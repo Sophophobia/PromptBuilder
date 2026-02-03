@@ -50,8 +50,8 @@
 
     :root[data-theme="light"]{
       color-scheme: light;
-      --bg:#f7f9ff; --bgGlow:#dbe7ff;
-      --panel:#ffffff; --panel2:#f2f6ff;
+      --bg:#f6f7fb; --bgGlow:#ffffff;
+      --panel:#ffffff; --panel2:#f3f5fb;
       --text:#0b1220; --muted:#4b5b7a;
       --border:#d4deef; --accent:#2b6cff;
       --danger:#d63c3c; --ok:#1c9b4a; --warn:#b8860b;
@@ -102,7 +102,7 @@
       gap:8px;
       padding:6px 10px;
       border-radius:999px;
-      border:1px solid var(--stroke);
+      border:1px solid var(--border);
       background: var(--panelB);
       color: var(--text);
       font-size:12px;
@@ -676,10 +676,13 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <button class="modeChip" id="btnSyncMode" title="Switch between Local and OneDrive (UI only)">
-            <span class="dot" aria-hidden="true"></span>
-            <span class="label">Local</span>
-          </button>
+          <button class="modeChip" id="btnSyncProvider" title="Switch between Offline (Local) and Online (OneDrive share folder)">
+  <span class="dot" aria-hidden="true"></span>
+  <span class="label">Offline</span>
+</button>
+<button class="modeChip" id="btnSyncOnlineMode" title="Switch Online mode (Auto / Manual)" style="display:none;">
+  <span class="label">Manual</span>
+</button>
         </div>
         <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
       </div>
@@ -706,7 +709,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37</span>
+          <span class="pill" id="appVersionPill" title="App version">v38</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -4002,10 +4005,6 @@ async function exportSnapshotJson(options=null) {
   const jsonText = JSON.stringify(snapshot, null, 2);
 
   if (s.provider === 'onedrive') {
-    if (s.mode !== 'manual') {
-      toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-      return snapshot;
-    }
     OneDriveSync.uploadSnapshot(jsonText)
       .then(({ name }) => toast(`Uploaded: ${name}`))
       .catch(err => {
@@ -6313,11 +6312,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
     if (s.provider === 'onedrive') {
-      if (s.mode !== 'manual') {
-        toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-        return;
-      }
-      await oneDriveImportFlow({ wipe: false });
+      if (s.mode === 'auto') await oneDriveImportLatestFlow({ wipe: false });
+      else await oneDriveImportFlow({ wipe: false });
       return;
     }
     fileInput.click();
@@ -6343,11 +6339,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
       if (s.provider === 'onedrive') {
-        if (s.mode !== 'manual') {
-          toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-          return;
-        }
-        await oneDriveImportFlow({ wipe: true });
+        if (s.mode === 'auto') await oneDriveImportLatestFlow({ wipe: true });
+        else await oneDriveImportFlow({ wipe: true });
         return;
       }
       wipeInput.click();
@@ -6725,6 +6718,46 @@ async function oneDriveImportFlow({ wipe }){
   }
 }
 
+
+async function oneDriveImportLatestFlow({ wipe }){
+  try {
+    if (location.protocol === 'file:') {
+      alert('OneDrive sync needs http(s). If you opened this file directly, host it (for example GitHub Pages) or open via a local web server.');
+      return;
+    }
+
+    if (!OneDriveSync.isConfigured()) {
+      openSyncUiModal();
+      toast('Configure OneDrive in Sync Settings first');
+      return;
+    }
+
+    if (wipe) {
+      const ok = confirm('This will delete all local data and replace it with the latest JSON snapshot from your OneDrive shared folder. Continue?');
+      if (!ok) return;
+    }
+
+    await OneDriveSync.signIn();
+
+    const files = await OneDriveSync.listSnapshots();
+    const latest = files && files.length ? files[0] : null;
+    if (!latest){
+      toast('No JSON snapshots found in the shared folder');
+      return;
+    }
+
+    const raw = await OneDriveSync.downloadSnapshot(latest);
+    if (wipe) await wipeLocalAndImportAllFromText(raw);
+    else await openImportWizardFromText(raw);
+
+    toast('Imported latest: ' + (latest.name || 'snapshot'));
+  } catch (e) {
+    console.error(e);
+    toast('OneDrive action failed');
+    alert('OneDrive action failed.\n\n' + (e && e.message ? e.message : e));
+  }
+}
+
 function openOneDriveSnapshotPicker({ title, onPick }){
   const wrap = document.createElement('div');
   wrap.className = 'form';
@@ -6826,34 +6859,50 @@ function setSyncUiState(provider, mode){
 }
 function applySyncUiState(){
   const s = getSyncUiState();
-  const btnEl = document.getElementById('btnSyncMode');
+  const btnProvider = document.getElementById('btnSyncProvider');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
   const subEl = document.getElementById('syncSubText');
-  if (btnEl){
-    btnEl.dataset.provider = s.provider;
-    const label = btnEl.querySelector('.label');
+
+  if (btnProvider){
+    btnProvider.dataset.provider = s.provider;
+    const label = btnProvider.querySelector('.label');
     if (label){
-      if (s.provider === 'local') label.textContent = 'Local';
-      else label.textContent = (s.mode === 'auto') ? 'OneDrive · Auto' : 'OneDrive · Manual';
+      label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
     }
   }
-  if (subEl){
-    if (s.provider === 'local') subEl.textContent = 'Local cache · Snapshot import/export';
-    else subEl.textContent = (s.mode === 'auto')
-      ? 'OneDrive share folder · Auto: import latest snapshot (not implemented yet)'
-      : 'OneDrive share folder · Manual: choose snapshot on import';
+
+  if (btnMode){
+    const label = btnMode.querySelector('.label');
+    if (s.provider === 'onedrive'){
+      btnMode.style.display = '';
+      if (label) label.textContent = (s.mode === 'auto') ? 'Auto' : 'Manual';
+    } else {
+      btnMode.style.display = 'none';
+      if (label) label.textContent = 'Manual';
+    }
   }
+
+  if (subEl){
+    subEl.style.cursor = 'pointer';
+    subEl.title = 'Open sync settings';
+    if (s.provider === 'local') subEl.textContent = 'Offline · Local cache · Snapshot import/export';
+    else subEl.textContent = (s.mode === 'auto')
+      ? 'Online · OneDrive share folder · Auto: import latest snapshot'
+      : 'Online · OneDrive share folder · Manual: choose snapshot on import';
+  }
+
   // Keep browser title clean; reflect mode lightly.
   document.title = (s.provider === 'local')
     ? 'Prompt Builder'
-    : 'Prompt Builder · OneDrive';
+    : 'Prompt Builder · Online';
 
-  // Update main snapshot buttons (Import/Export) labels based on mode
+  // Update main snapshot buttons labels based on provider
   const btnExp = document.getElementById('btnExportSnapshot');
   const btnImp = document.getElementById('btnImportSnapshot');
   const btnWip = document.getElementById('btnWipeImportSnapshot');
-  if (btnExp) btnExp.textContent = (s.provider === 'onedrive') ? 'Export Snapshot (OneDrive)' : 'Export Snapshot (JSON)';
-  if (btnImp) btnImp.textContent = (s.provider === 'onedrive') ? 'Import Snapshot (OneDrive)' : 'Import Snapshot (JSON)';
-  if (btnWip) btnWip.textContent = (s.provider === 'onedrive') ? 'Wipe & Import (OneDrive)' : 'Wipe & Import Snapshot';
+  if (btnExp) btnExp.textContent = (s.provider === 'onedrive') ? 'Export Snapshot (Online)' : 'Export Snapshot (JSON)';
+  if (btnImp) btnImp.textContent = (s.provider === 'onedrive') ? 'Import Snapshot (Online)' : 'Import Snapshot (JSON)';
+  if (btnWip) btnWip.textContent = (s.provider === 'onedrive') ? 'Wipe & Import (Online)' : 'Wipe Local and Import JSON';
 }
 
 function openSyncUiModal(){
@@ -6921,7 +6970,7 @@ function openSyncUiModal(){
         <br>Note: OneDrive sync requires this page to run from http(s), not file://.
       </div>
       <div class="muted" style="margin-top:8px;">
-        OneDrive Auto is not implemented yet.
+        OneDrive Auto will import the latest snapshot automatically.
       </div>
     </div>
   `;
@@ -7020,9 +7069,36 @@ function openSyncUiModal(){
 
 function initSyncUi(){
   applySyncUiState();
-  const b = document.getElementById('btnSyncMode');
-  if (b){
-    b.addEventListener('click', (e) => {
+
+  const btnProvider = document.getElementById('btnSyncProvider');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
+  const sub = document.getElementById('syncSubText');
+
+  if (btnProvider){
+    btnProvider.addEventListener('click', (e) => {
+      e.preventDefault();
+      const s = getSyncUiState();
+      const nextProvider = (s.provider === 'local') ? 'onedrive' : 'local';
+      setSyncUiState(nextProvider, s.mode);
+      if (nextProvider === 'onedrive' && !OneDriveSync.isConfigured()){
+        openSyncUiModal();
+        toast('Configure OneDrive in sync settings');
+      }
+    });
+  }
+
+  if (btnMode){
+    btnMode.addEventListener('click', (e) => {
+      e.preventDefault();
+      const s = getSyncUiState();
+      if (s.provider !== 'onedrive') return;
+      const nextMode = (s.mode === 'auto') ? 'manual' : 'auto';
+      setSyncUiState(s.provider, nextMode);
+    });
+  }
+
+  if (sub){
+    sub.addEventListener('click', (e) => {
       e.preventDefault();
       openSyncUiModal();
     });
@@ -7037,7 +7113,6 @@ function initSyncUi(){
       window.location.replace(url.toString());
     });
   }
-
 }
 
 /** ========= Init ========= */
