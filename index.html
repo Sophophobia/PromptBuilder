@@ -50,8 +50,8 @@
 
     :root[data-theme="light"]{
       color-scheme: light;
-      --bg:#f6f7fb; --bgGlow:#ffffff;
-      --panel:#ffffff; --panel2:#f3f5fb;
+      --bg:#edf3ff; --bgGlow:#d8e6ff;
+      --panel:#ffffff; --panel2:#f2f6ff;
       --text:#0b1220; --muted:#4b5b7a;
       --border:#d4deef; --accent:#2b6cff;
       --danger:#d63c3c; --ok:#1c9b4a; --warn:#b8860b;
@@ -89,8 +89,8 @@
     *{ box-sizing:border-box; }
     body{
       margin:0; font-family:var(--sans); color:var(--text);
-      background: radial-gradient(1200px 800px at 20% 10%, var(--bgGlow) 0%, var(--bg) 60%);
-    }
+      background: radial-gradient(1200px 900px at 18% 6%, var(--bgGlow) 0%, var(--bg) 62%), linear-gradient(180deg, var(--accentB) 0%, rgba(0,0,0,0) 60%);
+      }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
     .title{ display:flex; flex-direction:column; gap:4px; }
@@ -102,7 +102,7 @@
       gap:8px;
       padding:6px 10px;
       border-radius:999px;
-      border:1px solid var(--border);
+      border:1px solid var(--stroke);
       background: var(--panelB);
       color: var(--text);
       font-size:12px;
@@ -123,6 +123,12 @@
     }
     .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
     .modeChip[data-provider="onedrive"] .dot{ background: #60A5FA; }
+
+
+.modeGroup{ display:inline-flex; align-items:center; gap:8px; }
+.modeChip.iconOnly{ padding:6px 10px; min-width:30px; justify-content:center; }
+.modeChip.iconOnly .label{ font-size:14px; }
+.modeChip.needsSetup{ border-color: rgba(214, 60, 60, .55); box-shadow: 0 0 0 3px rgba(214, 60, 60, .12); }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -676,15 +682,21 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <button class="modeChip" id="btnSyncProvider" title="Switch between Offline (Local) and Online (OneDrive share folder)">
-  <span class="dot" aria-hidden="true"></span>
-  <span class="label">Offline</span>
-</button>
-<button class="modeChip" id="btnSyncOnlineMode" title="Switch Online mode (Auto / Manual)" style="display:none;">
-  <span class="label">Manual</span>
-</button>
+          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline and Online">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="label">Offline</span>
+          </button>
+
+          <div class="modeGroup" id="onlineModeGroup" style="display:none;">
+            <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Auto and Manual">
+              <span class="label">Auto</span>
+            </button>
+            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+              <span class="label">⚙</span>
+            </button>
+          </div>
         </div>
-        <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
+        <div class="sub" id="syncSubText">Offline · Local cache</div>
       </div>
       <div class="tabs" role="tablist" aria-label="Main Tabs">
         <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
@@ -709,7 +721,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v38</span>
+          <span class="pill" id="appVersionPill" title="App version">v37.1</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -4005,6 +4017,10 @@ async function exportSnapshotJson(options=null) {
   const jsonText = JSON.stringify(snapshot, null, 2);
 
   if (s.provider === 'onedrive') {
+    if (s.mode !== 'manual') {
+      toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+      return snapshot;
+    }
     OneDriveSync.uploadSnapshot(jsonText)
       .then(({ name }) => toast(`Uploaded: ${name}`))
       .catch(err => {
@@ -6312,8 +6328,11 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
     if (s.provider === 'onedrive') {
-      if (s.mode === 'auto') await oneDriveImportLatestFlow({ wipe: false });
-      else await oneDriveImportFlow({ wipe: false });
+      if (s.mode !== 'manual') {
+        toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+        return;
+      }
+      await oneDriveImportFlow({ wipe: false });
       return;
     }
     fileInput.click();
@@ -6339,8 +6358,11 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
       if (s.provider === 'onedrive') {
-        if (s.mode === 'auto') await oneDriveImportLatestFlow({ wipe: true });
-        else await oneDriveImportFlow({ wipe: true });
+        if (s.mode !== 'manual') {
+          toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+          return;
+        }
+        await oneDriveImportFlow({ wipe: true });
         return;
       }
       wipeInput.click();
@@ -6691,7 +6713,7 @@ async function oneDriveImportFlow({ wipe }){
     }
 
     if (!OneDriveSync.isConfigured()) {
-      openSyncUiModal();
+      openSyncSettingsModal();
       toast('Configure OneDrive in Sync Settings first');
       return;
     }
@@ -6711,46 +6733,6 @@ async function oneDriveImportFlow({ wipe }){
       }
     });
 
-  } catch (e) {
-    console.error(e);
-    toast('OneDrive action failed');
-    alert('OneDrive action failed.\n\n' + (e && e.message ? e.message : e));
-  }
-}
-
-
-async function oneDriveImportLatestFlow({ wipe }){
-  try {
-    if (location.protocol === 'file:') {
-      alert('OneDrive sync needs http(s). If you opened this file directly, host it (for example GitHub Pages) or open via a local web server.');
-      return;
-    }
-
-    if (!OneDriveSync.isConfigured()) {
-      openSyncUiModal();
-      toast('Configure OneDrive in Sync Settings first');
-      return;
-    }
-
-    if (wipe) {
-      const ok = confirm('This will delete all local data and replace it with the latest JSON snapshot from your OneDrive shared folder. Continue?');
-      if (!ok) return;
-    }
-
-    await OneDriveSync.signIn();
-
-    const files = await OneDriveSync.listSnapshots();
-    const latest = files && files.length ? files[0] : null;
-    if (!latest){
-      toast('No JSON snapshots found in the shared folder');
-      return;
-    }
-
-    const raw = await OneDriveSync.downloadSnapshot(latest);
-    if (wipe) await wipeLocalAndImportAllFromText(raw);
-    else await openImportWizardFromText(raw);
-
-    toast('Imported latest: ' + (latest.name || 'snapshot'));
   } catch (e) {
     console.error(e);
     toast('OneDrive action failed');
@@ -6840,7 +6822,7 @@ function openOneDriveSnapshotPicker({ title, onPick }){
 
   load();
 }
-/** ========= Sync Mode UI (Local vs OneDrive) — UI only ========= */
+/** ========= Sync Mode UI (Offline vs Online) ========= */
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'onedrive'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
@@ -6859,54 +6841,56 @@ function setSyncUiState(provider, mode){
 }
 function applySyncUiState(){
   const s = getSyncUiState();
-  const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncOnlineMode');
+
+  const providerBtn = document.getElementById('btnSyncProvider');
+  const modeGroup = document.getElementById('onlineModeGroup');
+  const modeBtn = document.getElementById('btnSyncOnlineMode');
+  const settingsBtn = document.getElementById('btnSyncSettings');
   const subEl = document.getElementById('syncSubText');
 
-  if (btnProvider){
-    btnProvider.dataset.provider = s.provider;
-    const label = btnProvider.querySelector('.label');
-    if (label){
-      label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
-    }
+  if (providerBtn){
+    providerBtn.dataset.provider = s.provider;
+    const label = providerBtn.querySelector('.label');
+    if (label) label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
   }
 
-  if (btnMode){
-    const label = btnMode.querySelector('.label');
-    if (s.provider === 'onedrive'){
-      btnMode.style.display = '';
-      if (label) label.textContent = (s.mode === 'auto') ? 'Auto' : 'Manual';
-    } else {
-      btnMode.style.display = 'none';
-      if (label) label.textContent = 'Manual';
-    }
+  if (modeGroup){
+    modeGroup.style.display = (s.provider === 'onedrive') ? 'inline-flex' : 'none';
+  }
+
+  if (modeBtn){
+    modeBtn.dataset.mode = s.mode;
+    const label = modeBtn.querySelector('.label');
+    if (label) label.textContent = (s.mode === 'auto') ? 'Auto' : 'Manual';
+  }
+
+  if (settingsBtn){
+    const cfg = OneDriveSync.getConfig();
+    const needsSetup = !(cfg && cfg.clientId && cfg.shareLink);
+    settingsBtn.classList.toggle('needsSetup', needsSetup);
   }
 
   if (subEl){
-    subEl.style.cursor = 'pointer';
-    subEl.title = 'Open sync settings';
-    if (s.provider === 'local') subEl.textContent = 'Offline · Local cache · Snapshot import/export';
+    if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
     else subEl.textContent = (s.mode === 'auto')
-      ? 'Online · OneDrive share folder · Auto: import latest snapshot'
-      : 'Online · OneDrive share folder · Manual: choose snapshot on import';
+      ? 'Online · Auto (latest snapshot) — not implemented yet'
+      : 'Online · Manual (choose snapshot)';
   }
 
-  // Keep browser title clean; reflect mode lightly.
   document.title = (s.provider === 'local')
     ? 'Prompt Builder'
     : 'Prompt Builder · Online';
 
-  // Update main snapshot buttons labels based on provider
+  // Update main snapshot buttons (Import/Export) labels based on mode
   const btnExp = document.getElementById('btnExportSnapshot');
   const btnImp = document.getElementById('btnImportSnapshot');
   const btnWip = document.getElementById('btnWipeImportSnapshot');
   if (btnExp) btnExp.textContent = (s.provider === 'onedrive') ? 'Export Snapshot (Online)' : 'Export Snapshot (JSON)';
   if (btnImp) btnImp.textContent = (s.provider === 'onedrive') ? 'Import Snapshot (Online)' : 'Import Snapshot (JSON)';
-  if (btnWip) btnWip.textContent = (s.provider === 'onedrive') ? 'Wipe & Import (Online)' : 'Wipe Local and Import JSON';
+  if (btnWip) btnWip.textContent = (s.provider === 'onedrive') ? 'Wipe & Import (Online)' : 'Wipe & Import Snapshot';
 }
 
-function openSyncUiModal(){
-  const s = getSyncUiState();
+function openSyncSettingsModal(){
   const od = OneDriveSync.getConfig();
 
   const wrap = document.createElement('div');
@@ -6914,206 +6898,132 @@ function openSyncUiModal(){
 
   wrap.innerHTML = `
     <div class="row">
-      <label style="min-width:120px;">Data source</label>
-      <div style="display:flex; gap:14px; flex-wrap:wrap;">
-        <label class="pill" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="syncProvider" value="local" ${s.provider === 'local' ? 'checked' : ''}>
-          <span>Local (offline)</span>
-        </label>
-        <label class="pill" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="syncProvider" value="onedrive" ${s.provider === 'onedrive' ? 'checked' : ''}>
-          <span>OneDrive (share folder)</span>
-        </label>
+      <label style="min-width:140px;">OneDrive App ID</label>
+      <input id="odClientId" placeholder="Application (client) ID" value="${escapeHtml(od.clientId || '')}">
+    </div>
+
+    <div class="row">
+      <label style="min-width:140px;">Shared folder link</label>
+      <input id="odShareLink" placeholder="Paste the OneDrive/SharePoint folder sharing link" value="${escapeHtml(od.shareLink || '')}">
+    </div>
+
+    <div class="row">
+      <label style="min-width:140px;">Uploader name</label>
+      <input id="odUploader" placeholder="e.g., Sylvia" value="${escapeHtml(od.uploader || '')}">
+    </div>
+
+    <div class="hint" style="margin-top:-6px;">
+      Used in uploaded filenames (no overwrites). Example: <span class="mono">MiVida_Snapshot_20260203_134500__Sylvia.json</span>
+    </div>
+
+    <div class="row">
+      <label style="min-width:140px;">Status</label>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <span class="pill" id="odAuthStatus">Not signed in</span>
+        <button class="btn mini" id="btnOdSignIn">Sign in</button>
+        <button class="btn mini ghost" id="btnOdSignOut">Sign out</button>
+        <button class="btn mini ghost" id="btnOdTest">Test folder access</button>
       </div>
     </div>
 
-    <div class="row" id="syncModeRow" style="margin-top:10px; ${s.provider === 'onedrive' ? '' : 'display:none;'}">
-      <label style="min-width:120px;">Online mode</label>
-      <div style="display:flex; gap:14px; flex-wrap:wrap;">
-        <label class="pill" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="syncMode" value="auto" ${s.mode === 'auto' ? 'checked' : ''}>
-          <span>Auto (import latest)</span>
-        </label>
-        <label class="pill" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="syncMode" value="manual" ${s.mode === 'manual' ? 'checked' : ''}>
-          <span>Manual (choose on import)</span>
-        </label>
-      </div>
-    </div>
-
-    <div id="odSettings" style="margin-top:14px; ${s.provider === 'onedrive' ? '' : 'display:none;'}">
-      <div class="row">
-        <label style="min-width:120px;">OneDrive App ID</label>
-        <input id="odClientId" type="text" placeholder="Client ID (Azure app registration)" value="${escapeHtml(od.clientId || '')}" style="flex:1;" />
-      </div>
-      <div class="row">
-        <label style="min-width:120px;">Share folder link</label>
-        <input id="odShareLink" type="text" placeholder="Paste the OneDrive shared folder link" value="${escapeHtml(od.shareLink || '')}" style="flex:1;" />
-      </div>
-      <div class="row">
-        <label style="min-width:120px;">Uploader name</label>
-        <input id="odUploader" type="text" placeholder="Your name (used in filenames)" value="${escapeHtml(od.uploader || '')}" style="flex:1;" />
-      </div>
-      <div class="row">
-        <label style="min-width:120px;">Status</label>
-        <div style="flex:1;">
-          <div id="odStatus" class="muted">${escapeHtml(OneDriveSync.getStatusLabel())}</div>
-          <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
-            <button class="btn mini" id="btnOdSignIn">Sign in</button>
-            <button class="btn mini" id="btnOdSignOut">Sign out</button>
-            <button class="btn mini" id="btnOdTest">Test folder</button>
-          </div>
-        </div>
-      </div>
-      <div class="muted" style="margin-top:10px;">
-        Online Manual uploads a new JSON snapshot each time. Filenames include timestamp and uploader name.
-        <br>Note: OneDrive sync requires this page to run from http(s), not file://.
-      </div>
-      <div class="muted" style="margin-top:8px;">
-        OneDrive Auto will import the latest snapshot automatically.
-      </div>
-    </div>
+    <div class="hint">Tip: You only need to set these once. Use the ⚙ button any time to update them.</div>
   `;
 
-  function showHide(){
-    const provider = wrap.querySelector('input[name="syncProvider"]:checked')?.value || 'local';
-    const modeRow = wrap.querySelector('#syncModeRow');
-    const odRow = wrap.querySelector('#odSettings');
-    if (modeRow) modeRow.style.display = (provider === 'onedrive') ? '' : 'none';
-    if (odRow) odRow.style.display = (provider === 'onedrive') ? '' : 'none';
-  }
-
-  // Show/hide settings based on provider selection
-  wrap.querySelectorAll('input[name="syncProvider"]').forEach(r => r.addEventListener('change', showHide));
-
-  // OneDrive buttons
-  const statusEl = wrap.querySelector('#odStatus');
-  const readInputsToConfig = () => {
-    const clientId = wrap.querySelector('#odClientId')?.value || '';
-    const shareLink = wrap.querySelector('#odShareLink')?.value || '';
-    const uploader = wrap.querySelector('#odUploader')?.value || '';
-    OneDriveSync.setConfig({ clientId, shareLink, uploader });
-  };
   const refreshStatus = () => {
-    if (statusEl) statusEl.textContent = OneDriveSync.getStatusLabel();
-  };
+  const el = wrap.querySelector('#odAuthStatus');
+  if (!el) return;
+  const label = OneDriveSync.getStatusLabel ? OneDriveSync.getStatusLabel() : 'Not signed in';
+  el.textContent = label;
+  const ok = /^Signed in as/i.test(label);
+  el.style.background = ok ? 'rgba(28,155,74,.12)' : 'rgba(214,60,60,.10)';
+  el.style.borderColor = ok ? 'rgba(28,155,74,.25)' : 'rgba(214,60,60,.25)';
+};
 
-  const btnIn = wrap.querySelector('#btnOdSignIn');
-  if (btnIn) btnIn.addEventListener('click', async (e) => {
-    e.preventDefault();
+  wrap.querySelector('#btnOdSignIn')?.addEventListener('click', async () => {
     try {
-      readInputsToConfig();
       await OneDriveSync.signIn();
       refreshStatus();
       toast('Signed in');
-    } catch (err) {
+    } catch (err){
       console.error(err);
-      refreshStatus();
       alert('Sign-in failed\n\n' + (err && err.message ? err.message : err));
     }
   });
-
-  const btnOut = wrap.querySelector('#btnOdSignOut');
-  if (btnOut) btnOut.addEventListener('click', async (e) => {
-    e.preventDefault();
+  wrap.querySelector('#btnOdSignOut')?.addEventListener('click', async () => {
     try {
       await OneDriveSync.signOut();
       refreshStatus();
       toast('Signed out');
-    } catch (err) {
+    } catch (err){
       console.error(err);
-      refreshStatus();
-      alert('Sign-out failed\n\n' + (err && err.message ? err.message : err));
+      toast('Sign-out failed: ' + (err?.message || String(err)));
     }
   });
-
-  const btnTest = wrap.querySelector('#btnOdTest');
-  if (btnTest) btnTest.addEventListener('click', async (e) => {
-    e.preventDefault();
+  wrap.querySelector('#btnOdTest')?.addEventListener('click', async () => {
     try {
-      readInputsToConfig();
-      await OneDriveSync.signIn();
-      const f = await OneDriveSync.resolveSharedFolder();
-      refreshStatus();
-      toast('Folder OK');
-      alert('Connected to shared folder\n\n' + (f.name || '') + '\nDrive: ' + f.driveId + '\nFolder: ' + f.folderId);
-    } catch (err) {
+      await OneDriveSync.resolveSharedFolder();
+      toast('Folder access OK');
+    } catch (err){
       console.error(err);
-      refreshStatus();
       alert('Folder test failed\n\n' + (err && err.message ? err.message : err));
     }
   });
 
-  openModal('Sync Settings', wrap, [
+  openModal('Sync settings', wrap, [
     btn('Cancel', { onClick: () => closeModal() }),
     btn('Save', { primary: true, onClick: () => {
-      const provider = wrap.querySelector('input[name="syncProvider"]:checked')?.value || 'local';
-      const mode = wrap.querySelector('input[name="syncMode"]:checked')?.value || 'auto';
-
-      if (provider === 'onedrive') {
-        // Persist OneDrive config
-        const clientId = wrap.querySelector('#odClientId')?.value || '';
-        const shareLink = wrap.querySelector('#odShareLink')?.value || '';
-        const uploader = wrap.querySelector('#odUploader')?.value || '';
-        OneDriveSync.setConfig({ clientId, shareLink, uploader });
-      }
-
-      setSyncUiState(provider, mode);
+      const clientId = wrap.querySelector('#odClientId')?.value || '';
+      const shareLink = wrap.querySelector('#odShareLink')?.value || '';
+      const uploader = wrap.querySelector('#odUploader')?.value || '';
+      OneDriveSync.setConfig({ clientId, shareLink, uploader });
       closeModal();
       toast('Saved');
+      applySyncUiState();
     }})
   ]);
 
-  showHide();
+  refreshStatus();
 }
 
 function initSyncUi(){
   applySyncUiState();
 
-  const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncOnlineMode');
-  const sub = document.getElementById('syncSubText');
-
-  if (btnProvider){
-    btnProvider.addEventListener('click', (e) => {
-      e.preventDefault();
+  const providerBtn = document.getElementById('btnSyncProvider');
+  if (providerBtn){
+    providerBtn.addEventListener('click', () => {
       const s = getSyncUiState();
       const nextProvider = (s.provider === 'local') ? 'onedrive' : 'local';
       setSyncUiState(nextProvider, s.mode);
-      if (nextProvider === 'onedrive' && !OneDriveSync.isConfigured()){
-        openSyncUiModal();
-        toast('Configure OneDrive in sync settings');
+
+      if (nextProvider === 'onedrive') {
+        const cfg = OneDriveSync.getConfig();
+        const needsSetup = !(cfg && cfg.clientId && cfg.shareLink);
+        if (needsSetup) toast('Online enabled. Click ⚙ to configure sync settings.');
       }
     });
   }
 
-  if (btnMode){
-    btnMode.addEventListener('click', (e) => {
-      e.preventDefault();
+  const modeBtn = document.getElementById('btnSyncOnlineMode');
+  if (modeBtn){
+    modeBtn.addEventListener('click', () => {
       const s = getSyncUiState();
       if (s.provider !== 'onedrive') return;
       const nextMode = (s.mode === 'auto') ? 'manual' : 'auto';
       setSyncUiState(s.provider, nextMode);
+      if (nextMode === 'auto') toast('Online Auto is not implemented yet.');
     });
   }
 
-  if (sub){
-    sub.addEventListener('click', (e) => {
+  const settingsBtn = document.getElementById('btnSyncSettings');
+  if (settingsBtn){
+    settingsBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      openSyncUiModal();
-    });
-  }
-
-  const hr = document.getElementById('btnHardRefresh');
-  if (hr){
-    hr.addEventListener('click', (e)=>{
-      e.preventDefault();
-      const url = new URL(window.location.href);
-      url.searchParams.set('v', Date.now().toString());
-      window.location.replace(url.toString());
+      openSyncSettingsModal();
     });
   }
 }
+
+
 
 /** ========= Init ========= */
 (async function init(){
