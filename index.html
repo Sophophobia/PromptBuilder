@@ -721,7 +721,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37.1</span>
+          <span class="pill" id="appVersionPill" title="App version">v37.2</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -6476,7 +6476,8 @@ const GitHubSync = (() => {
     const c = getConfig();
     if (!isConfigured()) return 'Not configured';
     if (!c.login) return 'Configured (not tested)';
-    const when = c.lastOk ? ` · OK ${fmtTime(c.lastOk)}` : '';
+    // fmtTime is scoped inside the import modal code path; use global formatLocal here.
+    const when = c.lastOk ? ` · OK ${formatLocal(c.lastOk)}` : '';
     return `Connected as ${c.login}${when}`;
   }
 
