@@ -709,6 +709,34 @@
       cursor: grab;
       user-select: none;
     }
+
+    /* Category manager */
+    .catItem{ align-items:center; }
+    .catTitle{
+      font-weight:700;
+      font-size:13px;
+      flex:1;
+      min-width: 160px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .catMeta{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .catMeta label{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-size:12px;
+      color: var(--muted);
+      user-select:none;
+    }
+    .catMeta input[type="checkbox"]{ transform: translateY(1px); }
+    .catRowUnc{ opacity:.85; }
     .dragHandle:active{ cursor: grabbing; }
     .item.sortable.dragging{ opacity: .55; }
     
@@ -775,8 +803,11 @@
       <div class="grid">
         <section class="card">
           <h2>
-            <span>Prompts <span class="pill">Global</span></span>
-            <button class="btn primary" id="btnAddPrompt">Add</button>
+            <span>Prompts</span>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn mini" id="btnManageCatsPrompts" title="Manage categories">🗂</button>
+              <button class="btn primary" id="btnAddPrompt">Add</button>
+            </div>
           </h2>
           <div class="muted">Reusable prompt blocks (Markdown). Shared across all users.</div>
           <div class="divider"></div>
@@ -787,7 +818,10 @@
         <section class="card">
           <h2>
             <span>Personal Info</span>
-            <button class="btn primary" id="btnAddPersonal">Add Item</button>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn mini" id="btnManageCatsPersonal" title="Manage categories">🗂</button>
+              <button class="btn primary" id="btnAddPersonal">Add Item</button>
+            </div>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -810,7 +844,10 @@
         <section class="card">
           <h2>
             <span>Career Info</span>
-            <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn mini" id="btnManageCatsCareer" title="Manage categories">🗂</button>
+              <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
+            </div>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -830,8 +867,11 @@
 
         <section class="card">
           <h2>
-            <span>Connection <span class="pill">Global</span></span>
-            <button class="btn primary" id="btnAddConnection">Add</button>
+            <span>Connection</span>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn mini" id="btnManageCatsConnections" title="Manage categories">🗂</button>
+              <button class="btn primary" id="btnAddConnection">Add</button>
+            </div>
           </h2>
           <div class="muted">
             Global connections. Each connection can select items from Prompt, Personal Info, and Career Info.
@@ -1302,7 +1342,7 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise = null;
 
@@ -1552,6 +1592,31 @@ function openDB() {
           }
         } catch (err) { /* best effort */ }
       }
+
+      // v4: Setup Categories (per Setup section) + order + default collapse
+      if (oldVersion < 4) {
+        try {
+          if (!db.objectStoreNames.contains('setupCategories')) {
+            const sc = db.createObjectStore('setupCategories', { keyPath: 'id' });
+            sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
+            sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
+          }
+        } catch (err) { /* best effort */ }
+      } else {
+        // Safety: ensure store/indexes exist
+        try {
+          if (!db.objectStoreNames.contains('setupCategories')) {
+            const sc = db.createObjectStore('setupCategories', { keyPath: 'id' });
+            sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
+            sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
+          } else {
+            const sc = tx.objectStore('setupCategories');
+            if (!sc.indexNames.contains('by_sectionKey')) sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
+            if (!sc.indexNames.contains('by_sectionKey_order')) sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
+          }
+        } catch (err) { /* best effort */ }
+      }
+
 
     };
 
@@ -2010,6 +2075,342 @@ async function ensureSeed() {
   }
 }
 
+
+/** ========= Setup Categories ========= */
+const SETUP_SECTIONS = [
+  { key: 'promptItems', label: 'Prompts' },
+  { key: 'personalTemplates', label: 'Personal Info' },
+  { key: 'careerTemplates', label: 'Career Info' },
+  { key: 'connections', label: 'Connection' }
+];
+
+async function getSetupCategories(sectionKey){
+  // Prefer index for efficiency, but fall back safely.
+  try {
+    const rows = await getByIndex('setupCategories', 'by_sectionKey', sectionKey);
+    return (rows || []).sort((a,b) => (a.order||0) - (b.order||0));
+  } catch {
+    const all = await safeGetAll('setupCategories');
+    return (all || []).filter(x => x.sectionKey === sectionKey).sort((a,b) => (a.order||0) - (b.order||0));
+  }
+}
+
+async function upsertSetupCategory(cat){
+  const now = nowISO();
+  const row = {
+    id: cat.id || uid(),
+    sectionKey: cat.sectionKey,
+    title: (cat.title || '').trim() || 'Untitled',
+    order: Number.isFinite(cat.order) ? cat.order : 1000,
+    isCollapsed: !!cat.isCollapsed,
+    createdAt: cat.createdAt || now,
+    updatedAt: now
+  };
+  await putOne('setupCategories', row);
+  return row;
+}
+
+async function deleteSetupCategory(sectionKey, catId){
+  // Delete category row
+  await deleteOne('setupCategories', catId);
+
+  // Move any items in that category to Uncategorized (best effort)
+  await clearCategoryFromItems(sectionKey, catId);
+
+  // Re-normalize category order (keep gaps small)
+  const cats = await getSetupCategories(sectionKey);
+  const tx = await openDB();
+  if (!tx.objectStoreNames.contains('setupCategories')) return;
+  const now = nowISO();
+  const txx = tx.transaction('setupCategories','readwrite');
+  const store = txx.objectStore('setupCategories');
+  cats.forEach((c, i) => {
+    store.put({ ...c, order: (i+1)*1000, updatedAt: now });
+  });
+  await txComplete(txx);
+}
+
+async function clearCategoryFromItems(sectionKey, catId){
+  const storeName = sectionKey; // sectionKey matches store name for the 4 Setup sections
+  const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return;
+  const items = await safeGetAll(storeName);
+  const now = nowISO();
+  const changed = (items || []).filter(x => String(x.categoryId || '') === String(catId));
+  if (!changed.length) return;
+
+  const tx = db.transaction(storeName, 'readwrite');
+  const st = tx.objectStore(storeName);
+  changed.forEach(x => {
+    st.put({ ...x, categoryId: '', updatedAt: now });
+  });
+  await txComplete(tx);
+}
+
+/** Category list drag reorder (persists category.order) */
+let catDragCtx = null;
+function makeCategoryRowSortable(rowEl){
+  if (!rowEl) return;
+  if (rowEl.querySelector('.dragHandle')) return;
+  const handle = document.createElement('div');
+  handle.className = 'dragHandle';
+  handle.textContent = '⋮⋮';
+  handle.title = 'Drag to reorder';
+  rowEl.insertBefore(handle, rowEl.firstChild);
+
+  rowEl.draggable = true;
+  rowEl.classList.add('sortable');
+
+  rowEl.addEventListener('dragstart', (e) => {
+    catDragCtx = { el: rowEl };
+    rowEl.classList.add('dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; } catch {}
+  });
+  rowEl.addEventListener('dragend', () => {
+    rowEl.classList.remove('dragging');
+    catDragCtx = null;
+  });
+
+  // Ensure dragging starts only from handle
+  handle.addEventListener('pointerdown', (e) => {
+    // no-op; presence of handle is the UX cue
+  });
+}
+
+function initSortableCategoryList(listEl, sectionKey, onAfterReorder){
+  if (!listEl) return;
+  listEl.addEventListener('dragover', (e) => {
+    if (!catDragCtx) return;
+    e.preventDefault();
+    const dragging = catDragCtx.el;
+    if (!dragging) return;
+
+    const afterEl = getDragAfterElement(listEl, e.clientY);
+    if (afterEl == null) {
+      listEl.appendChild(dragging);
+    } else if (afterEl !== dragging) {
+      listEl.insertBefore(dragging, afterEl);
+    }
+  });
+
+  listEl.addEventListener('drop', async (e) => {
+    if (!catDragCtx) return;
+    e.preventDefault();
+    await finalizeCategorySort(listEl, sectionKey);
+    if (typeof onAfterReorder === 'function') onAfterReorder();
+  });
+}
+
+async function finalizeCategorySort(listEl, sectionKey){
+  const ids = [...listEl.querySelectorAll('.catItem.sortable[data-cat-id]')]
+    .map(el => el.getAttribute('data-cat-id'))
+    .filter(Boolean);
+
+  if (!ids.length) return;
+
+  const db = await openDB();
+  if (!db.objectStoreNames.contains('setupCategories')) return;
+
+  const cats = await getSetupCategories(sectionKey);
+  const byId = new Map(cats.map(c => [c.id, c]));
+  const now = nowISO();
+  const tx = db.transaction('setupCategories', 'readwrite');
+  const st = tx.objectStore('setupCategories');
+
+  ids.forEach((id, i) => {
+    const c = byId.get(id);
+    if (!c) return;
+    st.put({ ...c, order: (i+1)*1000, updatedAt: now });
+  });
+  await txComplete(tx);
+}
+
+/** Category manager modal */
+async function openCategoryManager(sectionKey){
+  const section = SETUP_SECTIONS.find(s => s.key === sectionKey);
+  const label = section ? section.label : 'Categories';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'modalBody';
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'row';
+  headerRow.style.justifyContent = 'space-between';
+  headerRow.style.alignItems = 'center';
+
+  const hint = document.createElement('div');
+  hint.className = 'muted';
+  hint.textContent = 'Reorder categories, set default collapse, rename, or delete. Uncategorized is always available.';
+  hint.style.flex = '1';
+
+  const btnAdd = document.createElement('button');
+  btnAdd.className = 'btn mini primary';
+  btnAdd.textContent = 'Add Category';
+
+  headerRow.appendChild(hint);
+  headerRow.appendChild(btnAdd);
+  wrap.appendChild(headerRow);
+
+  wrap.appendChild(document.createElement('div')).className = 'divider';
+
+  const list = document.createElement('div');
+  list.className = 'list';
+  wrap.appendChild(list);
+
+  // Enable drag reorder for the category rows in this modal.
+  initSortableCategoryList(list, sectionKey);
+
+  const rerender = async () => {
+    const cats = await getSetupCategories(sectionKey);
+    list.innerHTML = '';
+
+    // Uncategorized (non-editable)
+    const unc = document.createElement('div');
+    unc.className = 'item catItem catRowUnc';
+    const uncMeta = document.createElement('div');
+    uncMeta.className = 'meta';
+    uncMeta.innerHTML = `<div class="name">Uncategorized</div><div class="small">Items with no category.</div>`;
+    const uncActions = document.createElement('div');
+    uncActions.className = 'actions';
+    uncActions.innerHTML = `<span class="pill">Default</span>`;
+    unc.appendChild(uncMeta);
+    unc.appendChild(uncActions);
+    list.appendChild(unc);
+
+    cats.forEach(cat => {
+      const row = document.createElement('div');
+      row.className = 'item catItem';
+      row.setAttribute('data-cat-id', cat.id);
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'catTitle';
+      titleWrap.title = cat.title || '';
+      titleWrap.textContent = cat.title || 'Untitled';
+
+      const meta = document.createElement('div');
+      meta.className = 'catMeta';
+
+      const collapseLabel = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!cat.isCollapsed;
+      cb.addEventListener('change', async () => {
+        await upsertSetupCategory({ ...cat, isCollapsed: cb.checked });
+      });
+      const span = document.createElement('span');
+      span.textContent = 'Default collapsed';
+      collapseLabel.appendChild(cb);
+      collapseLabel.appendChild(span);
+
+      meta.appendChild(collapseLabel);
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+
+      const btnRename = document.createElement('button');
+      btnRename.className = 'btn mini';
+      btnRename.textContent = 'Rename';
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn mini danger';
+      btnDelete.textContent = 'Delete';
+
+      const startInlineRename = () => {
+        const input = document.createElement('input');
+        input.value = cat.title || '';
+        input.style.flex = '1';
+        input.style.minWidth = '180px';
+
+        // replace title
+        row.replaceChild(input, titleWrap);
+
+        actions.innerHTML = '';
+        const bSave = document.createElement('button');
+        bSave.className = 'btn mini primary';
+        bSave.textContent = 'Save';
+        const bCancel = document.createElement('button');
+        bCancel.className = 'btn mini';
+        bCancel.textContent = 'Cancel';
+
+        const finish = async (save) => {
+          if (save) {
+            const v = (input.value || '').trim();
+            if (!v) { toast('Title cannot be empty'); return; }
+            await upsertSetupCategory({ ...cat, title: v });
+          }
+          await rerender();
+        };
+
+        bSave.addEventListener('click', () => finish(true));
+        bCancel.addEventListener('click', () => finish(false));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') finish(true);
+          if (e.key === 'Escape') finish(false);
+        });
+
+        actions.appendChild(bCancel);
+        actions.appendChild(bSave);
+
+        // focus
+        setTimeout(() => {
+          input.focus();
+          input.select();
+        }, 0);
+      };
+
+      btnRename.addEventListener('click', (e) => {
+        e.preventDefault();
+        startInlineRename();
+      });
+
+      btnDelete.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const ok = confirm(`Delete category "${cat.title || 'Untitled'}"?\n\nItems in this category will become Uncategorized.`);
+        if (!ok) return;
+        await deleteSetupCategory(sectionKey, cat.id);
+        await rerender();
+      });
+
+      actions.appendChild(btnRename);
+      actions.appendChild(btnDelete);
+
+      row.appendChild(titleWrap);
+      row.appendChild(meta);
+      row.appendChild(actions);
+
+      makeCategoryRowSortable(row);
+      list.appendChild(row);
+    });
+  };
+
+  btnAdd.addEventListener('click', async () => {
+    const cats = await getSetupCategories(sectionKey);
+    const maxOrder = (cats || []).reduce((m,c)=>Math.max(m, c.order || 0), 0);
+    const now = nowISO();
+    const cat = await upsertSetupCategory({
+      id: uid(),
+      sectionKey,
+      title: 'New Category',
+      order: maxOrder + 1000,
+      isCollapsed: false,
+      createdAt: now
+    });
+    await rerender();
+
+    // Auto-enter rename for the new row
+    const row = list.querySelector(`.catItem[data-cat-id="${cat.id}"]`);
+    if (row) {
+      const renameBtn = row.querySelector('.actions .btn');
+      if (renameBtn) renameBtn.click();
+    }
+  });
+
+  await rerender();
+
+  openModal(`Manage Categories · ${label}`, wrap, [
+    btn('Close', { onClick: () => closeModal() })
+  ]);
+}
 /** ========= Users ========= */
 async function loadUsersIntoSelect() {
   const users = await getAll('users');
@@ -3893,6 +4294,7 @@ async function exportSnapshotJson(options=null) {
 
   // Prompt items are needed when explicitly exporting prompts OR exporting connections (dependencies).
   const promptItems = (exportPromptsRequested || exportConnections) ? await safeGetAll('promptItems') : [];
+  const setupCategories = await safeGetAll('setupCategories');
 
   const changeLogs = exportLogs ? await safeGetAll('changeLogs') : [];
 
@@ -4054,6 +4456,8 @@ async function exportSnapshotJson(options=null) {
     userCareer: exportUserCareer ? (userCareerOut || []) : [],
 
     changeLogs: exportLogs ? (changeLogs || []) : [],
+
+    setupCategories: (setupCategories || []),
 
     // Optional UI ordering
     uiSort: uiSortOut,
@@ -4730,6 +5134,7 @@ function normalizeSnapshotForImport(s) {
     careerTemplates,
     careerContent,
     connections: Array.isArray(s.connections) ? s.connections : [],
+    setupCategories: Array.isArray(s.setupCategories) ? s.setupCategories : [],
     uiSort: (s.uiSort && typeof s.uiSort === 'object') ? s.uiSort : null,
   };
 }
@@ -5574,6 +5979,20 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   sel.personalContentKeys = sel.personalContentKeys || new Set();
   sel.careerContentKeys = sel.careerContentKeys || new Set();
 
+  // Setup Categories: always import if present (best effort)
+  try {
+    const cats = Array.isArray(snap.setupCategories) ? snap.setupCategories : [];
+    if (cats.length) {
+      const db = await openDB();
+      if (db.objectStoreNames.contains('setupCategories')) {
+        const tx = db.transaction('setupCategories', 'readwrite');
+        const st = tx.objectStore('setupCategories');
+        cats.forEach(c => st.put(c));
+        await txComplete(tx);
+      }
+    }
+  } catch (err) { /* best effort */ }
+
   // Ensure templates referenced by selected connections are included (so connections can be reconstructed)
   try {
     const needPT = new Set();
@@ -6279,7 +6698,7 @@ async function clearAllLocalData() {
   // NOTE: This app no longer uses a global `db` handle.
   // Always open the DB via openDB() so import flows never fail with "db is not defined".
   const db = await openDB();
-  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','changeLogs'];
+  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','setupCategories','changeLogs'];
   const stores = allStores.filter(n => db.objectStoreNames.contains(n));
   if (!stores.length) return;
   const tx = db.transaction(stores, 'readwrite');
@@ -6382,6 +6801,19 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     mode:'create',
     initial:{ title:'', promptItemIds:[], personalTemplateIds:[], careerTemplateIds:[] }
   }));
+
+  // Manage Categories (per Setup section)
+  const _mcp = document.getElementById('btnManageCatsPrompts');
+  if (_mcp) _mcp.addEventListener('click', () => openCategoryManager('promptItems'));
+
+  const _mcs = document.getElementById('btnManageCatsPersonal');
+  if (_mcs) _mcs.addEventListener('click', () => openCategoryManager('personalTemplates'));
+
+  const _mcc = document.getElementById('btnManageCatsCareer');
+  if (_mcc) _mcc.addEventListener('click', () => openCategoryManager('careerTemplates'));
+
+  const _mcn = document.getElementById('btnManageCatsConnections');
+  if (_mcn) _mcn.addEventListener('click', () => openCategoryManager('connections'));
 
   $('#btnExportLogs').addEventListener('click', exportLogsCsv);
   $('#btnExportSnapshot').addEventListener('click', openExportWizard);
