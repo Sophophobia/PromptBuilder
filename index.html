@@ -721,7 +721,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37.2</span>
+          <span class="pill" id="appVersionPill" title="App version">v37.3</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -6476,8 +6476,7 @@ const GitHubSync = (() => {
     const c = getConfig();
     if (!isConfigured()) return 'Not configured';
     if (!c.login) return 'Configured (not tested)';
-    // fmtTime is scoped inside the import modal code path; use global formatLocal here.
-    const when = c.lastOk ? ` · OK ${formatLocal(c.lastOk)}` : '';
+    const when = c.lastOk ? ` · OK ${fmtTime(c.lastOk)}` : '';
     return `Connected as ${c.login}${when}`;
   }
 
@@ -6777,7 +6776,8 @@ function applySyncUiState(){
   const s = getSyncUiState();
 
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncModeToggle');
+  const btnModeGroup = document.getElementById('onlineModeGroup');
+  const btnMode = document.getElementById('btnSyncOnlineMode') || document.getElementById('btnSyncModeToggle');
   const btnSettings = document.getElementById('btnSyncSettings');
   const subEl = document.getElementById('syncSubText');
 
@@ -6785,6 +6785,9 @@ function applySyncUiState(){
     btnProvider.dataset.provider = s.provider;
     const label = btnProvider.querySelector('.label');
     if (label) label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
+  }
+  if (btnModeGroup){
+    btnModeGroup.style.display = (s.provider === 'github') ? 'flex' : 'none';
   }
   if (btnMode){
     btnMode.style.display = (s.provider === 'github') ? '' : 'none';
@@ -6945,7 +6948,7 @@ function initSyncUi(){
   applySyncUiState();
 
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncModeToggle');
+  const btnMode = document.getElementById('btnSyncOnlineMode') || document.getElementById('btnSyncModeToggle');
   const btnSettings = document.getElementById('btnSyncSettings');
 
   if (btnProvider){
