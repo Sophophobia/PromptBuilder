@@ -129,6 +129,27 @@
     .modeChip[data-provider="github"]{ border-color: rgba(34,197,94,.55); }
     .modeChip[data-provider="github"]:hover{ background: rgba(34,197,94,.08); }
 
+    .syncInfoBadge{
+      display:none;
+      flex-direction:column;
+      gap:2px;
+      margin-left:8px;
+      padding:6px 10px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background: var(--panelB);
+      max-width: 520px;
+    }
+    .syncInfoLine{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
       display:flex; gap:10px; background: var(--panelA);
@@ -691,7 +712,12 @@
               <span class="dot" aria-hidden="true"></span>
               <span class="label">Manual</span>
             </button>
-            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+            
+            <div class="syncInfoBadge" id="syncInfoBadge" title="Online import info and local last edit time">
+              <div class="syncInfoLine" id="syncOnlineImportLine">Imported: —</div>
+              <div class="syncInfoLine" id="syncLocalModifiedLine">Local edit: —</div>
+            </div>
+<button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
               <span class="label">⚙</span>
             </button>
           </div>
@@ -1525,7 +1551,10 @@ async function withStore(storeName, mode, fn) {
     const tx = db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
     const res = fn(store, tx);
-    tx.oncomplete = () => resolve(res);
+    tx.oncomplete = () => {
+      try { if (mode === 'readwrite') markLocalModified(); } catch {}
+      resolve(res);
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
@@ -1753,6 +1782,10 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     if (overlay) overlay.classList.add('fullscreen');
     if (modalBox) modalBox.classList.add('fullscreen');
   }
+  // Remember what kind of modal this is (used for import context cleanup)
+  if (overlay) {
+    try { overlay.dataset.kind = (opts && opts.kind) ? String(opts.kind) : ''; } catch {}
+  }
 
   $('#modalTitle').textContent = title;
 
@@ -1778,6 +1811,9 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
+  const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
+  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
+  if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
   if (overlay) {
@@ -4611,6 +4647,7 @@ async function wipeLocalAndImportAllFromText(rawText) {
 
   toast('Imported. Local data replaced with JSON snapshot.');
   await refreshAll();
+  finalizeOnlineImportMeta();
 }
 
 function normalizeSnapshotForImport(s) {
@@ -5482,6 +5519,7 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Replace import completed');
         await refreshAll();
+        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Replace import failed: ' + (e?.message || String(e)));
@@ -5493,6 +5531,7 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Add to local import completed');
         await refreshAll();
+        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Add to local import failed: ' + (e?.message || String(e)));
@@ -5500,7 +5539,7 @@ async function openImportWizard(snap) {
     }})
   ];
 
-  openModal('Import Snapshot', container, footerButtons, headerBtns);
+  openModal('Import Snapshot', container, footerButtons, headerBtns, { kind: 'import' });
 }
 
 
@@ -6230,6 +6269,7 @@ async function clearAllLocalData() {
   const tx = db.transaction(stores, 'readwrite');
   stores.forEach(n => tx.objectStore(n).clear());
   await txComplete(tx);
+  try { markLocalModified(); } catch {}
 }
 
 async function importSnapshotSelectionReplace(snap, sel) {
@@ -6380,6 +6420,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const text = await f.text();
+        pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6781,6 +6822,31 @@ async function githubImportFlow({ wipe }){
         return;
       }
       const raw = await GitHubSync.downloadFileText(file.path);
+      // Capture metadata for the top bar (applied only after a successful import)
+      try {
+        let s = JSON.parse(raw);
+        if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+
+        const looksLikeSnapshot = s && typeof s === 'object' &&
+          (Array.isArray(s.users) || Array.isArray(s.promptItems) || Array.isArray(s.connections) ||
+           Array.isArray(s.careers) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
+           Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks));
+
+        if (looksLikeSnapshot) {
+          pendingOnlineImportMeta = {
+            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
+            toolVersion: String(s.toolVersion || '').trim(),
+            sourceName: String(file.name || '').trim(),
+            sourcePath: String(file.path || '').trim()
+          };
+        } else {
+          pendingOnlineImportMeta = null;
+        }
+      } catch {
+        pendingOnlineImportMeta = null;
+      }
+
       if (wipe) await wipeLocalAndImportAllFromText(raw);
       else await openImportWizardFromText(raw);
     };
@@ -6853,6 +6919,101 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
+const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last imported snapshot metadata (online only)
+const LOCAL_LAST_MOD_KEY = 'mivida_local_last_modified_at_v1';           // stores last local edit timestamp
+let pendingOnlineImportMeta = null;
+
+function fmtLocalStampFromIso(isoOrStr){
+  if (!isoOrStr) return '';
+  // If it already looks like a friendly local stamp, return it.
+  const s = String(isoOrStr);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) return s;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n,w=2)=>String(n).padStart(w,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
+}
+function parseLocalStampFromFilename(name){
+  const n = String(name || '');
+  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
+  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (!m) return '';
+  const [,Y,Mo,D,HH,MM,SS,MS] = m;
+  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+}
+function parseUploaderFromFilename(name){
+  const base = String(name || '').replace(/\.json$/i,'');
+  const parts = base.split('__');
+  if (parts.length < 2) return '';
+  return parts.slice(1).join('__').replace(/_/g,' ').trim();
+}
+function getLastOnlineImportInfo(){
+  try {
+    const raw = localStorage.getItem(SYNC_LAST_ONLINE_IMPORT_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object') ? obj : null;
+  } catch {
+    return null;
+  }
+}
+function setLastOnlineImportInfo(info){
+  try { localStorage.setItem(SYNC_LAST_ONLINE_IMPORT_KEY, JSON.stringify(info || null)); } catch {}
+  applySyncInfoUI();
+}
+function getLocalLastModifiedIso(){
+  try { return localStorage.getItem(LOCAL_LAST_MOD_KEY) || ''; } catch { return ''; }
+}
+
+// Debounced so bulk imports do not spam localStorage.
+let _localModT = null;
+let _localModLatest = 0;
+function markLocalModified(){
+  _localModLatest = Date.now();
+  if (_localModT) return;
+  _localModT = setTimeout(() => {
+    _localModT = null;
+    try { localStorage.setItem(LOCAL_LAST_MOD_KEY, new Date(_localModLatest).toISOString()); } catch {}
+    applySyncInfoUI();
+  }, 250);
+}
+
+function applySyncInfoUI(){
+  const s = getSyncUiState();
+  const badge = document.getElementById('syncInfoBadge');
+  const importLine = document.getElementById('syncOnlineImportLine');
+  const localLine = document.getElementById('syncLocalModifiedLine');
+  if (!badge || !importLine || !localLine) return;
+
+  if (s.provider !== 'github') {
+    badge.style.display = 'none';
+    return;
+  }
+  badge.style.display = 'flex';
+
+  const info = getLastOnlineImportInfo();
+
+  if (!info) {
+    importLine.textContent = 'Imported: —';
+  } else {
+    const dt = fmtLocalStampFromIso(info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '—';
+    const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
+    const ver = String(info.toolVersion || info.version || '').trim();
+    importLine.textContent = `Imported: ${dt} · ${by}${ver ? ' · ' + ver : ''}`;
+  }
+
+  const localIso = getLocalLastModifiedIso();
+  const localDt = fmtLocalStampFromIso(localIso) || '—';
+  localLine.textContent = `Local edit: ${localDt}`;
+}
+
+function finalizeOnlineImportMeta(){
+  if (!pendingOnlineImportMeta) return;
+  setLastOnlineImportInfo(pendingOnlineImportMeta);
+  pendingOnlineImportMeta = null;
+}
+
+
 function getSyncUiState(){
   const provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
   const mode = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
@@ -6893,6 +7054,8 @@ function applySyncUiState(){
     if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
     else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
+
+  applySyncInfoUI();
 
   // Title hint
   document.title = 'Prompt Builder';
