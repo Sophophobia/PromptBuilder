@@ -6681,24 +6681,46 @@ const GitHubSync = (() => {
       .map(x => ({ name: x.name, path: x.path, sha: x.sha, size: x.size || 0 }));
   };
 
+    const parseSnapshotFilenameMeta = (name) => {
+    const original = String(name || '');
+    const base = original.replace(/\.json$/i, '');
+    const parts = base.split('__');
+    const stampRaw = parts[0] || base;
+    const uploaderRaw = (parts.length > 1 ? parts.slice(1).join('__') : '');
+    const uploader = uploaderRaw ? uploaderRaw.replace(/_/g, ' ').trim() : '';
+
+    const cleaned = stampRaw
+      .replace(/^mivida_snapshot_/i, '')
+      .replace(/^mivida_snapshot-/i, '')
+      .replace(/^snapshot_/i, '')
+      .replace(/^snapshot-/i, '')
+      .trim();
+
+    // Accept patterns like:
+    // 20260204_131245_123
+    // 2026-02-04_13-12-45-123
+    // 2026-02-04T13-12-45-123
+    let m = cleaned.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)[-_]?([0-5]\d)[-_]?([0-5]\d)(?:[-_]?([0-9]{3}))?/);
+    if (!m) m = cleaned.match(/(20\d{2})([01]\d)([0-3]\d)[-_]?([0-2]\d)([0-5]\d)([0-5]\d)(?:[-_]?([0-9]{3}))?/);
+
+    let ts = 0;
+    let datetime = '';
+    if (m) {
+      const Y = +m[1], Mo = +m[2], D = +m[3];
+      const h = +m[4], mi = +m[5], se = +m[6], ms = +(m[7] || 0);
+      const dt = new Date(Y, Mo - 1, D, h, mi, se, ms); // local time
+      ts = dt.getTime();
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const pad3 = (n) => String(n).padStart(3, '0');
+      datetime = `${String(Y).padStart(4, '0')}-${pad2(Mo)}-${pad2(D)} ${pad2(h)}:${pad2(mi)}:${pad2(se)}.${pad3(ms)}`;
+    }
+
+    return { ts, datetime, uploader };
+  };
+
   const parseStamp = (name) => {
-    // Try common patterns like 2026-02-04_13-05-22, 20260204_130522, 2026-02-04-130522
-    const s = String(name || '');
-    let m = s.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)?[-_]?([0-5]\d)?[-_]?([0-5]\d)?/);
-    if (m) {
-      const Y=+m[1], Mo=+m[2], D=+m[3];
-      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
-      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
-      return dt.getTime();
-    }
-    m = s.match(/(20\d{2})([01]\d)([0-3]\d)_?([0-2]\d)?([0-5]\d)?([0-5]\d)?/);
-    if (m) {
-      const Y=+m[1], Mo=+m[2], D=+m[3];
-      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
-      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
-      return dt.getTime();
-    }
-    return 0;
+    return parseSnapshotFilenameMeta(name).ts || 0;
   };
 
   const getLatestFile = async () => {
@@ -6803,7 +6825,8 @@ const GitHubSync = (() => {
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists
+    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists,
+    parseFilenameMeta: parseSnapshotFilenameMeta
   };
 })();
 
@@ -6890,7 +6913,11 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
   list.style.gap = '8px';
 
   const rows = (files || []).slice();
-  rows.sort((a,b) => b.name.localeCompare(a.name));
+    rows.sort((a,b) => {
+    const ma = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(a.name) : { ts: 0 });
+    const mb = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(b.name) : { ts: 0 });
+    return (mb.ts - ma.ts) || b.name.localeCompare(a.name);
+  });
 
   rows.forEach(f => {
     const row = document.createElement('button');
@@ -6898,7 +6925,10 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     row.style.cursor = 'pointer';
     row.style.width = '100%';
     row.style.textAlign = 'left';
-    row.innerHTML = `<div><strong>${escapeHtml(f.name)}</strong><div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(f.path)}</div></div>`;
+        const meta = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(f.name) : { datetime: '', uploader: '' });
+    const dtText = meta.datetime || 'Unknown datetime';
+    const upText = meta.uploader || 'Unknown';
+    row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
     row.addEventListener('click', (e) => {
       e.preventDefault();
       closeModal();
