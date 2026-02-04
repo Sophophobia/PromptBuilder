@@ -131,26 +131,40 @@
 
     .syncInfoBadge{
       display:none;
-      flex-direction:column;
-      gap:2px;
+      align-items:center;
+      gap:8px;
       margin-left:8px;
       padding:6px 10px;
       border:1px solid var(--border);
-      border-radius:12px;
+      border-radius:999px;
       background: var(--panelB);
-      max-width: 520px;
+      max-width: 560px;
     }
-    .syncInfoLine{
+    .syncInfoLabel{
       font-size:11px;
       line-height:1.2;
       color: var(--muted);
       white-space:nowrap;
+      opacity:.9;
+    }
+    .syncInfoValue{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--text);
+      white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
+      max-width: 420px;
+    }
+    .syncEditedTag{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--warn);
+      white-space:nowrap;
+      opacity:.95;
     }
 
-
-    .title .sub{ color:var(--muted); font-size:13px; }
+.title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
       display:flex; gap:10px; background: var(--panelA);
       border:1px solid var(--border); border-radius: 999px; padding:6px; box-shadow: var(--shadow);
@@ -713,11 +727,12 @@
               <span class="label">Manual</span>
             </button>
             
-            <div class="syncInfoBadge" id="syncInfoBadge" title="Online import info and local last edit time">
-              <div class="syncInfoLine" id="syncOnlineImportLine">Imported: —</div>
-              <div class="syncInfoLine" id="syncLocalModifiedLine">Local edit: —</div>
+            <div class="syncInfoBadge" id="syncInfoBadge" title="">
+              <span class="syncInfoLabel">Version</span>
+              <span class="syncInfoValue" id="syncVersionValue">—</span>
+              <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
             </div>
-<button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+<button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings"> title="Sync settings">
               <span class="label">⚙</span>
             </button>
           </div>
@@ -6963,6 +6978,35 @@ function fmtLocalStampFromIso(isoOrStr){
   const pad = (n,w=2)=>String(n).padStart(w,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
 }
+function fmtStampForBadge(stampOrIso){
+  if (!stampOrIso) return '';
+  const s = String(stampOrIso).trim();
+  // Already a local stamp: YYYY-MM-DD HH:mm:ss.mmm or YYYY-MM-DD HH:mm...
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.slice(0,16); // drop seconds/ms for a cleaner badge
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n)=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtStampForTooltip(stampOrIso){
+  if (!stampOrIso) return '';
+  const s = String(stampOrIso).trim();
+  // If it already looks like a local stamp, remove milliseconds if present.
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.replace(/\.\d{3}\b/,'');
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n)=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function isEditedSinceImport(localIso, importedAtIso){
+  if (!localIso || !importedAtIso) return false;
+  const a = new Date(localIso).getTime();
+  const b = new Date(importedAtIso).getTime();
+  if (isNaN(a) || isNaN(b)) return false;
+  // Tolerance to avoid flicker around import completion time.
+  return a > (b + 2500);
+}
+
 function parseLocalStampFromFilename(name){
   const n = String(name || '');
   // Expected local stamp: YYYYMMDD_HHMMSS_mmm
@@ -7011,9 +7055,9 @@ function markLocalModified(){
 function applySyncInfoUI(){
   const s = getSyncUiState();
   const badge = document.getElementById('syncInfoBadge');
-  const importLine = document.getElementById('syncOnlineImportLine');
-  const localLine = document.getElementById('syncLocalModifiedLine');
-  if (!badge || !importLine || !localLine) return;
+  const valueEl = document.getElementById('syncVersionValue');
+  const editedEl = document.getElementById('syncEditedTag');
+  if (!badge || !valueEl || !editedEl) return;
 
   if (s.provider !== 'github') {
     badge.style.display = 'none';
@@ -7022,24 +7066,43 @@ function applySyncInfoUI(){
   badge.style.display = 'flex';
 
   const info = getLastOnlineImportInfo();
-
   if (!info) {
-    importLine.textContent = 'Imported: —';
-  } else {
-    const dt = fmtLocalStampFromIso(info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '—';
-    const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
-    const ver = String(info.toolVersion || info.version || '').trim();
-    importLine.textContent = `Imported: ${dt} · ${by}${ver ? ' · ' + ver : ''}`;
+    valueEl.textContent = '—';
+    editedEl.style.display = 'none';
+    badge.title = '';
+    return;
   }
 
+  const rawStamp = String(info.uploadedAtLocal || info.uploadedAt || parseLocalStampFromFilename(info.sourceName || '') || '').trim();
+  const dt = fmtStampForBadge(rawStamp) || '—';
+  const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
+  const ver = String(info.toolVersion || info.version || '').trim();
+
+  valueEl.textContent = `${dt} · ${by}${ver ? ' · ' + ver : ''}`;
+
   const localIso = getLocalLastModifiedIso();
-  const localDt = fmtLocalStampFromIso(localIso) || '—';
-  localLine.textContent = `Local edit: ${localDt}`;
+  const importedAtIso = String(info.importedAtIso || info.importedAt || '').trim();
+  const edited = isEditedSinceImport(localIso, importedAtIso);
+
+  if (edited) {
+    editedEl.style.display = 'inline';
+    const localTip = fmtStampForTooltip(localIso) || '—';
+    badge.title = `Last local edit: ${localTip}`;
+  } else {
+    editedEl.style.display = 'none';
+    badge.title = '';
+  }
 }
 
 function finalizeOnlineImportMeta(){
   if (!pendingOnlineImportMeta) return;
+  const nowIso = new Date().toISOString();
+  pendingOnlineImportMeta.importedAtIso = nowIso;
   setLastOnlineImportInfo(pendingOnlineImportMeta);
+
+  // Baseline local edit time to the import completion time so the badge does not immediately show (edited).
+  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, nowIso); } catch {}
+
   pendingOnlineImportMeta = null;
 }
 
