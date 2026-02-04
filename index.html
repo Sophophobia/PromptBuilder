@@ -50,7 +50,7 @@
 
     :root[data-theme="light"]{
       color-scheme: light;
-      --bg:#edf3ff; --bgGlow:#d8e6ff;
+      --bg:#f7f9ff; --bgGlow:#dbe7ff;
       --panel:#ffffff; --panel2:#f2f6ff;
       --text:#0b1220; --muted:#4b5b7a;
       --border:#d4deef; --accent:#2b6cff;
@@ -89,8 +89,8 @@
     *{ box-sizing:border-box; }
     body{
       margin:0; font-family:var(--sans); color:var(--text);
-      background: radial-gradient(1200px 900px at 18% 6%, var(--bgGlow) 0%, var(--bg) 62%), linear-gradient(180deg, var(--accentB) 0%, rgba(0,0,0,0) 60%);
-      }
+      background: radial-gradient(1200px 800px at 20% 10%, var(--bgGlow) 0%, var(--bg) 60%);
+    }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
     .title{ display:flex; flex-direction:column; gap:4px; }
@@ -114,6 +114,9 @@
     .modeChip:hover{ background: rgba(255,255,255,.06); }
     [data-theme="light"] .modeChip:hover{ background: rgba(0,0,0,.04); }
     .modeChip:active{ transform: translateY(1px); }
+    .syncGroup{ display:flex; align-items:center; gap:10px; }
+    .onlineModeGroup{ display:flex; align-items:center; gap:8px; }
+    .modeChip.small{ padding:6px 9px; font-size:12px; }
     .modeChip .dot{
       width:9px;
       height:9px;
@@ -122,13 +125,7 @@
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
     .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
-    .modeChip[data-provider="github"] .dot{ background: #60A5FA; }
-
-
-.modeGroup{ display:inline-flex; align-items:center; gap:8px; }
-.modeChip.iconOnly{ padding:6px 10px; min-width:30px; justify-content:center; }
-.modeChip.iconOnly .label{ font-size:14px; }
-.modeChip.needsSetup{ border-color: rgba(214, 60, 60, .55); box-shadow: 0 0 0 3px rgba(214, 60, 60, .12); }
+    .modeChip[data-provider="github"] .dot{ background: #A78BFA; }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -682,21 +679,20 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline and Online">
-            <span class="dot" aria-hidden="true"></span>
-            <span class="label">Offline</span>
-          </button>
-
-          <div class="modeGroup" id="onlineModeGroup" style="display:none;">
-            <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Auto and Manual">
-              <span class="label">Auto</span>
+          <div class="syncGroup" id="syncGroup">
+            <button class="modeChip" id="btnSyncProvider" type="button" title="Toggle Offline and Online">
+              <span class="dot"></span>
+              <span class="label">Offline</span>
             </button>
-            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
-              <span class="label">⚙</span>
-            </button>
+            <div class="onlineModeGroup" id="onlineModeGroup" style="display:none;">
+              <button class="modeChip small" id="btnSyncOnlineMode" type="button" title="Switch Online mode: Auto or Manual">
+                <span class="label">Manual</span>
+              </button>
+              <button class="modeChip small" id="btnSyncSettings" type="button" title="Sync Settings" aria-label="Sync Settings">⚙️</button>
+            </div>
           </div>
         </div>
-        <div class="sub" id="syncSubText">Offline · Local cache</div>
+        <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
       </div>
       <div class="tabs" role="tablist" aria-label="Main Tabs">
         <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
@@ -716,14 +712,6 @@
       <div class="chip">
         <label>Theme</label>
         <button class="btn mini" id="btnToggleTheme">Light mode</button>
-      </div>
-
-      <div class="chip" style="margin-left:auto;">
-        <label>About</label>
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37.3</span>
-          <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
-        </div>
       </div>
 
     </div>
@@ -855,6 +843,24 @@
 
 <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js" crossorigin="anonymous"></script>
 <script>
+  // Safe storage wrapper: falls back to in-memory storage if localStorage is unavailable (e.g., blocked by policy).
+  const storage = (() => {
+    try {
+      const t = '__prompt_builder_ls_test__';
+      window.localStorage.setItem(t, '1');
+      window.localStorage.removeItem(t);
+      return window.localStorage;
+    } catch (_) {
+      const mem = {};
+      return {
+        getItem: (k) => (Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null),
+        setItem: (k, v) => { mem[k] = String(v); },
+        removeItem: (k) => { delete mem[k]; },
+      };
+    }
+  })();
+
+
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
@@ -902,12 +908,12 @@ const copyToClipboard = async (text) => {
 function setTheme(theme) {
   const t = (theme === 'light') ? 'light' : 'dark';
   document.documentElement.dataset.theme = t;
-  localStorage.setItem('mivida_theme', t);
+  storage.setItem('mivida_theme', t);
   const btn = $('#btnToggleTheme');
   if (btn) btn.textContent = (t === 'light') ? 'Dark mode' : 'Light mode';
 }
 function initTheme() {
-  const saved = localStorage.getItem('mivida_theme');
+  const saved = storage.getItem('mivida_theme');
   const t = saved ? saved : 'dark';
   setTheme(t);
 }
@@ -1581,7 +1587,7 @@ const state = { currentUserId: null, currentCareerId: null, promptCareerId: '', 
 const UI_SORT_STORAGE_KEY = 'mivida_uiSort_v1';
 let uiSort = (() => {
   try {
-    const raw = localStorage.getItem(UI_SORT_STORAGE_KEY);
+    const raw = storage.getItem(UI_SORT_STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
     return (obj && typeof obj === 'object') ? obj : {};
   } catch {
@@ -1589,7 +1595,7 @@ let uiSort = (() => {
   }
 })();
 function saveUiSort(){
-  try { localStorage.setItem(UI_SORT_STORAGE_KEY, JSON.stringify(uiSort || {})); } catch {}
+  try { storage.setItem(UI_SORT_STORAGE_KEY, JSON.stringify(uiSort || {})); } catch {}
 }
 function getUiOrder(sortKey){
   const v = uiSort?.[sortKey];
@@ -1973,14 +1979,14 @@ async function loadUsersIntoSelect() {
     sel.appendChild(opt);
   });
 
-  const remembered = localStorage.getItem('mivida_current_user_id');
+  const remembered = storage.getItem('mivida_current_user_id');
   const pick = (remembered && users.some(u => u.id === remembered)) ? remembered : (users[0]?.id || null);
   state.currentUserId = pick;
   sel.value = pick;
 
   sel.onchange = async () => {
     state.currentUserId = sel.value;
-    localStorage.setItem('mivida_current_user_id', state.currentUserId);
+    storage.setItem('mivida_current_user_id', state.currentUserId);
     await refreshAll();
   };
 }
@@ -1992,7 +1998,7 @@ async function addUserFlow() {
   await addOne('users', row);
   await logChange({ entityType: 'user', entityId: row.id, action: 'create', after: row });
   state.currentUserId = row.id;
-  localStorage.setItem('mivida_current_user_id', row.id);
+  storage.setItem('mivida_current_user_id', row.id);
   await refreshAll();
 }
 async function renameUserFlow() {
@@ -2037,7 +2043,7 @@ async function deleteUserFlow() {
   await deleteOne('users', userId);
   await logChange({ entityType: 'user', entityId: userId, action: 'delete', after: null, before: u });
 
-  localStorage.removeItem('mivida_current_user_id');
+  storage.removeItem('mivida_current_user_id');
   state.currentUserId = null;
   await refreshAll();
 }
@@ -2048,9 +2054,9 @@ async function setCurrentCareer(careerId) {
   // Keep Prompt tab career in lockstep with Setup's current career
   state.promptCareerId = state.currentCareerId || '';
 
-  try { localStorage.setItem('mivida_current_career_id', state.currentCareerId); } catch {}
+  try { storage.setItem('mivida_current_career_id', state.currentCareerId); } catch {}
   // Clear any legacy prompt-only override so it never diverges
-  try { localStorage.removeItem('mivida_prompt_career_id'); } catch {}
+  try { storage.removeItem('mivida_prompt_career_id'); } catch {}
 
   const sel = $('#careerFilter');
   if (sel) sel.value = state.currentCareerId;
@@ -2134,7 +2140,7 @@ async function loadCareerFilterSelect() {
     sel.appendChild(opt);
   });
 
-  const remembered = localStorage.getItem('mivida_current_career_id');
+  const remembered = storage.getItem('mivida_current_career_id');
   const pick = (remembered && careers.some(c => c.id === remembered)) ? remembered : (careers[0]?.id || '');
   state.currentCareerId = pick || '';
   sel.value = state.currentCareerId;
@@ -3456,7 +3462,7 @@ async function renderPromptPickers() {
       uSel.appendChild(opt);
     });
 
-    const remembered = (() => { try { return localStorage.getItem('mivida_current_user_id'); } catch { return ''; } })();
+    const remembered = (() => { try { return storage.getItem('mivida_current_user_id'); } catch { return ''; } })();
     const pick = (state.currentUserId && users.some(x => x.id === state.currentUserId))
       ? state.currentUserId
       : ((remembered && users.some(x => x.id === remembered)) ? remembered : (users[0]?.id || ''));
@@ -3511,7 +3517,7 @@ async function renderPromptPickers() {
   });
 
   let rememberedCareer = '';
-  try { rememberedCareer = localStorage.getItem('mivida_current_career_id') || ''; } catch { rememberedCareer = ''; }
+  try { rememberedCareer = storage.getItem('mivida_current_career_id') || ''; } catch { rememberedCareer = ''; }
 
   let pickCareer =
     (state.currentCareerId && careers.some(x => x.id === state.currentCareerId)) ? state.currentCareerId :
@@ -4575,10 +4581,10 @@ async function wipeLocalAndImportAllFromText(rawText) {
 
   // Wipe UI-only ordering and remembered selections.
   try {
-    localStorage.removeItem(UI_SORT_STORAGE_KEY);
-    localStorage.removeItem('mivida_current_user_id');
-    localStorage.removeItem('mivida_current_career_id');
-    localStorage.removeItem('mivida_prompt_career_id');
+    storage.removeItem(UI_SORT_STORAGE_KEY);
+    storage.removeItem('mivida_current_user_id');
+    storage.removeItem('mivida_current_career_id');
+    storage.removeItem('mivida_prompt_career_id');
   } catch {}
 
   await importSnapshotSelectionReplace(snap, sel);
@@ -6216,9 +6222,9 @@ async function importSnapshotSelectionReplace(snap, sel) {
 
   // Reset remembered selections (they may no longer exist after replace)
   try {
-    localStorage.removeItem('mivida_current_user_id');
-    localStorage.removeItem('mivida_current_career_id');
-    localStorage.removeItem('mivida_prompt_career_id');
+    storage.removeItem('mivida_current_user_id');
+    storage.removeItem('mivida_current_career_id');
+    storage.removeItem('mivida_prompt_career_id');
   } catch {}
   state.currentUserId = '';
   state.currentCareerId = '';
@@ -6383,7 +6389,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 
   if (promptUserSel) promptUserSel.addEventListener('change', async () => {
     state.currentUserId = promptUserSel.value || '';
-    try { localStorage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
+    try { storage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
 
     // Sync Setup tab selector (selection only)
     const setupUserSel = $('#userSelect');
@@ -6447,24 +6453,24 @@ const GitHubSync = (() => {
 
   function getConfig(){
     return {
-      owner: (localStorage.getItem(GH_OWNER_KEY) || '').trim(),
-      repo: (localStorage.getItem(GH_REPO_KEY) || '').trim(),
-      branch: (localStorage.getItem(GH_BRANCH_KEY) || 'main').trim() || 'main',
-      folder: (localStorage.getItem(GH_FOLDER_KEY) || 'snapshots').trim() || 'snapshots',
-      uploader: (localStorage.getItem(GH_UPLOADER_KEY) || '').trim(),
-      token: (localStorage.getItem(GH_TOKEN_KEY) || '').trim(),
-      login: (localStorage.getItem(GH_LOGIN_KEY) || '').trim(),
-      lastOk: (localStorage.getItem(GH_LAST_OK_KEY) || '').trim(),
+      owner: (storage.getItem(GH_OWNER_KEY) || '').trim(),
+      repo: (storage.getItem(GH_REPO_KEY) || '').trim(),
+      branch: (storage.getItem(GH_BRANCH_KEY) || 'main').trim() || 'main',
+      folder: (storage.getItem(GH_FOLDER_KEY) || 'snapshots').trim() || 'snapshots',
+      uploader: (storage.getItem(GH_UPLOADER_KEY) || '').trim(),
+      token: (storage.getItem(GH_TOKEN_KEY) || '').trim(),
+      login: (storage.getItem(GH_LOGIN_KEY) || '').trim(),
+      lastOk: (storage.getItem(GH_LAST_OK_KEY) || '').trim(),
     };
   }
 
   function setConfig(cfg = {}){
-    if (typeof cfg.owner === 'string') localStorage.setItem(GH_OWNER_KEY, cfg.owner.trim());
-    if (typeof cfg.repo === 'string') localStorage.setItem(GH_REPO_KEY, cfg.repo.trim());
-    if (typeof cfg.branch === 'string') localStorage.setItem(GH_BRANCH_KEY, (cfg.branch.trim() || 'main'));
-    if (typeof cfg.folder === 'string') localStorage.setItem(GH_FOLDER_KEY, (cfg.folder.trim() || 'snapshots'));
-    if (typeof cfg.uploader === 'string') localStorage.setItem(GH_UPLOADER_KEY, cfg.uploader.trim());
-    if (typeof cfg.token === 'string') localStorage.setItem(GH_TOKEN_KEY, cfg.token.trim());
+    if (typeof cfg.owner === 'string') storage.setItem(GH_OWNER_KEY, cfg.owner.trim());
+    if (typeof cfg.repo === 'string') storage.setItem(GH_REPO_KEY, cfg.repo.trim());
+    if (typeof cfg.branch === 'string') storage.setItem(GH_BRANCH_KEY, (cfg.branch.trim() || 'main'));
+    if (typeof cfg.folder === 'string') storage.setItem(GH_FOLDER_KEY, (cfg.folder.trim() || 'snapshots'));
+    if (typeof cfg.uploader === 'string') storage.setItem(GH_UPLOADER_KEY, cfg.uploader.trim());
+    if (typeof cfg.token === 'string') storage.setItem(GH_TOKEN_KEY, cfg.token.trim());
   }
 
   function isConfigured(){
@@ -6519,12 +6525,12 @@ const GitHubSync = (() => {
     const repo = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`, {}, c);
 
     try {
-      localStorage.setItem(GH_LOGIN_KEY, me?.login || '');
-      localStorage.setItem(GH_LAST_OK_KEY, nowISO());
+      storage.setItem(GH_LOGIN_KEY, me?.login || '');
+      storage.setItem(GH_LAST_OK_KEY, nowISO());
     } catch {}
     // If branch wasn't set, follow default branch.
-    if (!localStorage.getItem(GH_BRANCH_KEY) && repo?.default_branch) {
-      try { localStorage.setItem(GH_BRANCH_KEY, repo.default_branch); } catch {}
+    if (!storage.getItem(GH_BRANCH_KEY) && repo?.default_branch) {
+      try { storage.setItem(GH_BRANCH_KEY, repo.default_branch); } catch {}
     }
     return { login: me?.login || '', repoFullName: repo?.full_name || '' };
   }
@@ -6752,8 +6758,8 @@ const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
 function getSyncUiState(){
-  let provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
-  let mode = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
+  let provider = (storage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
+  let mode = (storage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
 
   // Migration from older builds
   if (provider === 'onedrive') provider = 'github';
@@ -6764,11 +6770,11 @@ function getSyncUiState(){
   return { provider, mode };
 }
 function setSyncProvider(provider){
-  localStorage.setItem(SYNC_UI_PROVIDER_KEY, provider === 'github' ? 'github' : 'local');
+  storage.setItem(SYNC_UI_PROVIDER_KEY, provider === 'github' ? 'github' : 'local');
   applySyncUiState();
 }
 function setSyncMode(mode){
-  localStorage.setItem(SYNC_UI_MODE_KEY, mode === 'auto' ? 'auto' : 'manual');
+  storage.setItem(SYNC_UI_MODE_KEY, mode === 'auto' ? 'auto' : 'manual');
   applySyncUiState();
 }
 
@@ -6987,6 +6993,7 @@ function initSyncUi(){
   await ensureSeed();
   await refreshAll();
 })();
+
 </script>
 </body>
 </html>
