@@ -124,8 +124,10 @@
       background: var(--muted);
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
-    .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
-    .modeChip[data-provider="github"] .dot{ background: #f59e0b; }
+    .modeChip[data-provider="local"] .dot{ background: #94a3b8; }
+    .modeChip[data-provider="github"] .dot{ background: #22c55e; }
+    .modeChip[data-provider="github"]{ border-color: rgba(34,197,94,.55); }
+    .modeChip[data-provider="github"]:hover{ background: rgba(34,197,94,.08); }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -6910,7 +6912,7 @@ function openSyncSettingsModal(){
   wrap.innerHTML = `
     <div class="row">
       <label style="min-width:120px;">Owner</label>
-      <input id="ghOwner" type="text" placeholder="e.g. your-org-or-username" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
+      <input id="ghOwner" type="text" placeholder="Repo owner (username or org)" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
     </div>
     <div class="row">
       <label style="min-width:120px;">Repo</label>
