@@ -93,12 +93,12 @@
     }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
-    .headerRight{ display:flex; align-items:center; gap:12px; }
-    .headerMeta{ display:flex; align-items:center; gap:8px; }
-    .versionText{ font-size:12px; color: var(--muted); white-space:nowrap; }
     .title{ display:flex; flex-direction:column; gap:4px; }
     .title h1{ margin:0; font-size:18px; letter-spacing:.2px;}
     .titleRow{ display:flex; align-items:center; gap:10px; }
+    .modeGroup{ display:flex; align-items:center; gap:8px; }
+    .modeChip.iconOnly{ padding:6px 9px; }
+    .modeChip.iconOnly .dot{ display:none; }
     .modeChip{
       display:inline-flex;
       align-items:center;
@@ -117,9 +117,6 @@
     .modeChip:hover{ background: rgba(255,255,255,.06); }
     [data-theme="light"] .modeChip:hover{ background: rgba(0,0,0,.04); }
     .modeChip:active{ transform: translateY(1px); }
-    .syncGroup{ display:flex; align-items:center; gap:10px; }
-    .onlineModeGroup{ display:flex; align-items:center; gap:8px; }
-    .modeChip.small{ padding:6px 9px; font-size:12px; }
     .modeChip .dot{
       width:9px;
       height:9px;
@@ -128,7 +125,7 @@
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
     .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
-    .modeChip[data-provider="github"] .dot{ background: #A78BFA; }
+    .modeChip[data-provider="github"] .dot{ background: #f59e0b; }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -682,31 +679,26 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <div class="syncGroup" id="syncGroup">
-            <button class="modeChip" id="btnSyncProvider" type="button" title="Toggle Offline and Online">
-              <span class="dot"></span>
-              <span class="label">Offline</span>
+          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline and Online">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="label">Offline</span>
+          </button>
+
+          <div class="modeGroup" id="onlineModeGroup" style="display:none;">
+            <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Auto and Manual">
+              <span class="dot" aria-hidden="true"></span>
+              <span class="label">Manual</span>
             </button>
-            <div class="onlineModeGroup" id="onlineModeGroup" style="display:none;">
-              <button class="modeChip small" id="btnSyncOnlineMode" type="button" title="Switch Online mode: Auto or Manual">
-                <span class="label">Manual</span>
-              </button>
-              <button class="modeChip small" id="btnSyncSettings" type="button" title="Sync Settings" aria-label="Sync Settings">⚙️</button>
-            </div>
+            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+              <span class="label">⚙</span>
+            </button>
           </div>
         </div>
-        <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
+        <div class="sub" id="syncSubText">Offline · Local cache</div>
       </div>
-
-      <div class="headerRight">
-        <div class="tabs" role="tablist" aria-label="Main Tabs">
-          <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
-          <button class="tab" id="tabPrompt" aria-selected="false">Prompt</button>
-        </div>
-        <div class="headerMeta">
-          <span class="versionText" id="appVersion">v—</span>
-          <button class="modeChip small" id="btnHardRefresh" type="button" title="Hard refresh" aria-label="Hard refresh">↻</button>
-        </div>
+      <div class="tabs" role="tablist" aria-label="Main Tabs">
+        <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
+        <button class="tab" id="tabPrompt" aria-selected="false">Prompt</button>
       </div>
     </header>
 
@@ -722,6 +714,14 @@
       <div class="chip">
         <label>Theme</label>
         <button class="btn mini" id="btnToggleTheme">Light mode</button>
+      </div>
+
+      <div class="chip" style="margin-left:auto;">
+        <label>About</label>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span class="pill" id="appVersionPill" title="App version">v38</span>
+          <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
+        </div>
       </div>
 
     </div>
@@ -851,26 +851,7 @@
     <div class="toast" id="toast" aria-live="polite"></div>
   </div>
 
-<script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js" crossorigin="anonymous"></script>
 <script>
-  // Safe storage wrapper: falls back to in-memory storage if localStorage is unavailable (e.g., blocked by policy).
-  const storage = (() => {
-    try {
-      const t = '__prompt_builder_ls_test__';
-      window.localStorage.setItem(t, '1');
-      window.localStorage.removeItem(t);
-      return window.localStorage;
-    } catch (_) {
-      const mem = {};
-      return {
-        getItem: (k) => (Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null),
-        setItem: (k, v) => { mem[k] = String(v); },
-        removeItem: (k) => { delete mem[k]; },
-      };
-    }
-  })();
-
-
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
@@ -918,12 +899,12 @@ const copyToClipboard = async (text) => {
 function setTheme(theme) {
   const t = (theme === 'light') ? 'light' : 'dark';
   document.documentElement.dataset.theme = t;
-  storage.setItem('mivida_theme', t);
+  localStorage.setItem('mivida_theme', t);
   const btn = $('#btnToggleTheme');
   if (btn) btn.textContent = (t === 'light') ? 'Dark mode' : 'Light mode';
 }
 function initTheme() {
-  const saved = storage.getItem('mivida_theme');
+  const saved = localStorage.getItem('mivida_theme');
   const t = saved ? saved : 'dark';
   setTheme(t);
 }
@@ -1597,7 +1578,7 @@ const state = { currentUserId: null, currentCareerId: null, promptCareerId: '', 
 const UI_SORT_STORAGE_KEY = 'mivida_uiSort_v1';
 let uiSort = (() => {
   try {
-    const raw = storage.getItem(UI_SORT_STORAGE_KEY);
+    const raw = localStorage.getItem(UI_SORT_STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : {};
     return (obj && typeof obj === 'object') ? obj : {};
   } catch {
@@ -1605,7 +1586,7 @@ let uiSort = (() => {
   }
 })();
 function saveUiSort(){
-  try { storage.setItem(UI_SORT_STORAGE_KEY, JSON.stringify(uiSort || {})); } catch {}
+  try { localStorage.setItem(UI_SORT_STORAGE_KEY, JSON.stringify(uiSort || {})); } catch {}
 }
 function getUiOrder(sortKey){
   const v = uiSort?.[sortKey];
@@ -1989,14 +1970,14 @@ async function loadUsersIntoSelect() {
     sel.appendChild(opt);
   });
 
-  const remembered = storage.getItem('mivida_current_user_id');
+  const remembered = localStorage.getItem('mivida_current_user_id');
   const pick = (remembered && users.some(u => u.id === remembered)) ? remembered : (users[0]?.id || null);
   state.currentUserId = pick;
   sel.value = pick;
 
   sel.onchange = async () => {
     state.currentUserId = sel.value;
-    storage.setItem('mivida_current_user_id', state.currentUserId);
+    localStorage.setItem('mivida_current_user_id', state.currentUserId);
     await refreshAll();
   };
 }
@@ -2008,7 +1989,7 @@ async function addUserFlow() {
   await addOne('users', row);
   await logChange({ entityType: 'user', entityId: row.id, action: 'create', after: row });
   state.currentUserId = row.id;
-  storage.setItem('mivida_current_user_id', row.id);
+  localStorage.setItem('mivida_current_user_id', row.id);
   await refreshAll();
 }
 async function renameUserFlow() {
@@ -2053,7 +2034,7 @@ async function deleteUserFlow() {
   await deleteOne('users', userId);
   await logChange({ entityType: 'user', entityId: userId, action: 'delete', after: null, before: u });
 
-  storage.removeItem('mivida_current_user_id');
+  localStorage.removeItem('mivida_current_user_id');
   state.currentUserId = null;
   await refreshAll();
 }
@@ -2064,9 +2045,9 @@ async function setCurrentCareer(careerId) {
   // Keep Prompt tab career in lockstep with Setup's current career
   state.promptCareerId = state.currentCareerId || '';
 
-  try { storage.setItem('mivida_current_career_id', state.currentCareerId); } catch {}
+  try { localStorage.setItem('mivida_current_career_id', state.currentCareerId); } catch {}
   // Clear any legacy prompt-only override so it never diverges
-  try { storage.removeItem('mivida_prompt_career_id'); } catch {}
+  try { localStorage.removeItem('mivida_prompt_career_id'); } catch {}
 
   const sel = $('#careerFilter');
   if (sel) sel.value = state.currentCareerId;
@@ -2150,7 +2131,7 @@ async function loadCareerFilterSelect() {
     sel.appendChild(opt);
   });
 
-  const remembered = storage.getItem('mivida_current_career_id');
+  const remembered = localStorage.getItem('mivida_current_career_id');
   const pick = (remembered && careers.some(c => c.id === remembered)) ? remembered : (careers[0]?.id || '');
   state.currentCareerId = pick || '';
   sel.value = state.currentCareerId;
@@ -3472,7 +3453,7 @@ async function renderPromptPickers() {
       uSel.appendChild(opt);
     });
 
-    const remembered = (() => { try { return storage.getItem('mivida_current_user_id'); } catch { return ''; } })();
+    const remembered = (() => { try { return localStorage.getItem('mivida_current_user_id'); } catch { return ''; } })();
     const pick = (state.currentUserId && users.some(x => x.id === state.currentUserId))
       ? state.currentUserId
       : ((remembered && users.some(x => x.id === remembered)) ? remembered : (users[0]?.id || ''));
@@ -3527,7 +3508,7 @@ async function renderPromptPickers() {
   });
 
   let rememberedCareer = '';
-  try { rememberedCareer = storage.getItem('mivida_current_career_id') || ''; } catch { rememberedCareer = ''; }
+  try { rememberedCareer = localStorage.getItem('mivida_current_career_id') || ''; } catch { rememberedCareer = ''; }
 
   let pickCareer =
     (state.currentCareerId && careers.some(x => x.id === state.currentCareerId)) ? state.currentCareerId :
@@ -4028,8 +4009,13 @@ async function exportSnapshotJson(options=null) {
     careerBlocks: exportCareers ? (careerBlocksLegacy || []) : []
   };
 
+  const s = getSyncUiState();
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
+
+  if (s.provider === 'github') {
+    // Online export (GitHub) is not implemented yet.
+  }
 
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
@@ -4591,10 +4577,10 @@ async function wipeLocalAndImportAllFromText(rawText) {
 
   // Wipe UI-only ordering and remembered selections.
   try {
-    storage.removeItem(UI_SORT_STORAGE_KEY);
-    storage.removeItem('mivida_current_user_id');
-    storage.removeItem('mivida_current_career_id');
-    storage.removeItem('mivida_prompt_career_id');
+    localStorage.removeItem(UI_SORT_STORAGE_KEY);
+    localStorage.removeItem('mivida_current_user_id');
+    localStorage.removeItem('mivida_current_career_id');
+    localStorage.removeItem('mivida_prompt_career_id');
   } catch {}
 
   await importSnapshotSelectionReplace(snap, sel);
@@ -6232,9 +6218,9 @@ async function importSnapshotSelectionReplace(snap, sel) {
 
   // Reset remembered selections (they may no longer exist after replace)
   try {
-    storage.removeItem('mivida_current_user_id');
-    storage.removeItem('mivida_current_career_id');
-    storage.removeItem('mivida_prompt_career_id');
+    localStorage.removeItem('mivida_current_user_id');
+    localStorage.removeItem('mivida_current_career_id');
+    localStorage.removeItem('mivida_prompt_career_id');
   } catch {}
   state.currentUserId = '';
   state.currentCareerId = '';
@@ -6329,6 +6315,10 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
     if (s.provider === 'github') {
+      if (s.mode !== 'manual') {
+        toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
+        return;
+      }
       await githubImportFlow({ wipe: false });
       return;
     }
@@ -6355,6 +6345,10 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
       if (s.provider === 'github') {
+        if (s.mode !== 'manual') {
+          toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
+          return;
+        }
         await githubImportFlow({ wipe: true });
         return;
       }
@@ -6399,7 +6393,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 
   if (promptUserSel) promptUserSel.addEventListener('change', async () => {
     state.currentUserId = promptUserSel.value || '';
-    try { storage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
+    try { localStorage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
 
     // Sync Setup tab selector (selection only)
     const setupUserSel = $('#userSelect');
@@ -6449,342 +6443,237 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 
 
 
+/** ========= GitHub Online Manual (Read only) ========= */
+const GITHUB_CFG_KEY = 'mivida_github_cfg';
 
-/** ========= GitHub Online Import (Manual + Auto) ========= */
 const GitHubSync = (() => {
-  const GH_OWNER_KEY = 'mivida_gh_owner';
-  const GH_REPO_KEY = 'mivida_gh_repo';
-  const GH_BRANCH_KEY = 'mivida_gh_branch';
-  const GH_FOLDER_KEY = 'mivida_gh_folder';
-  const GH_UPLOADER_KEY = 'mivida_gh_uploader_name';
-  const GH_TOKEN_KEY = 'mivida_gh_token';
-  const GH_LOGIN_KEY = 'mivida_gh_login';
-  const GH_LAST_OK_KEY = 'mivida_gh_last_ok';
-
-  function getConfig(){
+  const getConfig = () => {
+    let v = {};
+    try { v = JSON.parse(localStorage.getItem(GITHUB_CFG_KEY) || '{}') || {}; } catch { v = {}; }
     return {
-      owner: (storage.getItem(GH_OWNER_KEY) || '').trim(),
-      repo: (storage.getItem(GH_REPO_KEY) || '').trim(),
-      branch: (storage.getItem(GH_BRANCH_KEY) || 'main').trim() || 'main',
-      folder: (storage.getItem(GH_FOLDER_KEY) || 'snapshots').trim() || 'snapshots',
-      uploader: (storage.getItem(GH_UPLOADER_KEY) || '').trim(),
-      token: (storage.getItem(GH_TOKEN_KEY) || '').trim(),
-      login: (storage.getItem(GH_LOGIN_KEY) || '').trim(),
-      lastOk: (storage.getItem(GH_LAST_OK_KEY) || '').trim(),
+      owner: (v.owner || '').trim(),
+      repo: (v.repo || '').trim(),
+      branch: (v.branch || 'main').trim(),
+      folder: (v.folder || '').trim().replace(/^\/+|\/+$/g,''),
+      token: (v.token || '').trim(),
+      uploader: (v.uploader || '').trim()
     };
-  }
+  };
 
-  function setConfig(cfg = {}){
-    if (typeof cfg.owner === 'string') storage.setItem(GH_OWNER_KEY, cfg.owner.trim());
-    if (typeof cfg.repo === 'string') storage.setItem(GH_REPO_KEY, cfg.repo.trim());
-    if (typeof cfg.branch === 'string') storage.setItem(GH_BRANCH_KEY, (cfg.branch.trim() || 'main'));
-    if (typeof cfg.folder === 'string') storage.setItem(GH_FOLDER_KEY, (cfg.folder.trim() || 'snapshots'));
-    if (typeof cfg.uploader === 'string') storage.setItem(GH_UPLOADER_KEY, cfg.uploader.trim());
-    if (typeof cfg.token === 'string') storage.setItem(GH_TOKEN_KEY, cfg.token.trim());
-  }
+  const setConfig = (cfg) => {
+    const cur = getConfig();
+    const next = { ...cur, ...(cfg || {}) };
+    localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(next));
+  };
 
-  function isConfigured(){
+  const isConfigured = () => {
     const c = getConfig();
-    return !!(c.owner && c.repo && c.token);
-  }
+    return !!(c.owner && c.repo && c.branch && c.folder && c.token);
+  };
 
-  function getStatusLabel(){
-    const c = getConfig();
-    if (!isConfigured()) return 'Not configured';
-    if (!c.login) return 'Configured (not tested)';
-    const when = c.lastOk ? ` · OK ${fmtTime(c.lastOk)}` : '';
-    return `Connected as ${c.login}${when}`;
-  }
-
-  function _encodePath(path){
-    return String(path || '')
-      .split('/')
-      .filter(Boolean)
-      .map(seg => encodeURIComponent(seg))
-      .join('/');
-  }
-
-  async function api(path, { method='GET', headers={}, body=null } = {}, cfg=null){
-    const c = cfg || getConfig();
-    if (!c.token) throw new Error('Missing GitHub token.');
-    const url = `https://api.github.com${path}`;
+  const authHeaders = (token, useTokenPrefix=false) => {
+    const t = String(token || '').trim();
     const h = {
-      'Accept': 'application/vnd.github+json',
-      'Authorization': `Bearer ${c.token}`,
-      ...headers
+      'Accept': 'application/vnd.github+json'
     };
-    const res = await fetch(url, { method, headers: h, body });
-    if (!res.ok){
-      let msg = `${res.status} ${res.statusText}`;
-      try {
-        const j = await res.json();
-        if (j && j.message) msg = `${msg}: ${j.message}`;
-      } catch {}
-      throw new Error(msg);
-    }
-    // Some endpoints may return empty body
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return await res.json();
-    return await res.text();
-  }
+    if (t) h['Authorization'] = (useTokenPrefix ? `token ${t}` : `Bearer ${t}`);
+    return h;
+  };
 
-  async function testConnection(){
+  const ghFetch = async (url, token) => {
+    // Try Bearer first; some tokens prefer token prefix.
+    let r = await fetch(url, { headers: authHeaders(token, false) });
+    if (r.status === 401) {
+      r = await fetch(url, { headers: authHeaders(token, true) });
+    }
+    return r;
+  };
+
+  const testConnection = async () => {
     const c = getConfig();
-    if (!isConfigured()) throw new Error('Missing GitHub settings.');
-    const me = await api('/user', {}, c);
-    const repo = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`, {}, c);
-
-    try {
-      storage.setItem(GH_LOGIN_KEY, me?.login || '');
-      storage.setItem(GH_LAST_OK_KEY, nowISO());
-    } catch {}
-    // If branch wasn't set, follow default branch.
-    if (!storage.getItem(GH_BRANCH_KEY) && repo?.default_branch) {
-      try { storage.setItem(GH_BRANCH_KEY, repo.default_branch); } catch {}
+    if (!c.token) throw new Error('Missing GitHub token');
+    const r = await ghFetch('https://api.github.com/user', c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Auth failed (${r.status}). ${t || ''}`.trim());
     }
-    return { login: me?.login || '', repoFullName: repo?.full_name || '' };
-  }
+    const me = await r.json();
 
-  function _b64ToUtf8(b64){
-    const clean = String(b64 || '').replace(/\n/g,'');
-    const bin = atob(clean);
-    const bytes = new Uint8Array(bin.length);
-    for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder('utf-8').decode(bytes);
-  }
+    const repoUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`;
+    const rr = await ghFetch(repoUrl, c.token);
+    if (!rr.ok) {
+      const t = await rr.text().catch(()=> '');
+      throw new Error(`Repo access failed (${rr.status}). ${t || ''}`.trim());
+    }
+    return { login: me.login || '', ok: true };
+  };
 
-  function _parseSortScore(name){
-    const n = String(name || '');
-    // Prefer YYYYMMDD_HHMMSS
-    let m = n.match(/(\d{8})[_-](\d{6})/);
-    if (m) return Number(m[1] + m[2]);
-    // ISO-ish: YYYY-MM-DDTHH-MM-SS or YYYY-MM-DD_HH-MM-SS
-    m = n.match(/(\d{4})[-_](\d{2})[-_](\d{2})[T_ -](\d{2})[-_](\d{2})[-_](\d{2})/);
-    if (m) return Number(m[1]+m[2]+m[3]+m[4]+m[5]+m[6]);
-    // Date only
-    m = n.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
-    if (m) return Number(m[1]+m[2]+m[3]) * 1000000;
+  const listJsonFiles = async () => {
+    const c = getConfig();
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`List folder failed (${r.status}). ${t || ''}`.trim());
+    }
+    const data = await r.json();
+    const arr = Array.isArray(data) ? data : [];
+    return arr
+      .filter(x => x && x.type === 'file' && typeof x.name === 'string' && x.name.toLowerCase().endsWith('.json'))
+      .map(x => ({ name: x.name, path: x.path, sha: x.sha, size: x.size || 0 }));
+  };
+
+  const parseStamp = (name) => {
+    // Try common patterns like 2026-02-04_13-05-22, 20260204_130522, 2026-02-04-130522
+    const s = String(name || '');
+    let m = s.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)?[-_]?([0-5]\d)?[-_]?([0-5]\d)?/);
+    if (m) {
+      const Y=+m[1], Mo=+m[2], D=+m[3];
+      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
+      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
+      return dt.getTime();
+    }
+    m = s.match(/(20\d{2})([01]\d)([0-3]\d)_?([0-2]\d)?([0-5]\d)?([0-5]\d)?/);
+    if (m) {
+      const Y=+m[1], Mo=+m[2], D=+m[3];
+      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
+      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
+      return dt.getTime();
+    }
     return 0;
-  }
+  };
 
-  async function listSnapshots(){
+  const getLatestFile = async () => {
+    const files = await listJsonFiles();
+    if (!files.length) return null;
+    files.sort((a,b) => (parseStamp(b.name)-parseStamp(a.name)) || b.name.localeCompare(a.name));
+    return files[0];
+  };
+
+  const downloadFileText = async (path) => {
     const c = getConfig();
-    if (!isConfigured()) throw new Error('GitHub sync is not configured.');
-    const folder = _encodePath(c.folder || 'snapshots');
-    const branch = encodeURIComponent(c.branch || 'main');
-
-    let items;
-    try {
-      items = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${folder}?ref=${branch}`, {}, c);
-    } catch (e) {
-      // When folder doesn't exist, GitHub returns 404
-      throw new Error(`Cannot list snapshots in "${c.folder}". Make sure the folder exists in the repo and the token has access.\n\n${e.message || e}`);
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-
-    const files = (Array.isArray(items) ? items : [])
-      .filter(x => x && x.type === 'file' && (x.name || '').toLowerCase().endsWith('.json'))
-      .map(x => ({
-        name: x.name || '',
-        path: x.path || '',
-        size: typeof x.size === 'number' ? x.size : null,
-        sha: x.sha || '',
-        sortScore: _parseSortScore(x.name || ''),
-      }));
-
-    files.sort((a,b) => {
-      if ((b.sortScore || 0) !== (a.sortScore || 0)) return (b.sortScore||0) - (a.sortScore||0);
-      return String(b.name||'').localeCompare(String(a.name||'')); // fallback
-    });
-
-    return files;
-  }
-
-  async function downloadSnapshot(file){
-    const c = getConfig();
-    if (!file || !file.path) throw new Error('Missing snapshot file path.');
-    const branch = encodeURIComponent(c.branch || 'main');
-    const resp = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${_encodePath(file.path)}?ref=${branch}`, {}, c);
-    if (!resp || !resp.content) throw new Error('Snapshot content not found.');
-    return _b64ToUtf8(resp.content);
-  }
+    const data = await r.json();
+    const content = data && data.content ? String(data.content) : '';
+    const enc = data && data.encoding ? String(data.encoding) : 'base64';
+    if (enc !== 'base64') {
+      throw new Error('Unsupported file encoding: ' + enc);
+    }
+    const raw = atob(content.replace(/\s/g,''));
+    return raw;
+  };
 
   return {
-    getConfig,
-    setConfig,
-    isConfigured,
-    getStatusLabel,
-    testConnection,
-    listSnapshots,
-    downloadSnapshot,
+    getConfig, setConfig, isConfigured,
+    testConnection, listJsonFiles, getLatestFile, downloadFileText
   };
 })();
 
-function openGitHubSnapshotPicker({ title='Choose a snapshot', onPick }){
-  const cfg = GitHubSync.getConfig();
-
-  const wrap = document.createElement('div');
-  wrap.innerHTML = `
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <div class="muted" id="ghPickerStatus">Loading snapshots…</div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn mini" id="ghPickerRefresh">Refresh</button>
-      </div>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <input id="ghPickerSearch" type="text" placeholder="Search filename…" style="width:100%;"/>
-    </div>
-    <div class="divider" style="margin:12px 0;"></div>
-    <div id="ghPickerList" style="max-height:55vh; overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--panelB);"></div>
-    <div class="muted" style="margin-top:10px;">
-      Repo: <b>${escapeHtml(cfg.owner || '')}/${escapeHtml(cfg.repo || '')}</b> · Branch: <b>${escapeHtml(cfg.branch || '')}</b> · Folder: <b>${escapeHtml(cfg.folder || '')}</b>
-    </div>
-  `;
-
-  const statusEl = wrap.querySelector('#ghPickerStatus');
-  const listEl = wrap.querySelector('#ghPickerList');
-  const searchEl = wrap.querySelector('#ghPickerSearch');
-  const refreshBtn = wrap.querySelector('#ghPickerRefresh');
-
-  let allFiles = [];
-
-  function render(){
-    const q = (searchEl?.value || '').trim().toLowerCase();
-    const files = allFiles.filter(f => !q || (f.name || '').toLowerCase().includes(q));
-
-    if (!files.length){
-      listEl.innerHTML = `<div class="muted" style="padding:14px;">No matching snapshots.</div>`;
-      return;
-    }
-
-    listEl.innerHTML = files.map((f, idx) => {
-      const size = (typeof f.size === 'number') ? ` · ${(f.size/1024).toFixed(1)} KB` : '';
-      const latest = idx === 0 ? `<span class="pill" style="margin-left:8px;">Latest</span>` : '';
-      return `
-        <div class="row" style="padding:10px 12px; border-bottom:1px solid var(--border); align-items:flex-start;">
-          <div style="flex:1; min-width:0;">
-            <div style="font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-              ${escapeHtml(f.name)} ${latest}
-            </div>
-            <div class="muted" style="margin-top:4px;">${escapeHtml(f.path || '')}${size}</div>
-          </div>
-          <button class="btn mini" data-path="${escapeHtml(f.path)}" style="margin-left:10px;">Select</button>
-        </div>
-      `;
-    }).join('');
-
-    listEl.querySelectorAll('button[data-path]').forEach(b => {
-      b.addEventListener('click', async () => {
-        const path = b.getAttribute('data-path');
-        const file = allFiles.find(x => x.path === path);
-        if (!file) return;
-        closeModal();
-        try {
-          await onPick(file);
-        } catch (e) {
-          console.error(e);
-          toast('Failed to load snapshot');
-          alert('Failed to load snapshot.\n\n' + (e && e.message ? e.message : e));
-        }
-      });
-    });
-  }
-
-  async function load(){
-    try {
-      if (statusEl) statusEl.textContent = 'Loading snapshots…';
-      allFiles = await GitHubSync.listSnapshots();
-      if (statusEl) statusEl.textContent = `Found ${allFiles.length} JSON snapshot(s).`;
-      render();
-    } catch (e) {
-      console.error(e);
-      if (statusEl) statusEl.textContent = 'Failed to load snapshots.';
-      listEl.innerHTML = `<div class="muted" style="padding:14px; white-space:pre-wrap;">${escapeHtml(e && e.message ? e.message : String(e))}</div>`;
-    }
-  }
-
-  if (searchEl) searchEl.addEventListener('input', render);
-  if (refreshBtn) refreshBtn.addEventListener('click', load);
-
-  openModal(title, wrap, [btn('Close', { onClick: () => closeModal() })]);
-  load();
-}
-
-async function githubImportFlow({ wipe=false } = {}){
-  const s = getSyncUiState();
-  if (s.provider !== 'github') return;
-
-  if (!GitHubSync.isConfigured()) {
-    openGitHubSettingsModal({ focusToken: true });
-    return;
-  }
-
+async function githubImportFlow({ wipe }){
   try {
-    if (s.mode === 'manual') {
-      openGitHubSnapshotPicker({
-        title: wipe ? 'Choose a snapshot to WIPE and import' : 'Choose a snapshot to import',
-        onPick: async (file) => {
-          const text = await GitHubSync.downloadSnapshot(file);
-          if (wipe) {
-            const ok = confirm(`This will delete all local data and replace it with:\n\n${file.name}\n\nContinue?`);
-            if (!ok) return;
-            await wipeLocalAndImportAllFromText(text);
-          } else {
-            await openImportWizardFromText(text);
-          }
-          toast(`Imported: ${file.name}`);
-        }
-      });
+    const s = getSyncUiState();
+    if (!GitHubSync.isConfigured()) {
+      toast('Set GitHub sync settings first');
+      openSyncSettingsModal();
       return;
     }
 
-    // Auto: import the "latest" snapshot from the folder (best-effort by filename)
-    const files = await GitHubSync.listSnapshots();
-    if (!files.length) {
-      toast('No JSON snapshots found in the configured folder.');
-      alert('No JSON snapshots found in the configured folder.\n\nFolder: ' + GitHubSync.getConfig().folder);
+    const doImport = async (file) => {
+      if (!file || !file.path) {
+        toast('No snapshot selected');
+        return;
+      }
+      const raw = await GitHubSync.downloadFileText(file.path);
+      if (wipe) await wipeLocalAndImportAllFromText(raw);
+      else await openImportWizardFromText(raw);
+    };
+
+    if (s.mode === 'auto') {
+      const latest = await GitHubSync.getLatestFile();
+      if (!latest) { toast('No JSON found in the configured folder'); return; }
+      await doImport(latest);
       return;
     }
-    const latest = files[0];
-    const text = await GitHubSync.downloadSnapshot(latest);
 
-    if (wipe) {
-      const ok = confirm(`This will delete all local data and replace it with:\n\n${latest.name}\n\nContinue?`);
-      if (!ok) return;
-      await wipeLocalAndImportAllFromText(text);
-    } else {
-      await openImportWizardFromText(text);
-    }
-    toast(`Imported latest: ${latest.name}`);
-  } catch (err) {
-    console.error(err);
-    toast('Import failed: ' + (err?.message || String(err)));
-    alert('Import failed.\n\n' + (err && err.message ? err.message : err));
+    // Manual: choose file
+    const files = await GitHubSync.listJsonFiles();
+    if (!files.length) { toast('No JSON found in the configured folder'); return; }
+
+    openGitHubSnapshotPicker({
+      title: wipe ? 'GitHub · Choose a snapshot to Wipe & Import' : 'GitHub · Choose a snapshot to Import',
+      files,
+      onPick: doImport
+    });
+  } catch (e) {
+    console.error(e);
+    toast('GitHub import failed');
+    alert('GitHub import failed.\n\n' + (e && e.message ? e.message : e));
   }
 }
 
+function openGitHubSnapshotPicker({ title, files, onPick }){
+  const wrap = document.createElement('div');
+  wrap.className = 'form';
 
-/** ========= Sync Mode UI (Offline / GitHub Online) ========= */
+  const c = GitHubSync.getConfig();
+  const header = document.createElement('div');
+  header.className = 'muted';
+  header.style.marginBottom = '10px';
+  header.textContent = `${c.owner}/${c.repo} · ${c.branch} · /${c.folder}`;
+
+  const list = document.createElement('div');
+  list.style.display = 'flex';
+  list.style.flexDirection = 'column';
+  list.style.gap = '8px';
+
+  const rows = (files || []).slice();
+  rows.sort((a,b) => b.name.localeCompare(a.name));
+
+  rows.forEach(f => {
+    const row = document.createElement('button');
+    row.className = 'item';
+    row.style.cursor = 'pointer';
+    row.style.width = '100%';
+    row.style.textAlign = 'left';
+    row.innerHTML = `<div><strong>${escapeHtml(f.name)}</strong><div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(f.path)}</div></div>`;
+    row.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeModal();
+      try { onPick && onPick(f); } catch (err) { console.error(err); }
+    });
+    list.appendChild(row);
+  });
+
+  wrap.appendChild(header);
+  wrap.appendChild(list);
+
+  openModal(title || 'GitHub snapshots', wrap, [
+    btn('Close', { onClick: () => closeModal() })
+  ]);
+}
+
+/** ========= Sync UI (Offline, Online Auto, Online Manual) ========= */
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
 function getSyncUiState(){
-  let provider = (storage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
-  let mode = (storage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
-
-  // Migration from older builds
-  if (provider === 'onedrive') provider = 'github';
-
-  provider = (provider === 'github') ? 'github' : 'local';
-  mode = (mode === 'auto') ? 'auto' : 'manual';
-
-  return { provider, mode };
+  const provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
+  const mode = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
+  return {
+    provider: (provider === 'github') ? 'github' : 'local',
+    mode: (mode === 'auto') ? 'auto' : 'manual'
+  };
 }
-function setSyncProvider(provider){
-  storage.setItem(SYNC_UI_PROVIDER_KEY, provider === 'github' ? 'github' : 'local');
-  applySyncUiState();
-}
-function setSyncMode(mode){
-  storage.setItem(SYNC_UI_MODE_KEY, mode === 'auto' ? 'auto' : 'manual');
+function setSyncUiState(provider, mode){
+  localStorage.setItem(SYNC_UI_PROVIDER_KEY, provider);
+  localStorage.setItem(SYNC_UI_MODE_KEY, mode);
   applySyncUiState();
 }
 
@@ -6792,9 +6681,8 @@ function applySyncUiState(){
   const s = getSyncUiState();
 
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnModeGroup = document.getElementById('onlineModeGroup');
-  const btnMode = document.getElementById('btnSyncOnlineMode') || document.getElementById('btnSyncModeToggle');
-  const btnSettings = document.getElementById('btnSyncSettings');
+  const modeGroup = document.getElementById('onlineModeGroup');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
   const subEl = document.getElementById('syncSubText');
 
   if (btnProvider){
@@ -6802,232 +6690,170 @@ function applySyncUiState(){
     const label = btnProvider.querySelector('.label');
     if (label) label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
   }
-  if (btnModeGroup){
-    btnModeGroup.style.display = (s.provider === 'github') ? 'flex' : 'none';
-  }
+
+  if (modeGroup) modeGroup.style.display = (s.provider === 'github') ? '' : 'none';
+
   if (btnMode){
-    btnMode.style.display = (s.provider === 'github') ? '' : 'none';
     btnMode.dataset.provider = 'github';
     const label = btnMode.querySelector('.label');
     if (label) label.textContent = (s.mode === 'auto') ? 'Auto' : 'Manual';
   }
-  if (btnSettings){
-    btnSettings.style.display = (s.provider === 'github') ? '' : 'none';
-  }
+
   if (subEl){
-    if (s.provider === 'local') {
-      subEl.textContent = 'Offline · Local cache · Import/Export JSON';
-    } else {
-      subEl.textContent = `Online · GitHub · ${s.mode === 'auto' ? 'Auto' : 'Manual'} · ${GitHubSync.getStatusLabel()}`;
-    }
+    if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
+    else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
 
-  document.title = (s.provider === 'local') ? 'Prompt Builder' : 'Prompt Builder · Online';
+  // Title hint
+  document.title = 'Prompt Builder';
 
-  // Update button labels to reduce confusion
-  const btnExp = document.getElementById('btnExportSnapshot');
+  // Keep Import/Export button labels stable but reflect provider
   const btnImp = document.getElementById('btnImportSnapshot');
   const btnWip = document.getElementById('btnWipeImportSnapshot');
-  if (btnExp) btnExp.textContent = 'Export Snapshot (JSON)';
-  if (btnImp) btnImp.textContent = (s.provider === 'github')
-    ? (s.mode === 'auto' ? 'Import Latest (GitHub)' : 'Import (GitHub)')
-    : 'Import Snapshot (JSON)';
-  if (btnWip) btnWip.textContent = (s.provider === 'github')
-    ? (s.mode === 'auto' ? 'Wipe & Import Latest (GitHub)' : 'Wipe & Import (GitHub)')
-    : 'Wipe & Import Snapshot';
+  if (btnImp) btnImp.textContent = (s.provider === 'github') ? 'Import Snapshot (GitHub)' : 'Import Snapshot (JSON)';
+  if (btnWip) btnWip.textContent = (s.provider === 'github') ? 'Wipe Local and Import (GitHub)' : 'Wipe Local and Import JSON';
 }
 
-function openGitHubSettingsModal({ focusToken=false } = {}){
-  const c = GitHubSync.getConfig();
+function openSyncSettingsModal(){
+  const cfg = GitHubSync.getConfig();
 
-  const body = document.createElement('div');
-  body.className = 'modalBody';
-
-  const hint = document.createElement('div');
-  hint.className = 'hint';
-  hint.style.marginBottom = '10px';
-  hint.innerHTML = `
-    <div style="font-weight:700; margin-bottom:4px;">GitHub Sync Settings</div>
-    <div class="muted">Use a fine-grained token. Minimum for reading snapshots: <b>Contents: Read</b> on the private data repo.</div>
-  `;
-  body.appendChild(hint);
-
-  const form = document.createElement('div');
-  form.className = 'form';
-  form.innerHTML = `
-    <label>Private data repo owner</label>
-    <input id="ghOwner" placeholder="Owner (org or username)" value="${escapeHtml(c.owner)}"/>
-
-    <label>Private data repo name</label>
-    <input id="ghRepo" placeholder="Repo name (private data repo)" value="${escapeHtml(c.repo)}"/>
-
-    <div class="row" style="gap:10px;">
+  const wrap = document.createElement('div');
+  wrap.className = 'form';
+  wrap.innerHTML = `
+    <div class="row">
+      <label style="min-width:120px;">Owner</label>
+      <input id="ghOwner" type="text" placeholder="e.g. your-org-or-username" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Repo</label>
+      <input id="ghRepo" type="text" placeholder="e.g. MiVidaPromptData" value="${escapeHtml(cfg.repo)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Branch</label>
+      <input id="ghBranch" type="text" placeholder="main" value="${escapeHtml(cfg.branch)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Folder</label>
+      <input id="ghFolder" type="text" placeholder="e.g. snapshots" value="${escapeHtml(cfg.folder)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Uploader name</label>
+      <input id="ghUploader" type="text" placeholder="Your name" value="${escapeHtml(cfg.uploader)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Token</label>
+      <input id="ghToken" type="password" placeholder="GitHub fine-grained token" value="${escapeHtml(cfg.token)}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;">Status</label>
       <div style="flex:1;">
-        <label>Branch</label>
-        <input id="ghBranch" placeholder="main" value="${escapeHtml(c.branch || 'main')}"/>
-      </div>
-      <div style="flex:1;">
-        <label>Folder</label>
-        <input id="ghFolder" placeholder="snapshots" value="${escapeHtml(c.folder || 'snapshots')}"/>
+        <div id="ghStatus" class="muted">Not tested</div>
+        <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <button class="btn mini" id="btnGhTest">Test connection</button>
+        </div>
       </div>
     </div>
-
-    <label>Uploader name (optional, used for file naming later)</label>
-    <input id="ghUploader" placeholder="Your name" value="${escapeHtml(c.uploader || '')}"/>
-
-    <label>GitHub token</label>
-    <input id="ghToken" placeholder="Paste your token here" value="${escapeHtml(c.token ? '••••••••••' : '')}" autocomplete="off"/>
-    <div class="muted" style="margin-top:6px;">Token is stored in your browser's local storage on this device.</div>
-
-    <div class="divider" style="margin:12px 0;"></div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <div class="muted" id="ghStatus">${escapeHtml(GitHubSync.getStatusLabel())}</div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn mini" id="btnGhTest">Test Connection</button>
-      </div>
-    </div>
+    <div class="muted" style="margin-top:10px;">This stores settings locally in your browser. Token is required for private repos. Read only support is implemented (import only).</div>
   `;
-  body.appendChild(form);
 
-  const ownerEl = form.querySelector('#ghOwner');
-  const repoEl = form.querySelector('#ghRepo');
-  const branchEl = form.querySelector('#ghBranch');
-  const folderEl = form.querySelector('#ghFolder');
-  const uploaderEl = form.querySelector('#ghUploader');
-  const tokenEl = form.querySelector('#ghToken');
-  const statusEl = form.querySelector('#ghStatus');
-  const testBtn = form.querySelector('#btnGhTest');
+  const statusEl = wrap.querySelector('#ghStatus');
 
-  // Only show token placeholder dots; if user focuses, clear to allow paste.
-  if (tokenEl){
-    tokenEl.addEventListener('focus', () => {
-      if (tokenEl.value === '••••••••••') tokenEl.value = '';
-    });
-  }
+  const readInputs = () => ({
+    owner: wrap.querySelector('#ghOwner')?.value || '',
+    repo: wrap.querySelector('#ghRepo')?.value || '',
+    branch: wrap.querySelector('#ghBranch')?.value || 'main',
+    folder: wrap.querySelector('#ghFolder')?.value || '',
+    uploader: wrap.querySelector('#ghUploader')?.value || '',
+    token: wrap.querySelector('#ghToken')?.value || ''
+  });
 
-  const saveNow = () => {
-    const owner = (ownerEl?.value || '').trim();
-    const repo = (repoEl?.value || '').trim();
-    const branch = (branchEl?.value || 'main').trim() || 'main';
-    const folder = (folderEl?.value || 'snapshots').trim() || 'snapshots';
-    const uploader = (uploaderEl?.value || '').trim();
+  const btnTest = wrap.querySelector('#btnGhTest');
+  if (btnTest) btnTest.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      GitHubSync.setConfig(readInputs());
+      if (statusEl) statusEl.textContent = 'Testing...';
+      const res = await GitHubSync.testConnection();
+      if (statusEl) statusEl.textContent = 'Connected as ' + (res.login || '');
+      toast('Connected');
+    } catch (err) {
+      console.error(err);
+      if (statusEl) statusEl.textContent = 'Failed: ' + (err?.message || String(err));
+      alert('Connection test failed\n\n' + (err?.message || String(err)));
+    }
+  });
 
-    // Only overwrite token if user actually typed something (not placeholder)
-    let token = undefined;
-    const t = (tokenEl?.value || '').trim();
-    if (t && t !== '••••••••••') token = t;
-
-    const cfg = { owner, repo, branch, folder, uploader };
-    if (typeof token === 'string') cfg.token = token;
-
-    GitHubSync.setConfig(cfg);
-    applySyncUiState();
-    return GitHubSync.getConfig();
-  };
-
-  if (testBtn){
-    testBtn.addEventListener('click', async () => {
-      try {
-        statusEl.textContent = 'Testing…';
-        const cfg = saveNow();
-        if (!GitHubSync.isConfigured()){
-          statusEl.textContent = 'Missing required settings.';
-          toast('Please fill owner, repo, and token.');
-          return;
-        }
-        const r = await GitHubSync.testConnection();
-        statusEl.textContent = GitHubSync.getStatusLabel();
-        toast(`Connected as ${r.login}`);
-      } catch (e) {
-        console.error(e);
-        statusEl.textContent = 'Test failed.';
-        toast('Test failed: ' + (e?.message || String(e)));
-        alert('Test failed.\n\n' + (e && e.message ? e.message : e));
-      } finally {
-        applySyncUiState();
-      }
-    });
-  }
-
-  openModal('Sync Settings', body, [
+  openModal('Sync Settings', wrap, [
     btn('Cancel', { onClick: () => closeModal() }),
-    btn('Save', { primary:true, onClick: () => { saveNow(); closeModal(); toast('Sync settings saved'); } })
+    btn('Save', { primary: true, onClick: () => {
+      GitHubSync.setConfig(readInputs());
+      closeModal();
+      toast('Saved');
+    }})
   ]);
-
-  // Optional focus
-  if (focusToken && tokenEl) {
-    setTimeout(() => tokenEl.focus(), 0);
-  }
 }
 
 function initSyncUi(){
   applySyncUiState();
 
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncOnlineMode') || document.getElementById('btnSyncModeToggle');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
   const btnSettings = document.getElementById('btnSyncSettings');
 
   if (btnProvider){
-    btnProvider.addEventListener('click', () => {
+    btnProvider.addEventListener('click', async (e) => {
+      e.preventDefault();
       const s = getSyncUiState();
       if (s.provider === 'local') {
-        // switch to online
-        setSyncProvider('github');
-        // Don't force the modal if settings already exist.
-        if (!GitHubSync.isConfigured()) openGitHubSettingsModal({ focusToken:true });
+        // Switch to online
+        if (!GitHubSync.isConfigured()) {
+          openSyncSettingsModal();
+          // Keep offline until user saves
+          return;
+        }
+        setSyncUiState('github', s.mode);
       } else {
-        setSyncProvider('local');
+        setSyncUiState('local', s.mode);
       }
     });
   }
 
   if (btnMode){
-    btnMode.addEventListener('click', () => {
+    btnMode.addEventListener('click', (e) => {
+      e.preventDefault();
       const s = getSyncUiState();
-      if (s.provider !== 'github') return;
-      setSyncMode(s.mode === 'manual' ? 'auto' : 'manual');
+      const next = (s.mode === 'auto') ? 'manual' : 'auto';
+      setSyncUiState('github', next);
     });
   }
 
   if (btnSettings){
-    btnSettings.addEventListener('click', () => openGitHubSettingsModal());
+    btnSettings.addEventListener('click', (e) => {
+      e.preventDefault();
+      openSyncSettingsModal();
+    });
   }
-}
 
-
-
-/** ========= App Meta ========= */
-const APP_BUILD_VERSION = 'v37.4';
-
-function initHeaderMeta(){
-  const vEl = document.getElementById('appVersion');
-  if (vEl) vEl.textContent = APP_BUILD_VERSION;
-
-  const btn = document.getElementById('btnHardRefresh');
-  if (btn){
-    btn.addEventListener('click', () => {
-      try{
-        const u = new URL(window.location.href);
-        u.searchParams.set('v', String(Date.now()));
-        window.location.replace(u.toString());
-      } catch {
-        // fallback
-        window.location.reload(true);
-      }
+  const hr = document.getElementById('btnHardRefresh');
+  if (hr){
+    hr.addEventListener('click', (e)=>{
+      e.preventDefault();
+      const url = new URL(window.location.href);
+      url.searchParams.set('v', Date.now().toString());
+      window.location.replace(url.toString());
     });
   }
 }
 
+
 /** ========= Init ========= */
 (async function init(){
   initTheme();
-  initHeaderMeta();
   wireEvents();
   initSyncUi();
   await ensureSeed();
   await refreshAll();
 })();
-
 </script>
 </body>
 </html>
