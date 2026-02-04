@@ -50,7 +50,7 @@
 
     :root[data-theme="light"]{
       color-scheme: light;
-      --bg:#f7f9ff; --bgGlow:#dbe7ff;
+      --bg:#edf3ff; --bgGlow:#d8e6ff;
       --panel:#ffffff; --panel2:#f2f6ff;
       --text:#0b1220; --muted:#4b5b7a;
       --border:#d4deef; --accent:#2b6cff;
@@ -89,8 +89,8 @@
     *{ box-sizing:border-box; }
     body{
       margin:0; font-family:var(--sans); color:var(--text);
-      background: radial-gradient(1200px 800px at 20% 10%, var(--bgGlow) 0%, var(--bg) 60%);
-    }
+      background: radial-gradient(1200px 900px at 18% 6%, var(--bgGlow) 0%, var(--bg) 62%), linear-gradient(180deg, var(--accentB) 0%, rgba(0,0,0,0) 60%);
+      }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
     .title{ display:flex; flex-direction:column; gap:4px; }
@@ -124,10 +124,11 @@
     .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
     .modeChip[data-provider="github"] .dot{ background: #60A5FA; }
 
-    /* small icon button for sync settings */
-    .modeChip.iconOnly{ padding:6px 8px; }
-    .modeChip.iconOnly .dot{ display:none; }
-    .modeChip.iconOnly .label{ font-family: var(--mono); font-weight: 750; }
+
+.modeGroup{ display:inline-flex; align-items:center; gap:8px; }
+.modeChip.iconOnly{ padding:6px 10px; min-width:30px; justify-content:center; }
+.modeChip.iconOnly .label{ font-size:14px; }
+.modeChip.needsSetup{ border-color: rgba(214, 60, 60, .55); box-shadow: 0 0 0 3px rgba(214, 60, 60, .12); }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -681,19 +682,21 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline / Online (GitHub)">
+          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline and Online">
             <span class="dot" aria-hidden="true"></span>
             <span class="label">Offline</span>
           </button>
-          <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Online mode (Auto / Manual)" style="display:none;">
-            <span class="dot" aria-hidden="true"></span>
-            <span class="label">Manual</span>
-          </button>
-          <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync Settings" style="display:none;">
-            <span class="label">⚙</span>
-          </button>
+
+          <div class="modeGroup" id="onlineModeGroup" style="display:none;">
+            <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Auto and Manual">
+              <span class="label">Auto</span>
+            </button>
+            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+              <span class="label">⚙</span>
+            </button>
+          </div>
         </div>
-        <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
+        <div class="sub" id="syncSubText">Offline · Local cache</div>
       </div>
       <div class="tabs" role="tablist" aria-label="Main Tabs">
         <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
@@ -718,7 +721,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37.2</span>
+          <span class="pill" id="appVersionPill" title="App version">v37.1</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -4009,23 +4012,8 @@ async function exportSnapshotJson(options=null) {
     careerBlocks: exportCareers ? (careerBlocksLegacy || []) : []
   };
 
-  const s = getSyncUiState();
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-
-  if (s.provider === 'onedrive') {
-    if (s.mode !== 'manual') {
-      toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-      return snapshot;
-    }
-    OneDriveSync.uploadSnapshot(jsonText)
-      .then(({ name }) => toast(`Uploaded: ${name}`))
-      .catch(err => {
-        console.error(err);
-        toast('Upload failed: ' + (err?.message || String(err)));
-      });
-    return snapshot;
-  }
 
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
@@ -6324,12 +6312,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const fileInput = $('#fileImportSnapshot');
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
-    if (s.provider === 'onedrive') {
-      if (s.mode !== 'manual') {
-        toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-        return;
-      }
-      await oneDriveImportFlow({ wipe: false });
+    if (s.provider === 'github') {
+      await githubImportFlow({ wipe: false });
       return;
     }
     fileInput.click();
@@ -6354,12 +6338,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   if (btnWipeImport && wipeInput) {
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
-      if (s.provider === 'onedrive') {
-        if (s.mode !== 'manual') {
-          toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
-          return;
-        }
-        await oneDriveImportFlow({ wipe: true });
+      if (s.provider === 'github') {
+        await githubImportFlow({ wipe: true });
         return;
       }
       wipeInput.click();
@@ -6453,341 +6433,233 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 
 
 
-/** ========= OneDrive Online Manual (Graph + MSAL) ========= */
-const OD_CLIENT_ID_KEY = 'mivida_od_client_id';
-const OD_SHARE_LINK_KEY = 'mivida_od_share_link';
-const OD_UPLOADER_KEY = 'mivida_od_uploader_name';
 
-const OneDriveSync = (() => {
-  let pca = null;
-  let folderCache = null; // { driveId, folderId, name, webUrl }
-
-  const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
-  const DEFAULT_SCOPES = ['User.Read', 'Files.ReadWrite'];
+/** ========= GitHub Online Import (Manual + Auto) ========= */
+const GitHubSync = (() => {
+  const GH_OWNER_KEY = 'mivida_gh_owner';
+  const GH_REPO_KEY = 'mivida_gh_repo';
+  const GH_BRANCH_KEY = 'mivida_gh_branch';
+  const GH_FOLDER_KEY = 'mivida_gh_folder';
+  const GH_UPLOADER_KEY = 'mivida_gh_uploader_name';
+  const GH_TOKEN_KEY = 'mivida_gh_token';
+  const GH_LOGIN_KEY = 'mivida_gh_login';
+  const GH_LAST_OK_KEY = 'mivida_gh_last_ok';
 
   function getConfig(){
     return {
-      clientId: (localStorage.getItem(OD_CLIENT_ID_KEY) || '').trim(),
-      shareLink: (localStorage.getItem(OD_SHARE_LINK_KEY) || '').trim(),
-      uploader: (localStorage.getItem(OD_UPLOADER_KEY) || '').trim(),
-      scopes: DEFAULT_SCOPES.slice(),
+      owner: (localStorage.getItem(GH_OWNER_KEY) || '').trim(),
+      repo: (localStorage.getItem(GH_REPO_KEY) || '').trim(),
+      branch: (localStorage.getItem(GH_BRANCH_KEY) || 'main').trim() || 'main',
+      folder: (localStorage.getItem(GH_FOLDER_KEY) || 'snapshots').trim() || 'snapshots',
+      uploader: (localStorage.getItem(GH_UPLOADER_KEY) || '').trim(),
+      token: (localStorage.getItem(GH_TOKEN_KEY) || '').trim(),
+      login: (localStorage.getItem(GH_LOGIN_KEY) || '').trim(),
+      lastOk: (localStorage.getItem(GH_LAST_OK_KEY) || '').trim(),
     };
   }
 
-  function setConfig({ clientId, shareLink, uploader }){
-    if (typeof clientId === 'string') localStorage.setItem(OD_CLIENT_ID_KEY, clientId.trim());
-    if (typeof shareLink === 'string') localStorage.setItem(OD_SHARE_LINK_KEY, shareLink.trim());
-    if (typeof uploader === 'string') localStorage.setItem(OD_UPLOADER_KEY, uploader.trim());
-    folderCache = null;
+  function setConfig(cfg = {}){
+    if (typeof cfg.owner === 'string') localStorage.setItem(GH_OWNER_KEY, cfg.owner.trim());
+    if (typeof cfg.repo === 'string') localStorage.setItem(GH_REPO_KEY, cfg.repo.trim());
+    if (typeof cfg.branch === 'string') localStorage.setItem(GH_BRANCH_KEY, (cfg.branch.trim() || 'main'));
+    if (typeof cfg.folder === 'string') localStorage.setItem(GH_FOLDER_KEY, (cfg.folder.trim() || 'snapshots'));
+    if (typeof cfg.uploader === 'string') localStorage.setItem(GH_UPLOADER_KEY, cfg.uploader.trim());
+    if (typeof cfg.token === 'string') localStorage.setItem(GH_TOKEN_KEY, cfg.token.trim());
   }
 
   function isConfigured(){
     const c = getConfig();
-    return !!(c.clientId && c.shareLink);
+    return !!(c.owner && c.repo && c.token);
   }
 
-  function ensureNotFileProtocol(){
-    if (location.protocol === 'file:') {
-      throw new Error('OneDrive sync requires running this page from http(s), not file://');
-    }
-  }
-
-  function ensureMsal(){
+  function getStatusLabel(){
     const c = getConfig();
-    if (!c.clientId) throw new Error('Missing OneDrive App ID (client id).');
-    if (!window.msal || !window.msal.PublicClientApplication) {
-      throw new Error('MSAL library failed to load.');
-    }
-
-    // Recreate PCA if clientId changed.
-    if (!pca || pca.getConfiguration?.().auth?.clientId !== c.clientId) {
-      const redirectUri = window.location.origin + window.location.pathname;
-      pca = new msal.PublicClientApplication({
-        auth: {
-          clientId: c.clientId,
-          authority: 'https://login.microsoftonline.com/common',
-          redirectUri,
-        },
-        cache: {
-          cacheLocation: 'localStorage',
-          storeAuthStateInCookie: false,
-        }
-      });
-    }
-    return pca;
+    if (!isConfigured()) return 'Not configured';
+    if (!c.login) return 'Configured (not tested)';
+    const when = c.lastOk ? ` · OK ${fmtTime(c.lastOk)}` : '';
+    return `Connected as ${c.login}${when}`;
   }
 
-  function getActiveAccount(){
-    if (!pca) return null;
-    const ac = pca.getActiveAccount?.();
-    if (ac) return ac;
-    const all = pca.getAllAccounts?.() || [];
-    return all[0] || null;
+  function _encodePath(path){
+    return String(path || '')
+      .split('/')
+      .filter(Boolean)
+      .map(seg => encodeURIComponent(seg))
+      .join('/');
   }
 
-  async function signIn(){
-    ensureNotFileProtocol();
+  async function api(path, { method='GET', headers={}, body=null } = {}, cfg=null){
+    const c = cfg || getConfig();
+    if (!c.token) throw new Error('Missing GitHub token.');
+    const url = `https://api.github.com${path}`;
+    const h = {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${c.token}`,
+      ...headers
+    };
+    const res = await fetch(url, { method, headers: h, body });
+    if (!res.ok){
+      let msg = `${res.status} ${res.statusText}`;
+      try {
+        const j = await res.json();
+        if (j && j.message) msg = `${msg}: ${j.message}`;
+      } catch {}
+      throw new Error(msg);
+    }
+    // Some endpoints may return empty body
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return await res.json();
+    return await res.text();
+  }
+
+  async function testConnection(){
     const c = getConfig();
-    if (!c.clientId) throw new Error('Missing OneDrive App ID (client id).');
-    const app = ensureMsal();
-    const existing = getActiveAccount();
-    if (existing) {
-      app.setActiveAccount(existing);
-      return existing;
-    }
-    const res = await app.loginPopup({ scopes: c.scopes });
-    if (res && res.account) app.setActiveAccount(res.account);
-    return res.account;
-  }
-
-  async function signOut(){
-    if (!pca) return;
-    const acct = getActiveAccount();
-    folderCache = null;
-    if (!acct) {
-      // Just clear cache
-      try { localStorage.removeItem('msal.account.keys'); } catch {}
-      return;
-    }
-    await pca.logoutPopup({ account: acct });
-  }
-
-  async function getToken(){
-    ensureNotFileProtocol();
-    const app = ensureMsal();
-    const c = getConfig();
-    let acct = getActiveAccount();
-    if (!acct) acct = await signIn();
+    if (!isConfigured()) throw new Error('Missing GitHub settings.');
+    const me = await api('/user', {}, c);
+    const repo = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`, {}, c);
 
     try {
-      const res = await app.acquireTokenSilent({ scopes: c.scopes, account: acct });
-      return res.accessToken;
-    } catch (e) {
-      const res = await app.acquireTokenPopup({ scopes: c.scopes, account: acct });
-      return res.accessToken;
+      localStorage.setItem(GH_LOGIN_KEY, me?.login || '');
+      localStorage.setItem(GH_LAST_OK_KEY, nowISO());
+    } catch {}
+    // If branch wasn't set, follow default branch.
+    if (!localStorage.getItem(GH_BRANCH_KEY) && repo?.default_branch) {
+      try { localStorage.setItem(GH_BRANCH_KEY, repo.default_branch); } catch {}
     }
+    return { login: me?.login || '', repoFullName: repo?.full_name || '' };
   }
 
-  async function graphFetch(path, opts = {}){
-    const token = await getToken();
-    const url = path.startsWith('http') ? path : (GRAPH_BASE + path);
-    const headers = new Headers(opts.headers || {});
-    headers.set('Authorization', 'Bearer ' + token);
-    // Caller can override content-type, but default is JSON.
-    if (!headers.has('Content-Type') && opts.method && opts.method.toUpperCase() !== 'GET') {
-      headers.set('Content-Type', 'application/json');
-    }
-    const res = await fetch(url, { ...opts, headers });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`Graph error ${res.status}: ${txt || res.statusText}`);
-    }
-    return res;
+  function _b64ToUtf8(b64){
+    const clean = String(b64 || '').replace(/\n/g,'');
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
   }
 
-  function b64UrlEncode(str){
-    // base64 encode UTF-8 string, then base64url without padding
-    const b64 = btoa(unescape(encodeURIComponent(str)));
-    return b64.replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-  }
-
-  function encodeShareLinkToShareId(url){
-    return 'u!' + b64UrlEncode(url);
-  }
-
-  async function resolveSharedFolder(){
-    const c = getConfig();
-    if (!c.shareLink) throw new Error('Missing shared folder link.');
-    if (folderCache) return folderCache;
-
-    const shareId = encodeShareLinkToShareId(c.shareLink);
-    const res = await graphFetch(`/shares/${shareId}/driveItem?$select=id,name,folder,parentReference,remoteItem,webUrl`, {
-      method: 'GET',
-      headers: { 'Prefer': 'redeemSharingLink' }
-    });
-    const item = await res.json();
-
-    const isFolder = !!(item.folder || (item.remoteItem && item.remoteItem.folder));
-    if (!isFolder) throw new Error('The shared link does not point to a folder.');
-
-    const folderId = (item.remoteItem && item.remoteItem.id) ? item.remoteItem.id : item.id;
-    const driveId = (item.remoteItem && item.remoteItem.parentReference && item.remoteItem.parentReference.driveId)
-      ? item.remoteItem.parentReference.driveId
-      : (item.parentReference && item.parentReference.driveId);
-
-    if (!driveId || !folderId) throw new Error('Unable to resolve driveId/folderId from the shared link.');
-
-    folderCache = { driveId, folderId, name: item.name || 'Shared folder', webUrl: item.webUrl || '' };
-    return folderCache;
+  function _parseSortScore(name){
+    const n = String(name || '');
+    // Prefer YYYYMMDD_HHMMSS
+    let m = n.match(/(\d{8})[_-](\d{6})/);
+    if (m) return Number(m[1] + m[2]);
+    // ISO-ish: YYYY-MM-DDTHH-MM-SS or YYYY-MM-DD_HH-MM-SS
+    m = n.match(/(\d{4})[-_](\d{2})[-_](\d{2})[T_ -](\d{2})[-_](\d{2})[-_](\d{2})/);
+    if (m) return Number(m[1]+m[2]+m[3]+m[4]+m[5]+m[6]);
+    // Date only
+    m = n.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+    if (m) return Number(m[1]+m[2]+m[3]) * 1000000;
+    return 0;
   }
 
   async function listSnapshots(){
-    const f = await resolveSharedFolder();
-    const res = await graphFetch(`/drives/${f.driveId}/items/${f.folderId}/children?$top=200&$select=id,name,createdDateTime,lastModifiedDateTime,size,file`, { method: 'GET' });
-    const data = await res.json();
-    const items = Array.isArray(data.value) ? data.value : [];
-    const files = items
-      .filter(x => x && x.file && x.name && x.name.toLowerCase().endswith('.json'))
+    const c = getConfig();
+    if (!isConfigured()) throw new Error('GitHub sync is not configured.');
+    const folder = _encodePath(c.folder || 'snapshots');
+    const branch = encodeURIComponent(c.branch || 'main');
+
+    let items;
+    try {
+      items = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${folder}?ref=${branch}`, {}, c);
+    } catch (e) {
+      // When folder doesn't exist, GitHub returns 404
+      throw new Error(`Cannot list snapshots in "${c.folder}". Make sure the folder exists in the repo and the token has access.\n\n${e.message || e}`);
+    }
+
+    const files = (Array.isArray(items) ? items : [])
+      .filter(x => x && x.type === 'file' && (x.name || '').toLowerCase().endsWith('.json'))
       .map(x => ({
-        id: x.id,
-        name: x.name,
-        createdDateTime: x.createdDateTime,
-        lastModifiedDateTime: x.lastModifiedDateTime,
-        size: x.size,
-        driveId: f.driveId,
+        name: x.name || '',
+        path: x.path || '',
+        size: typeof x.size === 'number' ? x.size : null,
+        sha: x.sha || '',
+        sortScore: _parseSortScore(x.name || ''),
       }));
 
-    files.sort((a, b) => {
-      const da = Date.parse(a.lastModifiedDateTime || a.createdDateTime || 0) || 0;
-      const db = Date.parse(b.lastModifiedDateTime || b.createdDateTime || 0) || 0;
-      return db - da;
+    files.sort((a,b) => {
+      if ((b.sortScore || 0) !== (a.sortScore || 0)) return (b.sortScore||0) - (a.sortScore||0);
+      return String(b.name||'').localeCompare(String(a.name||'')); // fallback
     });
+
     return files;
   }
 
   async function downloadSnapshot(file){
-    if (!file || !file.id || !file.driveId) throw new Error('Missing file info.');
-    const res = await graphFetch(`/drives/${file.driveId}/items/${file.id}/content`, { method: 'GET' });
-    return await res.text();
-  }
-
-  function makeSnapshotFileName(){
     const c = getConfig();
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const stamp = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    let who = (c.uploader || 'unknown').trim();
-    // Windows-invalid characters for filenames
-    who = who.replace(/[\\/:*?"<>|]/g, '_');
-    if (!who) who = 'unknown';
-    return `MiVida_Snapshot_${stamp}__${who}.json`;
-  }
-
-  async function uploadSnapshot(jsonText){
-    const c = getConfig();
-    if (!c.shareLink) throw new Error('Missing shared folder link.');
-    if (!c.clientId) throw new Error('Missing OneDrive App ID (client id).');
-
-    const f = await resolveSharedFolder();
-    const fileName = makeSnapshotFileName();
-
-    const res = await graphFetch(`/drives/${f.driveId}/items/${f.folderId}:/${encodeURIComponent(fileName)}:/content`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: jsonText,
-    });
-    const out = await res.json().catch(() => ({}));
-    return { name: fileName, id: out.id || null, webUrl: out.webUrl || '' };
-  }
-
-  function getStatusLabel(){
-    try {
-      const c = getConfig();
-      if (!c.clientId) return 'Missing OneDrive App ID';
-      if (!c.shareLink) return 'Missing shared folder link';
-      if (!window.msal) return 'MSAL not loaded';
-      ensureMsal();
-      const acct = getActiveAccount();
-      return acct ? `Signed in as ${acct.username || acct.name || 'account'}` : 'Not signed in';
-    } catch (e) {
-      return (e && e.message) ? e.message : String(e);
-    }
+    if (!file || !file.path) throw new Error('Missing snapshot file path.');
+    const branch = encodeURIComponent(c.branch || 'main');
+    const resp = await api(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${_encodePath(file.path)}?ref=${branch}`, {}, c);
+    if (!resp || !resp.content) throw new Error('Snapshot content not found.');
+    return _b64ToUtf8(resp.content);
   }
 
   return {
-    getConfig, setConfig, isConfigured,
-    signIn, signOut,
-    resolveSharedFolder, listSnapshots, downloadSnapshot, uploadSnapshot,
+    getConfig,
+    setConfig,
+    isConfigured,
     getStatusLabel,
+    testConnection,
+    listSnapshots,
+    downloadSnapshot,
   };
 })();
 
-async function oneDriveImportFlow({ wipe }){
-  try {
-    if (location.protocol === 'file:') {
-      alert('OneDrive sync needs http(s). If you opened this file directly, host it (for example GitHub Pages) or open via a local web server.');
-      return;
-    }
+function openGitHubSnapshotPicker({ title='Choose a snapshot', onPick }){
+  const cfg = GitHubSync.getConfig();
 
-    if (!OneDriveSync.isConfigured()) {
-      openSyncUiModal();
-      toast('Configure OneDrive in Sync Settings first');
-      return;
-    }
-
-    // Ensure signed in, then open picker
-    await OneDriveSync.signIn();
-
-    openOneDriveSnapshotPicker({
-      title: wipe ? 'OneDrive · Choose a snapshot to Wipe & Import' : 'OneDrive · Choose a snapshot to Import',
-      onPick: async (file) => {
-        const raw = await OneDriveSync.downloadSnapshot(file);
-        if (wipe) {
-          await wipeLocalAndImportAllFromText(raw);
-        } else {
-          await openImportWizardFromText(raw);
-        }
-      }
-    });
-
-  } catch (e) {
-    console.error(e);
-    toast('OneDrive action failed');
-    alert('OneDrive action failed.\n\n' + (e && e.message ? e.message : e));
-  }
-}
-
-function openOneDriveSnapshotPicker({ title, onPick }){
   const wrap = document.createElement('div');
-  wrap.className = 'form';
   wrap.innerHTML = `
-    <div class="row" style="gap:10px; align-items:center;">
-      <input id="odSnapSearch" type="text" placeholder="Search files..." style="flex:1;" />
-      <button class="btn mini" id="odSnapRefresh">Refresh</button>
+    <div class="row" style="align-items:center; justify-content:space-between;">
+      <div class="muted" id="ghPickerStatus">Loading snapshots…</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn mini" id="ghPickerRefresh">Refresh</button>
+      </div>
     </div>
-    <div id="odSnapStatus" class="muted" style="margin:10px 0 8px 0;">Loading snapshots...</div>
-    <div id="odSnapList" style="max-height:55vh; overflow:auto; border:1px solid var(--border); border-radius:12px;"></div>
+    <div class="row" style="margin-top:10px;">
+      <input id="ghPickerSearch" type="text" placeholder="Search filename…" style="width:100%;"/>
+    </div>
+    <div class="divider" style="margin:12px 0;"></div>
+    <div id="ghPickerList" style="max-height:55vh; overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--panelB);"></div>
+    <div class="muted" style="margin-top:10px;">
+      Repo: <b>${escapeHtml(cfg.owner || '')}/${escapeHtml(cfg.repo || '')}</b> · Branch: <b>${escapeHtml(cfg.branch || '')}</b> · Folder: <b>${escapeHtml(cfg.folder || '')}</b>
+    </div>
   `;
 
-  openModal(title || 'OneDrive snapshots', wrap, [
-    btn('Close', { onClick: () => closeModal() })
-  ]);
-
-  const searchEl = wrap.querySelector('#odSnapSearch');
-  const statusEl = wrap.querySelector('#odSnapStatus');
-  const listEl = wrap.querySelector('#odSnapList');
-  const refreshBtn = wrap.querySelector('#odSnapRefresh');
+  const statusEl = wrap.querySelector('#ghPickerStatus');
+  const listEl = wrap.querySelector('#ghPickerList');
+  const searchEl = wrap.querySelector('#ghPickerSearch');
+  const refreshBtn = wrap.querySelector('#ghPickerRefresh');
 
   let allFiles = [];
 
   function render(){
-    const q = (searchEl.value || '').trim().toLowerCase();
-    const files = q ? allFiles.filter(f => (f.name || '').toLowerCase().includes(q)) : allFiles;
+    const q = (searchEl?.value || '').trim().toLowerCase();
+    const files = allFiles.filter(f => !q || (f.name || '').toLowerCase().includes(q));
 
-    if (!files.length) {
-      listEl.innerHTML = `<div class="muted" style="padding:14px;">No matching JSON snapshots found in this folder.</div>`;
+    if (!files.length){
+      listEl.innerHTML = `<div class="muted" style="padding:14px;">No matching snapshots.</div>`;
       return;
     }
 
-    listEl.innerHTML = files.map(f => {
-      const when = f.lastModifiedDateTime || f.createdDateTime || '';
-      const nice = when ? escapeHtml(fmtTime(when)) : '';
+    listEl.innerHTML = files.map((f, idx) => {
       const size = (typeof f.size === 'number') ? ` · ${(f.size/1024).toFixed(1)} KB` : '';
+      const latest = idx === 0 ? `<span class="pill" style="margin-left:8px;">Latest</span>` : '';
       return `
         <div class="row" style="padding:10px 12px; border-bottom:1px solid var(--border); align-items:flex-start;">
           <div style="flex:1; min-width:0;">
-            <div style="font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.name)}</div>
-            <div class="muted" style="margin-top:4px;">${nice}${size}</div>
+            <div style="font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(f.name)} ${latest}
+            </div>
+            <div class="muted" style="margin-top:4px;">${escapeHtml(f.path || '')}${size}</div>
           </div>
-          <button class="btn mini" data-fileid="${escapeHtml(f.id)}" style="margin-left:10px;">Select</button>
+          <button class="btn mini" data-path="${escapeHtml(f.path)}" style="margin-left:10px;">Select</button>
         </div>
       `;
     }).join('');
 
-    listEl.querySelectorAll('button[data-fileid]').forEach(b => {
+    listEl.querySelectorAll('button[data-path]').forEach(b => {
       b.addEventListener('click', async () => {
-        const id = b.getAttribute('data-fileid');
-        const file = allFiles.find(x => x.id === id);
+        const path = b.getAttribute('data-path');
+        const file = allFiles.find(x => x.path === path);
         if (!file) return;
         closeModal();
         try {
@@ -6803,144 +6675,108 @@ function openOneDriveSnapshotPicker({ title, onPick }){
 
   async function load(){
     try {
-      statusEl.textContent = 'Loading snapshots...';
-      allFiles = await OneDriveSync.listSnapshots();
-      statusEl.textContent = `Found ${allFiles.length} JSON snapshot(s).`; 
+      if (statusEl) statusEl.textContent = 'Loading snapshots…';
+      allFiles = await GitHubSync.listSnapshots();
+      if (statusEl) statusEl.textContent = `Found ${allFiles.length} JSON snapshot(s).`;
       render();
     } catch (e) {
       console.error(e);
-      statusEl.textContent = 'Failed to load snapshots.';
-      listEl.innerHTML = `<div class="muted" style="padding:14px;">${escapeHtml(e && e.message ? e.message : String(e))}</div>`;
+      if (statusEl) statusEl.textContent = 'Failed to load snapshots.';
+      listEl.innerHTML = `<div class="muted" style="padding:14px; white-space:pre-wrap;">${escapeHtml(e && e.message ? e.message : String(e))}</div>`;
     }
   }
 
   if (searchEl) searchEl.addEventListener('input', render);
   if (refreshBtn) refreshBtn.addEventListener('click', load);
 
+  openModal(title, wrap, [btn('Close', { onClick: () => closeModal() })]);
   load();
 }
-/** ========= Sync Mode UI (Local vs GitHub) ========= */
+
+async function githubImportFlow({ wipe=false } = {}){
+  const s = getSyncUiState();
+  if (s.provider !== 'github') return;
+
+  if (!GitHubSync.isConfigured()) {
+    openGitHubSettingsModal({ focusToken: true });
+    return;
+  }
+
+  try {
+    if (s.mode === 'manual') {
+      openGitHubSnapshotPicker({
+        title: wipe ? 'Choose a snapshot to WIPE and import' : 'Choose a snapshot to import',
+        onPick: async (file) => {
+          const text = await GitHubSync.downloadSnapshot(file);
+          if (wipe) {
+            const ok = confirm(`This will delete all local data and replace it with:\n\n${file.name}\n\nContinue?`);
+            if (!ok) return;
+            await wipeLocalAndImportAllFromText(text);
+          } else {
+            await openImportWizardFromText(text);
+          }
+          toast(`Imported: ${file.name}`);
+        }
+      });
+      return;
+    }
+
+    // Auto: import the "latest" snapshot from the folder (best-effort by filename)
+    const files = await GitHubSync.listSnapshots();
+    if (!files.length) {
+      toast('No JSON snapshots found in the configured folder.');
+      alert('No JSON snapshots found in the configured folder.\n\nFolder: ' + GitHubSync.getConfig().folder);
+      return;
+    }
+    const latest = files[0];
+    const text = await GitHubSync.downloadSnapshot(latest);
+
+    if (wipe) {
+      const ok = confirm(`This will delete all local data and replace it with:\n\n${latest.name}\n\nContinue?`);
+      if (!ok) return;
+      await wipeLocalAndImportAllFromText(text);
+    } else {
+      await openImportWizardFromText(text);
+    }
+    toast(`Imported latest: ${latest.name}`);
+  } catch (err) {
+    console.error(err);
+    toast('Import failed: ' + (err?.message || String(err)));
+    alert('Import failed.\n\n' + (err && err.message ? err.message : err));
+  }
+}
+
+
+/** ========= Sync Mode UI (Offline / GitHub Online) ========= */
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
-const GitHubSync = (() => {
-  const CFG_KEY = 'mivida_github_sync_cfg';
-  let mem = null;
-
-  function getConfig(){
-    if (mem) return mem;
-    try {
-      mem = JSON.parse(localStorage.getItem(CFG_KEY) || '{}') || {};
-    } catch { mem = {}; }
-    return mem;
-  }
-
-  function setConfig(patch){
-    const cur = getConfig();
-    mem = { ...cur, ...patch };
-    localStorage.setItem(CFG_KEY, JSON.stringify(mem));
-    applySyncUiState();
-  }
-
-  function isConfigured(){
-    const c = getConfig();
-    return !!(c.token && c.owner && c.repo);
-  }
-
-  function isConnected(){
-    const c = getConfig();
-    return !!(c.connectedLogin && c.connectedAt);
-  }
-
-  function disconnect(){
-    setConfig({ connectedLogin: '', connectedAt: '', repoFullName: '' });
-  }
-
-  function getStatusLabel(){
-    const c = getConfig();
-    if (!isConfigured()) return 'Not configured';
-    if (isConnected()) return `Connected as ${c.connectedLogin}`;
-    return 'Ready to connect';
-  }
-
-  function authHeaders(){
-    const c = getConfig();
-    const token = (c.token || '').trim();
-    const h = {
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28'
-    };
-    if (token) h['Authorization'] = `Bearer ${token}`;
-    return h;
-  }
-
-  async function testConnection(){
-    const c = getConfig();
-    if (!isConfigured()) throw new Error('Missing GitHub token / owner / repo');
-
-    const headers = authHeaders();
-
-    // 1) Validate token
-    const meResp = await fetch('https://api.github.com/user', { headers });
-    if (!meResp.ok) {
-      const t = await safeReadText(meResp);
-      throw new Error(`Auth failed (${meResp.status}): ${t || meResp.statusText}`);
-    }
-    const me = await meResp.json();
-    const login = me && me.login ? String(me.login) : '';
-
-    // 2) Validate access to target repo (metadata only)
-    const repoUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`;
-    const repoResp = await fetch(repoUrl, { headers });
-    if (!repoResp.ok) {
-      const t = await safeReadText(repoResp);
-      throw new Error(`Repo access failed (${repoResp.status}): ${t || repoResp.statusText}`);
-    }
-    const repo = await repoResp.json();
-    const full = repo && repo.full_name ? String(repo.full_name) : `${c.owner}/${c.repo}`;
-
-    setConfig({
-      connectedLogin: login,
-      connectedAt: new Date().toISOString(),
-      repoFullName: full
-    });
-    return { login, repo: full };
-  }
-
-  async function safeReadText(resp){
-    try { return await resp.text(); } catch { return ''; }
-  }
-
-  return {
-    getConfig,
-    setConfig,
-    isConfigured,
-    isConnected,
-    disconnect,
-    getStatusLabel,
-    testConnection
-  };
-})();
-
 function getSyncUiState(){
-  const providerRaw = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
-  const modeRaw = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
-  return {
-    provider: (providerRaw === 'github') ? 'github' : 'local',
-    mode: (modeRaw === 'auto') ? 'auto' : 'manual'
-  };
-}
+  let provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
+  let mode = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
 
-function setSyncUiState(provider, mode){
-  localStorage.setItem(SYNC_UI_PROVIDER_KEY, provider);
-  localStorage.setItem(SYNC_UI_MODE_KEY, mode);
+  // Migration from older builds
+  if (provider === 'onedrive') provider = 'github';
+
+  provider = (provider === 'github') ? 'github' : 'local';
+  mode = (mode === 'auto') ? 'auto' : 'manual';
+
+  return { provider, mode };
+}
+function setSyncProvider(provider){
+  localStorage.setItem(SYNC_UI_PROVIDER_KEY, provider === 'github' ? 'github' : 'local');
+  applySyncUiState();
+}
+function setSyncMode(mode){
+  localStorage.setItem(SYNC_UI_MODE_KEY, mode === 'auto' ? 'auto' : 'manual');
   applySyncUiState();
 }
 
 function applySyncUiState(){
   const s = getSyncUiState();
+
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncOnlineMode');
+  const btnMode = document.getElementById('btnSyncModeToggle');
   const btnSettings = document.getElementById('btnSyncSettings');
   const subEl = document.getElementById('syncSubText');
 
@@ -6958,161 +6794,186 @@ function applySyncUiState(){
   if (btnSettings){
     btnSettings.style.display = (s.provider === 'github') ? '' : 'none';
   }
-
   if (subEl){
     if (s.provider === 'local') {
-      subEl.textContent = 'Local cache · Snapshot import/export';
+      subEl.textContent = 'Offline · Local cache · Import/Export JSON';
     } else {
-      const cfg = GitHubSync.getConfig();
-      const repo = (cfg.owner && cfg.repo) ? `${cfg.owner}/${cfg.repo}` : 'Repo not set';
-      subEl.textContent = `GitHub · ${GitHubSync.getStatusLabel()} · ${repo}`;
+      subEl.textContent = `Online · GitHub · ${s.mode === 'auto' ? 'Auto' : 'Manual'} · ${GitHubSync.getStatusLabel()}`;
     }
   }
 
-  document.title = (s.provider === 'local') ? 'Prompt Builder' : 'Prompt Builder · GitHub';
+  document.title = (s.provider === 'local') ? 'Prompt Builder' : 'Prompt Builder · Online';
+
+  // Update button labels to reduce confusion
+  const btnExp = document.getElementById('btnExportSnapshot');
+  const btnImp = document.getElementById('btnImportSnapshot');
+  const btnWip = document.getElementById('btnWipeImportSnapshot');
+  if (btnExp) btnExp.textContent = 'Export Snapshot (JSON)';
+  if (btnImp) btnImp.textContent = (s.provider === 'github')
+    ? (s.mode === 'auto' ? 'Import Latest (GitHub)' : 'Import (GitHub)')
+    : 'Import Snapshot (JSON)';
+  if (btnWip) btnWip.textContent = (s.provider === 'github')
+    ? (s.mode === 'auto' ? 'Wipe & Import Latest (GitHub)' : 'Wipe & Import (GitHub)')
+    : 'Wipe & Import Snapshot';
 }
 
-function openSyncUiModal(opts = {}){
-  const onCancel = (opts && typeof opts.onCancel === 'function') ? opts.onCancel : null;
-  const cfg = GitHubSync.getConfig();
+function openGitHubSettingsModal({ focusToken=false } = {}){
+  const c = GitHubSync.getConfig();
 
-  const wrap = document.createElement('div');
-  wrap.className = 'form';
-  wrap.innerHTML = `
-    <div class="row">
-      <label style="min-width:140px;">Private data repo</label>
-      <div style="flex:1; display:flex; gap:10px;">
-        <input id="ghOwner" type="text" placeholder="owner" value="${escapeHtml(cfg.owner || '')}" style="flex:1;" />
-        <input id="ghRepo" type="text" placeholder="repo" value="${escapeHtml(cfg.repo || '')}" style="flex:1;" />
-      </div>
-    </div>
-    <div class="row">
-      <label style="min-width:140px;">Branch</label>
-      <input id="ghBranch" type="text" placeholder="main" value="${escapeHtml(cfg.branch || 'main')}" style="flex:1;" />
-    </div>
-    <div class="row">
-      <label style="min-width:140px;">Folder</label>
-      <input id="ghFolder" type="text" placeholder="snapshots" value="${escapeHtml(cfg.folder || 'snapshots')}" style="flex:1;" />
-    </div>
-    <div class="row">
-      <label style="min-width:140px;">Uploader name</label>
-      <input id="ghUploader" type="text" placeholder="Your name" value="${escapeHtml(cfg.uploader || '')}" style="flex:1;" />
-    </div>
-    <div class="row">
-      <label style="min-width:140px;">GitHub token</label>
-      <input id="ghToken" type="password" placeholder="Fine-grained PAT (contents read/write)" value="${escapeHtml(cfg.token || '')}" style="flex:1;" />
-    </div>
-    <div class="row">
-      <label style="min-width:140px;">Status</label>
+  const body = document.createElement('div');
+  body.className = 'modalBody';
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.style.marginBottom = '10px';
+  hint.innerHTML = `
+    <div style="font-weight:700; margin-bottom:4px;">GitHub Sync Settings</div>
+    <div class="muted">Use a fine-grained token. Minimum for reading snapshots: <b>Contents: Read</b> on the private data repo.</div>
+  `;
+  body.appendChild(hint);
+
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `
+    <label>Private data repo owner</label>
+    <input id="ghOwner" placeholder="e.g., Sophophobia" value="${escapeHtml(c.owner)}"/>
+
+    <label>Private data repo name</label>
+    <input id="ghRepo" placeholder="e.g., MiVidaPrompt" value="${escapeHtml(c.repo)}"/>
+
+    <div class="row" style="gap:10px;">
       <div style="flex:1;">
-        <div id="ghStatus" class="muted">${escapeHtml(GitHubSync.getStatusLabel())}</div>
-        <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
-          <button class="btn mini" id="btnGhConnect">Connect</button>
-          <button class="btn mini" id="btnGhDisconnect">Disconnect</button>
-        </div>
+        <label>Branch</label>
+        <input id="ghBranch" placeholder="main" value="${escapeHtml(c.branch || 'main')}"/>
+      </div>
+      <div style="flex:1;">
+        <label>Folder</label>
+        <input id="ghFolder" placeholder="snapshots" value="${escapeHtml(c.folder || 'snapshots')}"/>
       </div>
     </div>
-    <div class="muted" style="margin-top:10px;">
-      Tokens are saved locally in your browser (localStorage). Use a fine-grained token limited to the private JSON repo.
+
+    <label>Uploader name (optional, used for file naming later)</label>
+    <input id="ghUploader" placeholder="Your name" value="${escapeHtml(c.uploader || '')}"/>
+
+    <label>GitHub token</label>
+    <input id="ghToken" placeholder="Paste your token here" value="${escapeHtml(c.token ? '••••••••••' : '')}" autocomplete="off"/>
+    <div class="muted" style="margin-top:6px;">Token is stored in your browser's local storage on this device.</div>
+
+    <div class="divider" style="margin:12px 0;"></div>
+    <div class="row" style="align-items:center; justify-content:space-between;">
+      <div class="muted" id="ghStatus">${escapeHtml(GitHubSync.getStatusLabel())}</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn mini" id="btnGhTest">Test Connection</button>
+      </div>
     </div>
   `;
+  body.appendChild(form);
 
-  const statusEl = wrap.querySelector('#ghStatus');
-  const readInputsToConfig = () => {
-    const owner = wrap.querySelector('#ghOwner')?.value || '';
-    const repo = wrap.querySelector('#ghRepo')?.value || '';
-    const branch = wrap.querySelector('#ghBranch')?.value || 'main';
-    const folder = wrap.querySelector('#ghFolder')?.value || 'snapshots';
-    const uploader = wrap.querySelector('#ghUploader')?.value || '';
-    const token = wrap.querySelector('#ghToken')?.value || '';
-    GitHubSync.setConfig({ owner, repo, branch, folder, uploader, token });
+  const ownerEl = form.querySelector('#ghOwner');
+  const repoEl = form.querySelector('#ghRepo');
+  const branchEl = form.querySelector('#ghBranch');
+  const folderEl = form.querySelector('#ghFolder');
+  const uploaderEl = form.querySelector('#ghUploader');
+  const tokenEl = form.querySelector('#ghToken');
+  const statusEl = form.querySelector('#ghStatus');
+  const testBtn = form.querySelector('#btnGhTest');
+
+  // Only show token placeholder dots; if user focuses, clear to allow paste.
+  if (tokenEl){
+    tokenEl.addEventListener('focus', () => {
+      if (tokenEl.value === '••••••••••') tokenEl.value = '';
+    });
+  }
+
+  const saveNow = () => {
+    const owner = (ownerEl?.value || '').trim();
+    const repo = (repoEl?.value || '').trim();
+    const branch = (branchEl?.value || 'main').trim() || 'main';
+    const folder = (folderEl?.value || 'snapshots').trim() || 'snapshots';
+    const uploader = (uploaderEl?.value || '').trim();
+
+    // Only overwrite token if user actually typed something (not placeholder)
+    let token = undefined;
+    const t = (tokenEl?.value || '').trim();
+    if (t && t !== '••••••••••') token = t;
+
+    const cfg = { owner, repo, branch, folder, uploader };
+    if (typeof token === 'string') cfg.token = token;
+
+    GitHubSync.setConfig(cfg);
+    applySyncUiState();
+    return GitHubSync.getConfig();
   };
-  const refreshStatus = () => { if (statusEl) statusEl.textContent = GitHubSync.getStatusLabel(); };
 
-  const btnConnect = wrap.querySelector('#btnGhConnect');
-  if (btnConnect) btnConnect.addEventListener('click', async (e) => {
-    e.preventDefault();
-    try {
-      readInputsToConfig();
-      await GitHubSync.testConnection();
-      refreshStatus();
-      toast('GitHub connected');
-    } catch (err) {
-      console.error(err);
-      refreshStatus();
-      alert('GitHub connect failed\n\n' + (err && err.message ? err.message : err));
-    }
-  });
-  const btnDisc = wrap.querySelector('#btnGhDisconnect');
-  if (btnDisc) btnDisc.addEventListener('click', (e) => {
-    e.preventDefault();
-    GitHubSync.disconnect();
-    refreshStatus();
-    toast('Disconnected');
-  });
+  if (testBtn){
+    testBtn.addEventListener('click', async () => {
+      try {
+        statusEl.textContent = 'Testing…';
+        const cfg = saveNow();
+        if (!GitHubSync.isConfigured()){
+          statusEl.textContent = 'Missing required settings.';
+          toast('Please fill owner, repo, and token.');
+          return;
+        }
+        const r = await GitHubSync.testConnection();
+        statusEl.textContent = GitHubSync.getStatusLabel();
+        toast(`Connected as ${r.login}`);
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Test failed.';
+        toast('Test failed: ' + (e?.message || String(e)));
+        alert('Test failed.\n\n' + (e && e.message ? e.message : e));
+      } finally {
+        applySyncUiState();
+      }
+    });
+  }
 
-  openModal('Sync Settings', wrap, [
-    btn('Cancel', { onClick: () => { closeModal(); if (onCancel) try { onCancel(); } catch {} } }),
-    btn('Save', { primary: true, onClick: () => {
-      readInputsToConfig();
-      refreshStatus();
-      closeModal();
-      toast('Saved');
-    }})
+  openModal('Sync Settings', body, [
+    btn('Cancel', { onClick: () => closeModal() }),
+    btn('Save', { primary:true, onClick: () => { saveNow(); closeModal(); toast('Sync settings saved'); } })
   ]);
+
+  // Optional focus
+  if (focusToken && tokenEl) {
+    setTimeout(() => tokenEl.focus(), 0);
+  }
 }
 
 function initSyncUi(){
   applySyncUiState();
 
   const btnProvider = document.getElementById('btnSyncProvider');
-  const btnMode = document.getElementById('btnSyncOnlineMode');
+  const btnMode = document.getElementById('btnSyncModeToggle');
   const btnSettings = document.getElementById('btnSyncSettings');
 
   if (btnProvider){
-    btnProvider.addEventListener('click', (e) => {
-      e.preventDefault();
+    btnProvider.addEventListener('click', () => {
       const s = getSyncUiState();
       if (s.provider === 'local') {
-        // switch to GitHub
-        setSyncUiState('github', s.mode);
-        if (!GitHubSync.isConfigured()) {
-          openSyncUiModal({ onCancel: () => setSyncUiState('local', s.mode) });
-          toast('Set GitHub credentials in Sync Settings');
-        }
+        // switch to online
+        setSyncProvider('github');
+        // Don't force the modal if settings already exist.
+        if (!GitHubSync.isConfigured()) openGitHubSettingsModal({ focusToken:true });
       } else {
-        // switch to local
-        setSyncUiState('local', s.mode);
+        setSyncProvider('local');
       }
     });
   }
 
   if (btnMode){
-    btnMode.addEventListener('click', (e) => {
-      e.preventDefault();
+    btnMode.addEventListener('click', () => {
       const s = getSyncUiState();
-      const next = (s.mode === 'auto') ? 'manual' : 'auto';
-      setSyncUiState(s.provider, next);
+      if (s.provider !== 'github') return;
+      setSyncMode(s.mode === 'manual' ? 'auto' : 'manual');
     });
   }
 
   if (btnSettings){
-    btnSettings.addEventListener('click', (e) => {
-      e.preventDefault();
-      openSyncUiModal();
-    });
-  }
-
-  const hr = document.getElementById('btnHardRefresh');
-  if (hr){
-    hr.addEventListener('click', (e)=>{
-      e.preventDefault();
-      const url = new URL(window.location.href);
-      url.searchParams.set('v', Date.now().toString());
-      window.location.replace(url.toString());
-    });
+    btnSettings.addEventListener('click', () => openGitHubSettingsModal());
   }
 }
+
 
 /** ========= Init ========= */
 (async function init(){
