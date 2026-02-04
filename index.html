@@ -4010,13 +4010,30 @@ async function exportSnapshotJson(options=null) {
   };
 
   const s = getSyncUiState();
-  const stamp = new Date().toISOString().replace(/[:.]/g,'-');
-  const jsonText = JSON.stringify(snapshot, null, 2);
 
   if (s.provider === 'github') {
-    // Online export (GitHub) is not implemented yet.
+    // Online export: upload to GitHub (append-only; never overwrite).
+    try {
+      const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
+      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
+      const cfg = GitHubSync.getConfig();
+      snapshot.uploadedBy = cfg.uploader || '';
+      snapshot.uploadedAtLocal = uploadedAtLocal;
+      snapshot.toolVersion = toolVersion;
+      const jsonText = JSON.stringify(snapshot, null, 2);
+      const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
+      toast(`Uploaded: ${up.filename}`);
+    } catch (err) {
+      console.error(err);
+      alert('Online export failed\n\n' + (err?.message || String(err)));
+      throw err;
+    }
+    return snapshot;
   }
 
+  // Offline export: download locally
+  const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+  const jsonText = JSON.stringify(snapshot, null, 2);
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
@@ -6446,6 +6463,84 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 /** ========= GitHub Online Manual (Read only) ========= */
 const GITHUB_CFG_KEY = 'mivida_github_cfg';
 
+/** ========= Secrets (token storage) =========
+ * We store the GitHub token in IndexedDB (not localStorage) so it persists across refresh/restart
+ * while avoiding accidental exposure in plain localStorage dumps.
+ * Note: In a pure front-end app, this is still accessible to anyone with browser access/devtools.
+ */
+const SecretStore = (() => {
+  const DB_NAME = 'mivida_prompt_builder_secrets';
+  const STORE = 'kv';
+  const KEY_GH = 'github_token';
+  let _tokenCache = '';
+
+  const openDb = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  const get = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const os = tx.objectStore(STORE);
+      const r = os.get(key);
+      r.onsuccess = () => resolve(r.result || '');
+      r.onerror = () => resolve('');
+    });
+  };
+
+  const set = async (key, val) => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore(STORE).put(String(val || ''), key);
+    });
+  };
+
+  const del = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.objectStore(STORE).delete(key);
+    });
+  };
+
+  const init = async () => {
+    // Migrate legacy token from localStorage into IDB once.
+    let legacy = '';
+    try {
+      const cfg = JSON.parse(localStorage.getItem(GITHUB_CFG_KEY) || '{}') || {};
+      legacy = String(cfg.token || '').trim();
+      if (legacy) {
+        cfg.token = ''; // scrub
+        localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(cfg));
+      }
+    } catch {}
+    const stored = (await get(KEY_GH)) || '';
+    _tokenCache = stored || legacy || '';
+    if (legacy && !stored) {
+      await set(KEY_GH, legacy);
+    }
+  };
+
+  const getGitHubToken = () => _tokenCache || '';
+  const setGitHubToken = async (t) => { _tokenCache = String(t || '').trim(); await set(KEY_GH, _tokenCache); };
+  const clearGitHubToken = async () => { _tokenCache = ''; await del(KEY_GH); };
+
+  return { init, getGitHubToken, setGitHubToken, clearGitHubToken };
+})();
+
+
 const GitHubSync = (() => {
   const getConfig = () => {
     let v = {};
@@ -6455,14 +6550,23 @@ const GitHubSync = (() => {
       repo: (v.repo || '').trim(),
       branch: (v.branch || 'main').trim(),
       folder: (v.folder || '').trim().replace(/^\/+|\/+$/g,''),
-      token: (v.token || '').trim(),
+      token: (SecretStore.getGitHubToken() || '').trim(),
       uploader: (v.uploader || '').trim()
     };
   };
 
-  const setConfig = (cfg) => {
+  const setConfig = async (cfg) => {
     const cur = getConfig();
-    const next = { ...cur, ...(cfg || {}) };
+    const incoming = { ...(cfg || {}) };
+
+    // Token is stored in IndexedDB secrets. If input is blank, keep existing.
+    if (Object.prototype.hasOwnProperty.call(incoming, 'token')) {
+      const t = String(incoming.token || '').trim();
+      if (t) await SecretStore.setGitHubToken(t);
+      delete incoming.token;
+    }
+
+    const next = { ...cur, ...incoming, token: '' }; // never persist token in localStorage
     localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(next));
   };
 
@@ -6505,6 +6609,16 @@ const GitHubSync = (() => {
       const t = await rr.text().catch(()=> '');
       throw new Error(`Repo access failed (${rr.status}). ${t || ''}`.trim());
     }
+
+    // Verify folder exists (required for Online import/export)
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const folderUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
+    const fr = await ghFetch(folderUrl, c.token);
+    if (!fr.ok) {
+      const t = await fr.text().catch(()=> '');
+      throw new Error(`Folder access failed (${fr.status}). ${t || ''}`.trim());
+    }
+
     return { login: me.login || '', ok: true };
   };
 
@@ -6569,10 +6683,84 @@ const GitHubSync = (() => {
     const raw = atob(content.replace(/\s/g,''));
     return raw;
   };
+  const toBase64Utf8 = (str) => {
+    // Safe base64 for unicode
+    const bytes = new TextEncoder().encode(String(str || ''));
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    return btoa(bin);
+  };
+
+  const ensureFolderExists = async () => {
+    const c = getConfig();
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Folder access failed (${r.status}). ${t || ''}`.trim());
+    }
+    const data = await r.json().catch(()=>null);
+    if (!Array.isArray(data) && !(data && data.type === 'dir')) {
+      // GitHub returns array for a folder, object for a file.
+      throw new Error('Folder path is not a directory: ' + (c.folder || '(root)'));
+    }
+    return true;
+  };
+
+  const uploadNewFile = async (path, contentText, message) => {
+    const c = getConfig();
+    if (!c.token) throw new Error('Missing GitHub token');
+    await ensureFolderExists();
+
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}`;
+    const payload = {
+      message: message || ('Add snapshot ' + path),
+      content: toBase64Utf8(contentText),
+      branch: c.branch
+    };
+    // For PUT we need fetch with method and body.
+    const doPut = async (useTokenPrefix=false) => fetch(url, {
+      method: 'PUT',
+      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    let pr = await doPut(false);
+    if (pr.status === 401) pr = await doPut(true);
+
+    if (!pr.ok) {
+      const t = await pr.text().catch(()=> '');
+      throw new Error(`Upload failed (${pr.status}). ${t || ''}`.trim());
+    }
+    return pr.json().catch(()=> ({}));
+  };
+
+  const makeLocalStamp = () => {
+    const d = new Date();
+    const pad = (n, w=2) => String(n).padStart(w,'0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${pad(d.getMilliseconds(),3)}`;
+  };
+
+  const sanitizeFilePart = (s) => String(s || '').trim()
+    .replace(/[\s]+/g,'_')
+    .replace(/[^a-zA-Z0-9._-]+/g,'')
+    .replace(/^_+|_+$/g,'') || 'unknown';
+
+  const uploadSnapshotJsonText = async (jsonText) => {
+    const c = getConfig();
+    const stamp = makeLocalStamp();
+    const uploader = sanitizeFilePart(c.uploader || 'unknown');
+    const filename = `${stamp}__${uploader}.json`;
+    const relPath = (c.folder ? (c.folder.replace(/^\/+|\/+$/g,'') + '/') : '') + filename;
+    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`);
+    return { filename, path: relPath };
+  };
+
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText
+    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists
   };
 })();
 
@@ -6742,7 +6930,14 @@ function openSyncSettingsModal(){
     </div>
     <div class="row">
       <label style="min-width:120px;">Token</label>
-      <input id="ghToken" type="password" placeholder="GitHub fine-grained token" value="${escapeHtml(cfg.token)}" style="flex:1;" />
+      <input id="ghToken" type="password" placeholder="${cfg.token ? 'Token saved (leave blank to keep)' : 'GitHub token'}" value="" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;"></label>
+      <div style="flex:1; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div class="hint" style="margin:0;">Token is saved on this device. Leave blank to keep it.</div>
+        <button class="btn mini danger" id="ghClearToken" type="button">Clear Token</button>
+      </div>
     </div>
     <div class="row">
       <label style="min-width:120px;">Status</label>
@@ -6768,10 +6963,17 @@ function openSyncSettingsModal(){
   });
 
   const btnTest = wrap.querySelector('#btnGhTest');
+  const btnClear = wrap.querySelector('#ghClearToken');
+  if (btnClear) btnClear.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await SecretStore.clearGitHubToken();
+    toast('Token cleared');
+  });
+
   if (btnTest) btnTest.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      GitHubSync.setConfig(readInputs());
+      await GitHubSync.setConfig(readInputs());
       if (statusEl) statusEl.textContent = 'Testing...';
       const res = await GitHubSync.testConnection();
       if (statusEl) statusEl.textContent = 'Connected as ' + (res.login || '');
@@ -6785,8 +6987,8 @@ function openSyncSettingsModal(){
 
   openModal('Sync Settings', wrap, [
     btn('Cancel', { onClick: () => closeModal() }),
-    btn('Save', { primary: true, onClick: () => {
-      GitHubSync.setConfig(readInputs());
+    btn('Save', { primary: true, onClick: async () => {
+      await GitHubSync.setConfig(readInputs());
       closeModal();
       toast('Saved');
     }})
@@ -6850,6 +7052,7 @@ function initSyncUi(){
 (async function init(){
   initTheme();
   wireEvents();
+  await SecretStore.init();
   initSyncUi();
   await ensureSeed();
   await refreshAll();
