@@ -99,6 +99,9 @@
     .modeGroup{ display:flex; align-items:center; gap:8px; }
     .modeChip.iconOnly{ padding:6px 9px; }
     .modeChip.iconOnly .dot{ display:none; }
+    /* icon-only buttons should be compact and truly icon-only */
+    .modeChip.iconOnly{ width:34px; justify-content:center; padding:6px 0; }
+    .modeChip.iconOnly .icon{ font-size:14px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
     .modeChip{
       display:inline-flex;
       align-items:center;
@@ -729,14 +732,15 @@
               <span class="label">Manual</span>
             </button>
             
+            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
+              <span class="icon" aria-hidden="true">⚙</span>
+            </button>
+
             <div class="syncInfoBadge" id="syncInfoBadge" title="">
-              <span class="syncInfoLabel">Version</span>
+              <span class="syncInfoLabel">JSON</span>
               <span class="syncInfoValue" id="syncVersionValue">—</span>
               <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
             </div>
-<button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
-              <span class="label">⚙</span>
-            </button>
           </div>
         </div>
         <div class="sub" id="syncSubText">Offline · Local cache</div>
@@ -756,15 +760,10 @@
         <button class="btn mini danger" id="btnWipeImportSnapshot" title="Delete all local data and replace it with the selected JSON snapshot">Wipe Local and Import JSON</button>
       </div>
 
-      <div class="chip">
-        <label>Theme</label>
-        <button class="btn mini" id="btnToggleTheme">Light mode</button>
-      </div>
-
       <div class="chip" style="margin-left:auto;">
-        <label>About</label>
+        <label>Theme</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v38</span>
+          <button class="btn mini" id="btnToggleTheme">Light mode</button>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -7118,8 +7117,8 @@ function applySyncInfoUI(){
   const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
-  const ver = String(info.toolVersion || info.version || '').trim();
-  valueEl.textContent = `${dt} · ${by}${ver ? ' · ' + ver : ''}`;
+  // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
+  valueEl.textContent = `${dt} · ${by}`;
 
   // Edited detection: compare local last modified vs baseline captured at import.
   const baselineIso = String(info.localBaselineIso || '').trim();
