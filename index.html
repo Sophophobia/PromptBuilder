@@ -93,6 +93,9 @@
     }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
+    .headerRight{ display:flex; align-items:center; gap:12px; }
+    .headerMeta{ display:flex; align-items:center; gap:8px; }
+    .versionText{ font-size:12px; color: var(--muted); white-space:nowrap; }
     .title{ display:flex; flex-direction:column; gap:4px; }
     .title h1{ margin:0; font-size:18px; letter-spacing:.2px;}
     .titleRow{ display:flex; align-items:center; gap:10px; }
@@ -102,7 +105,7 @@
       gap:8px;
       padding:6px 10px;
       border-radius:999px;
-      border:1px solid var(--stroke);
+      border:1px solid var(--border);
       background: var(--panelB);
       color: var(--text);
       font-size:12px;
@@ -694,9 +697,16 @@
         </div>
         <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
       </div>
-      <div class="tabs" role="tablist" aria-label="Main Tabs">
-        <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
-        <button class="tab" id="tabPrompt" aria-selected="false">Prompt</button>
+
+      <div class="headerRight">
+        <div class="tabs" role="tablist" aria-label="Main Tabs">
+          <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
+          <button class="tab" id="tabPrompt" aria-selected="false">Prompt</button>
+        </div>
+        <div class="headerMeta">
+          <span class="versionText" id="appVersion">v—</span>
+          <button class="modeChip small" id="btnHardRefresh" type="button" title="Hard refresh" aria-label="Hard refresh">↻</button>
+        </div>
       </div>
     </header>
 
@@ -6846,10 +6856,10 @@ function openGitHubSettingsModal({ focusToken=false } = {}){
   form.className = 'form';
   form.innerHTML = `
     <label>Private data repo owner</label>
-    <input id="ghOwner" placeholder="e.g., Sophophobia" value="${escapeHtml(c.owner)}"/>
+    <input id="ghOwner" placeholder="Owner (org or username)" value="${escapeHtml(c.owner)}"/>
 
     <label>Private data repo name</label>
-    <input id="ghRepo" placeholder="e.g., MiVidaPrompt" value="${escapeHtml(c.repo)}"/>
+    <input id="ghRepo" placeholder="Repo name (private data repo)" value="${escapeHtml(c.repo)}"/>
 
     <div class="row" style="gap:10px;">
       <div style="flex:1;">
@@ -6985,9 +6995,33 @@ function initSyncUi(){
 }
 
 
+
+/** ========= App Meta ========= */
+const APP_BUILD_VERSION = 'v37.4';
+
+function initHeaderMeta(){
+  const vEl = document.getElementById('appVersion');
+  if (vEl) vEl.textContent = APP_BUILD_VERSION;
+
+  const btn = document.getElementById('btnHardRefresh');
+  if (btn){
+    btn.addEventListener('click', () => {
+      try{
+        const u = new URL(window.location.href);
+        u.searchParams.set('v', String(Date.now()));
+        window.location.replace(u.toString());
+      } catch {
+        // fallback
+        window.location.reload(true);
+      }
+    });
+  }
+}
+
 /** ========= Init ========= */
 (async function init(){
   initTheme();
+  initHeaderMeta();
   wireEvents();
   initSyncUi();
   await ensureSeed();
