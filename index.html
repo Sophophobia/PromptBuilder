@@ -50,7 +50,7 @@
 
     :root[data-theme="light"]{
       color-scheme: light;
-      --bg:#edf3ff; --bgGlow:#d8e6ff;
+      --bg:#f7f9ff; --bgGlow:#dbe7ff;
       --panel:#ffffff; --panel2:#f2f6ff;
       --text:#0b1220; --muted:#4b5b7a;
       --border:#d4deef; --accent:#2b6cff;
@@ -89,8 +89,8 @@
     *{ box-sizing:border-box; }
     body{
       margin:0; font-family:var(--sans); color:var(--text);
-      background: radial-gradient(1200px 900px at 18% 6%, var(--bgGlow) 0%, var(--bg) 62%), linear-gradient(180deg, var(--accentB) 0%, rgba(0,0,0,0) 60%);
-      }
+      background: radial-gradient(1200px 800px at 20% 10%, var(--bgGlow) 0%, var(--bg) 60%);
+    }
     .app{ max-width: 1180px; margin: 26px auto; padding: 0 18px 34px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 14px; }
     .title{ display:flex; flex-direction:column; gap:4px; }
@@ -122,13 +122,12 @@
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
     .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
-    .modeChip[data-provider="onedrive"] .dot{ background: #60A5FA; }
+    .modeChip[data-provider="github"] .dot{ background: #60A5FA; }
 
-
-.modeGroup{ display:inline-flex; align-items:center; gap:8px; }
-.modeChip.iconOnly{ padding:6px 10px; min-width:30px; justify-content:center; }
-.modeChip.iconOnly .label{ font-size:14px; }
-.modeChip.needsSetup{ border-color: rgba(214, 60, 60, .55); box-shadow: 0 0 0 3px rgba(214, 60, 60, .12); }
+    /* small icon button for sync settings */
+    .modeChip.iconOnly{ padding:6px 8px; }
+    .modeChip.iconOnly .dot{ display:none; }
+    .modeChip.iconOnly .label{ font-family: var(--mono); font-weight: 750; }
 
     .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -682,21 +681,19 @@
       <div class="title">
         <div class="titleRow">
           <h1>Prompt Builder</h1>
-          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline and Online">
+          <button class="modeChip" id="btnSyncProvider" title="Toggle Offline / Online (GitHub)">
             <span class="dot" aria-hidden="true"></span>
             <span class="label">Offline</span>
           </button>
-
-          <div class="modeGroup" id="onlineModeGroup" style="display:none;">
-            <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Auto and Manual">
-              <span class="label">Auto</span>
-            </button>
-            <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
-              <span class="label">⚙</span>
-            </button>
-          </div>
+          <button class="modeChip" id="btnSyncOnlineMode" title="Toggle Online mode (Auto / Manual)" style="display:none;">
+            <span class="dot" aria-hidden="true"></span>
+            <span class="label">Manual</span>
+          </button>
+          <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync Settings" style="display:none;">
+            <span class="label">⚙</span>
+          </button>
         </div>
-        <div class="sub" id="syncSubText">Offline · Local cache</div>
+        <div class="sub" id="syncSubText">Local cache · Snapshot import/export</div>
       </div>
       <div class="tabs" role="tablist" aria-label="Main Tabs">
         <button class="tab active" id="tabSetup" aria-selected="true">Setup</button>
@@ -721,7 +718,7 @@
       <div class="chip" style="margin-left:auto;">
         <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v37.1</span>
+          <span class="pill" id="appVersionPill" title="App version">v37.2</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -4018,7 +4015,7 @@ async function exportSnapshotJson(options=null) {
 
   if (s.provider === 'onedrive') {
     if (s.mode !== 'manual') {
-      toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+      toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
       return snapshot;
     }
     OneDriveSync.uploadSnapshot(jsonText)
@@ -6329,7 +6326,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const s = getSyncUiState();
     if (s.provider === 'onedrive') {
       if (s.mode !== 'manual') {
-        toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+        toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
         return;
       }
       await oneDriveImportFlow({ wipe: false });
@@ -6359,7 +6356,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const s = getSyncUiState();
       if (s.provider === 'onedrive') {
         if (s.mode !== 'manual') {
-          toast('Online Auto is not implemented yet. Switch to Manual (Online Mode button).');
+          toast('OneDrive Auto is not implemented yet. Switch to Manual in Sync Settings.');
           return;
         }
         await oneDriveImportFlow({ wipe: true });
@@ -6713,7 +6710,7 @@ async function oneDriveImportFlow({ wipe }){
     }
 
     if (!OneDriveSync.isConfigured()) {
-      openSyncSettingsModal();
+      openSyncUiModal();
       toast('Configure OneDrive in Sync Settings first');
       return;
     }
@@ -6822,208 +6819,300 @@ function openOneDriveSnapshotPicker({ title, onPick }){
 
   load();
 }
-/** ========= Sync Mode UI (Offline vs Online) ========= */
-const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'onedrive'
+/** ========= Sync Mode UI (Local vs GitHub) ========= */
+const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
-function getSyncUiState(){
-  const provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
-  const mode = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'auto').toLowerCase();
+const GitHubSync = (() => {
+  const CFG_KEY = 'mivida_github_sync_cfg';
+  let mem = null;
+
+  function getConfig(){
+    if (mem) return mem;
+    try {
+      mem = JSON.parse(localStorage.getItem(CFG_KEY) || '{}') || {};
+    } catch { mem = {}; }
+    return mem;
+  }
+
+  function setConfig(patch){
+    const cur = getConfig();
+    mem = { ...cur, ...patch };
+    localStorage.setItem(CFG_KEY, JSON.stringify(mem));
+    applySyncUiState();
+  }
+
+  function isConfigured(){
+    const c = getConfig();
+    return !!(c.token && c.owner && c.repo);
+  }
+
+  function isConnected(){
+    const c = getConfig();
+    return !!(c.connectedLogin && c.connectedAt);
+  }
+
+  function disconnect(){
+    setConfig({ connectedLogin: '', connectedAt: '', repoFullName: '' });
+  }
+
+  function getStatusLabel(){
+    const c = getConfig();
+    if (!isConfigured()) return 'Not configured';
+    if (isConnected()) return `Connected as ${c.connectedLogin}`;
+    return 'Ready to connect';
+  }
+
+  function authHeaders(){
+    const c = getConfig();
+    const token = (c.token || '').trim();
+    const h = {
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
+  }
+
+  async function testConnection(){
+    const c = getConfig();
+    if (!isConfigured()) throw new Error('Missing GitHub token / owner / repo');
+
+    const headers = authHeaders();
+
+    // 1) Validate token
+    const meResp = await fetch('https://api.github.com/user', { headers });
+    if (!meResp.ok) {
+      const t = await safeReadText(meResp);
+      throw new Error(`Auth failed (${meResp.status}): ${t || meResp.statusText}`);
+    }
+    const me = await meResp.json();
+    const login = me && me.login ? String(me.login) : '';
+
+    // 2) Validate access to target repo (metadata only)
+    const repoUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`;
+    const repoResp = await fetch(repoUrl, { headers });
+    if (!repoResp.ok) {
+      const t = await safeReadText(repoResp);
+      throw new Error(`Repo access failed (${repoResp.status}): ${t || repoResp.statusText}`);
+    }
+    const repo = await repoResp.json();
+    const full = repo && repo.full_name ? String(repo.full_name) : `${c.owner}/${c.repo}`;
+
+    setConfig({
+      connectedLogin: login,
+      connectedAt: new Date().toISOString(),
+      repoFullName: full
+    });
+    return { login, repo: full };
+  }
+
+  async function safeReadText(resp){
+    try { return await resp.text(); } catch { return ''; }
+  }
+
   return {
-    provider: (provider === 'onedrive') ? 'onedrive' : 'local',
-    mode: (mode === 'manual') ? 'manual' : 'auto'
+    getConfig,
+    setConfig,
+    isConfigured,
+    isConnected,
+    disconnect,
+    getStatusLabel,
+    testConnection
+  };
+})();
+
+function getSyncUiState(){
+  const providerRaw = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
+  const modeRaw = (localStorage.getItem(SYNC_UI_MODE_KEY) || 'manual').toLowerCase();
+  return {
+    provider: (providerRaw === 'github') ? 'github' : 'local',
+    mode: (modeRaw === 'auto') ? 'auto' : 'manual'
   };
 }
+
 function setSyncUiState(provider, mode){
   localStorage.setItem(SYNC_UI_PROVIDER_KEY, provider);
   localStorage.setItem(SYNC_UI_MODE_KEY, mode);
   applySyncUiState();
 }
+
 function applySyncUiState(){
   const s = getSyncUiState();
-
-  const providerBtn = document.getElementById('btnSyncProvider');
-  const modeGroup = document.getElementById('onlineModeGroup');
-  const modeBtn = document.getElementById('btnSyncOnlineMode');
-  const settingsBtn = document.getElementById('btnSyncSettings');
+  const btnProvider = document.getElementById('btnSyncProvider');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
+  const btnSettings = document.getElementById('btnSyncSettings');
   const subEl = document.getElementById('syncSubText');
 
-  if (providerBtn){
-    providerBtn.dataset.provider = s.provider;
-    const label = providerBtn.querySelector('.label');
+  if (btnProvider){
+    btnProvider.dataset.provider = s.provider;
+    const label = btnProvider.querySelector('.label');
     if (label) label.textContent = (s.provider === 'local') ? 'Offline' : 'Online';
   }
-
-  if (modeGroup){
-    modeGroup.style.display = (s.provider === 'onedrive') ? 'inline-flex' : 'none';
-  }
-
-  if (modeBtn){
-    modeBtn.dataset.mode = s.mode;
-    const label = modeBtn.querySelector('.label');
+  if (btnMode){
+    btnMode.style.display = (s.provider === 'github') ? '' : 'none';
+    btnMode.dataset.provider = 'github';
+    const label = btnMode.querySelector('.label');
     if (label) label.textContent = (s.mode === 'auto') ? 'Auto' : 'Manual';
   }
-
-  if (settingsBtn){
-    const cfg = OneDriveSync.getConfig();
-    const needsSetup = !(cfg && cfg.clientId && cfg.shareLink);
-    settingsBtn.classList.toggle('needsSetup', needsSetup);
+  if (btnSettings){
+    btnSettings.style.display = (s.provider === 'github') ? '' : 'none';
   }
 
   if (subEl){
-    if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
-    else subEl.textContent = (s.mode === 'auto')
-      ? 'Online · Auto (latest snapshot) — not implemented yet'
-      : 'Online · Manual (choose snapshot)';
+    if (s.provider === 'local') {
+      subEl.textContent = 'Local cache · Snapshot import/export';
+    } else {
+      const cfg = GitHubSync.getConfig();
+      const repo = (cfg.owner && cfg.repo) ? `${cfg.owner}/${cfg.repo}` : 'Repo not set';
+      subEl.textContent = `GitHub · ${GitHubSync.getStatusLabel()} · ${repo}`;
+    }
   }
 
-  document.title = (s.provider === 'local')
-    ? 'Prompt Builder'
-    : 'Prompt Builder · Online';
-
-  // Update main snapshot buttons (Import/Export) labels based on mode
-  const btnExp = document.getElementById('btnExportSnapshot');
-  const btnImp = document.getElementById('btnImportSnapshot');
-  const btnWip = document.getElementById('btnWipeImportSnapshot');
-  if (btnExp) btnExp.textContent = (s.provider === 'onedrive') ? 'Export Snapshot (Online)' : 'Export Snapshot (JSON)';
-  if (btnImp) btnImp.textContent = (s.provider === 'onedrive') ? 'Import Snapshot (Online)' : 'Import Snapshot (JSON)';
-  if (btnWip) btnWip.textContent = (s.provider === 'onedrive') ? 'Wipe & Import (Online)' : 'Wipe & Import Snapshot';
+  document.title = (s.provider === 'local') ? 'Prompt Builder' : 'Prompt Builder · GitHub';
 }
 
-function openSyncSettingsModal(){
-  const od = OneDriveSync.getConfig();
+function openSyncUiModal(opts = {}){
+  const onCancel = (opts && typeof opts.onCancel === 'function') ? opts.onCancel : null;
+  const cfg = GitHubSync.getConfig();
 
   const wrap = document.createElement('div');
   wrap.className = 'form';
-
   wrap.innerHTML = `
     <div class="row">
-      <label style="min-width:140px;">OneDrive App ID</label>
-      <input id="odClientId" placeholder="Application (client) ID" value="${escapeHtml(od.clientId || '')}">
-    </div>
-
-    <div class="row">
-      <label style="min-width:140px;">Shared folder link</label>
-      <input id="odShareLink" placeholder="Paste the OneDrive/SharePoint folder sharing link" value="${escapeHtml(od.shareLink || '')}">
-    </div>
-
-    <div class="row">
-      <label style="min-width:140px;">Uploader name</label>
-      <input id="odUploader" placeholder="e.g., Sylvia" value="${escapeHtml(od.uploader || '')}">
-    </div>
-
-    <div class="hint" style="margin-top:-6px;">
-      Used in uploaded filenames (no overwrites). Example: <span class="mono">MiVida_Snapshot_20260203_134500__Sylvia.json</span>
-    </div>
-
-    <div class="row">
-      <label style="min-width:140px;">Status</label>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <span class="pill" id="odAuthStatus">Not signed in</span>
-        <button class="btn mini" id="btnOdSignIn">Sign in</button>
-        <button class="btn mini ghost" id="btnOdSignOut">Sign out</button>
-        <button class="btn mini ghost" id="btnOdTest">Test folder access</button>
+      <label style="min-width:140px;">Private data repo</label>
+      <div style="flex:1; display:flex; gap:10px;">
+        <input id="ghOwner" type="text" placeholder="owner" value="${escapeHtml(cfg.owner || '')}" style="flex:1;" />
+        <input id="ghRepo" type="text" placeholder="repo" value="${escapeHtml(cfg.repo || '')}" style="flex:1;" />
       </div>
     </div>
-
-    <div class="hint">Tip: You only need to set these once. Use the ⚙ button any time to update them.</div>
+    <div class="row">
+      <label style="min-width:140px;">Branch</label>
+      <input id="ghBranch" type="text" placeholder="main" value="${escapeHtml(cfg.branch || 'main')}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:140px;">Folder</label>
+      <input id="ghFolder" type="text" placeholder="snapshots" value="${escapeHtml(cfg.folder || 'snapshots')}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:140px;">Uploader name</label>
+      <input id="ghUploader" type="text" placeholder="Your name" value="${escapeHtml(cfg.uploader || '')}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:140px;">GitHub token</label>
+      <input id="ghToken" type="password" placeholder="Fine-grained PAT (contents read/write)" value="${escapeHtml(cfg.token || '')}" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:140px;">Status</label>
+      <div style="flex:1;">
+        <div id="ghStatus" class="muted">${escapeHtml(GitHubSync.getStatusLabel())}</div>
+        <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <button class="btn mini" id="btnGhConnect">Connect</button>
+          <button class="btn mini" id="btnGhDisconnect">Disconnect</button>
+        </div>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:10px;">
+      Tokens are saved locally in your browser (localStorage). Use a fine-grained token limited to the private JSON repo.
+    </div>
   `;
 
-  const refreshStatus = () => {
-  const el = wrap.querySelector('#odAuthStatus');
-  if (!el) return;
-  const label = OneDriveSync.getStatusLabel ? OneDriveSync.getStatusLabel() : 'Not signed in';
-  el.textContent = label;
-  const ok = /^Signed in as/i.test(label);
-  el.style.background = ok ? 'rgba(28,155,74,.12)' : 'rgba(214,60,60,.10)';
-  el.style.borderColor = ok ? 'rgba(28,155,74,.25)' : 'rgba(214,60,60,.25)';
-};
+  const statusEl = wrap.querySelector('#ghStatus');
+  const readInputsToConfig = () => {
+    const owner = wrap.querySelector('#ghOwner')?.value || '';
+    const repo = wrap.querySelector('#ghRepo')?.value || '';
+    const branch = wrap.querySelector('#ghBranch')?.value || 'main';
+    const folder = wrap.querySelector('#ghFolder')?.value || 'snapshots';
+    const uploader = wrap.querySelector('#ghUploader')?.value || '';
+    const token = wrap.querySelector('#ghToken')?.value || '';
+    GitHubSync.setConfig({ owner, repo, branch, folder, uploader, token });
+  };
+  const refreshStatus = () => { if (statusEl) statusEl.textContent = GitHubSync.getStatusLabel(); };
 
-  wrap.querySelector('#btnOdSignIn')?.addEventListener('click', async () => {
+  const btnConnect = wrap.querySelector('#btnGhConnect');
+  if (btnConnect) btnConnect.addEventListener('click', async (e) => {
+    e.preventDefault();
     try {
-      await OneDriveSync.signIn();
+      readInputsToConfig();
+      await GitHubSync.testConnection();
       refreshStatus();
-      toast('Signed in');
-    } catch (err){
+      toast('GitHub connected');
+    } catch (err) {
       console.error(err);
-      alert('Sign-in failed\n\n' + (err && err.message ? err.message : err));
+      refreshStatus();
+      alert('GitHub connect failed\n\n' + (err && err.message ? err.message : err));
     }
   });
-  wrap.querySelector('#btnOdSignOut')?.addEventListener('click', async () => {
-    try {
-      await OneDriveSync.signOut();
-      refreshStatus();
-      toast('Signed out');
-    } catch (err){
-      console.error(err);
-      toast('Sign-out failed: ' + (err?.message || String(err)));
-    }
-  });
-  wrap.querySelector('#btnOdTest')?.addEventListener('click', async () => {
-    try {
-      await OneDriveSync.resolveSharedFolder();
-      toast('Folder access OK');
-    } catch (err){
-      console.error(err);
-      alert('Folder test failed\n\n' + (err && err.message ? err.message : err));
-    }
+  const btnDisc = wrap.querySelector('#btnGhDisconnect');
+  if (btnDisc) btnDisc.addEventListener('click', (e) => {
+    e.preventDefault();
+    GitHubSync.disconnect();
+    refreshStatus();
+    toast('Disconnected');
   });
 
-  openModal('Sync settings', wrap, [
-    btn('Cancel', { onClick: () => closeModal() }),
+  openModal('Sync Settings', wrap, [
+    btn('Cancel', { onClick: () => { closeModal(); if (onCancel) try { onCancel(); } catch {} } }),
     btn('Save', { primary: true, onClick: () => {
-      const clientId = wrap.querySelector('#odClientId')?.value || '';
-      const shareLink = wrap.querySelector('#odShareLink')?.value || '';
-      const uploader = wrap.querySelector('#odUploader')?.value || '';
-      OneDriveSync.setConfig({ clientId, shareLink, uploader });
+      readInputsToConfig();
+      refreshStatus();
       closeModal();
       toast('Saved');
-      applySyncUiState();
     }})
   ]);
-
-  refreshStatus();
 }
 
 function initSyncUi(){
   applySyncUiState();
 
-  const providerBtn = document.getElementById('btnSyncProvider');
-  if (providerBtn){
-    providerBtn.addEventListener('click', () => {
-      const s = getSyncUiState();
-      const nextProvider = (s.provider === 'local') ? 'onedrive' : 'local';
-      setSyncUiState(nextProvider, s.mode);
+  const btnProvider = document.getElementById('btnSyncProvider');
+  const btnMode = document.getElementById('btnSyncOnlineMode');
+  const btnSettings = document.getElementById('btnSyncSettings');
 
-      if (nextProvider === 'onedrive') {
-        const cfg = OneDriveSync.getConfig();
-        const needsSetup = !(cfg && cfg.clientId && cfg.shareLink);
-        if (needsSetup) toast('Online enabled. Click ⚙ to configure sync settings.');
+  if (btnProvider){
+    btnProvider.addEventListener('click', (e) => {
+      e.preventDefault();
+      const s = getSyncUiState();
+      if (s.provider === 'local') {
+        // switch to GitHub
+        setSyncUiState('github', s.mode);
+        if (!GitHubSync.isConfigured()) {
+          openSyncUiModal({ onCancel: () => setSyncUiState('local', s.mode) });
+          toast('Set GitHub credentials in Sync Settings');
+        }
+      } else {
+        // switch to local
+        setSyncUiState('local', s.mode);
       }
     });
   }
 
-  const modeBtn = document.getElementById('btnSyncOnlineMode');
-  if (modeBtn){
-    modeBtn.addEventListener('click', () => {
+  if (btnMode){
+    btnMode.addEventListener('click', (e) => {
+      e.preventDefault();
       const s = getSyncUiState();
-      if (s.provider !== 'onedrive') return;
-      const nextMode = (s.mode === 'auto') ? 'manual' : 'auto';
-      setSyncUiState(s.provider, nextMode);
-      if (nextMode === 'auto') toast('Online Auto is not implemented yet.');
+      const next = (s.mode === 'auto') ? 'manual' : 'auto';
+      setSyncUiState(s.provider, next);
     });
   }
 
-  const settingsBtn = document.getElementById('btnSyncSettings');
-  if (settingsBtn){
-    settingsBtn.addEventListener('click', (e) => {
+  if (btnSettings){
+    btnSettings.addEventListener('click', (e) => {
       e.preventDefault();
-      openSyncSettingsModal();
+      openSyncUiModal();
+    });
+  }
+
+  const hr = document.getElementById('btnHardRefresh');
+  if (hr){
+    hr.addEventListener('click', (e)=>{
+      e.preventDefault();
+      const url = new URL(window.location.href);
+      url.searchParams.set('v', Date.now().toString());
+      window.location.replace(url.toString());
     });
   }
 }
-
-
 
 /** ========= Init ========= */
 (async function init(){
