@@ -99,9 +99,6 @@
     .modeGroup{ display:flex; align-items:center; gap:8px; }
     .modeChip.iconOnly{ padding:6px 9px; }
     .modeChip.iconOnly .dot{ display:none; }
-    /* icon-only buttons should be compact and truly icon-only */
-    .modeChip.iconOnly{ width:34px; justify-content:center; padding:6px 0; }
-    .modeChip.iconOnly .icon{ font-size:14px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
     .modeChip{
       display:inline-flex;
       align-items:center;
@@ -127,49 +124,10 @@
       background: var(--muted);
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
-    .modeChip[data-provider="local"] .dot{ background: #94a3b8; }
-    .modeChip[data-provider="github"] .dot{ background: #22c55e; }
-    .modeChip[data-provider="github"]{ border-color: rgba(34,197,94,.55); }
-    .modeChip[data-provider="github"]:hover{ background: rgba(34,197,94,.08); }
+    .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
+    .modeChip[data-provider="github"] .dot{ background: #f59e0b; }
 
-    .syncInfoBadge{
-      display:none;
-      align-items:center;
-      gap:8px;
-      margin-left:8px;
-      padding:6px 10px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background: var(--panelB);
-      max-width: 560px;
-      white-space:nowrap;
-      flex-wrap:nowrap;
-    }
-    .syncInfoLabel{
-      font-size:11px;
-      line-height:1.2;
-      color: var(--muted);
-      white-space:nowrap;
-      opacity:.9;
-    }
-    .syncInfoValue{
-      font-size:11px;
-      line-height:1.2;
-      color: var(--text);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      max-width: 420px;
-    }
-    .syncEditedTag{
-      font-size:11px;
-      line-height:1.2;
-      color: var(--warn);
-      white-space:nowrap;
-      opacity:.95;
-    }
-
-.title .sub{ color:var(--muted); font-size:13px; }
+    .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
       display:flex; gap:10px; background: var(--panelA);
       border:1px solid var(--border); border-radius: 999px; padding:6px; box-shadow: var(--shadow);
@@ -709,51 +667,9 @@
       cursor: grab;
       user-select: none;
     }
-
-    /* Category manager */
-    .catItem{ align-items:center; }
-    .catTitle{
-      font-weight:700;
-      font-size:13px;
-      flex:1;
-      min-width: 160px;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .catMeta{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .catMeta label{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      font-size:12px;
-      color: var(--muted);
-      user-select:none;
-    }
-    .catMeta input[type="checkbox"]{ transform: translateY(1px); }
-    .catRowUnc{ opacity:.85; }
     .dragHandle:active{ cursor: grabbing; }
     .item.sortable.dragging{ opacity: .55; }
     
-
-    /* Category groups (Setup list) */
-    .catGroup{ border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,0.03); overflow:hidden; }
-    body.light .catGroup{ background: rgba(0,0,0,0.02); }
-    .catGroup + .catGroup{ margin-top:12px; }
-    .catGroupHeader{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; cursor:pointer; user-select:none; }
-    .catGroupTitleWrap{ display:flex; align-items:center; gap:10px; min-width:0; }
-    .catGroupChevron{ font-size:13px; opacity:.75; flex:0 0 auto; }
-    .catGroupTitle{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .catGroupMeta{ font-size:12px; opacity:.7; flex:0 0 auto; }
-    .catGroupItems{ padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px; }
-    .catGroup.isCollapsed .catGroupItems{ display:none; }
-    .catGroupEmpty{ opacity:.65; font-size:12px; padding:6px 0 0; }
-
 </style>
 </head>
 
@@ -773,16 +689,9 @@
               <span class="dot" aria-hidden="true"></span>
               <span class="label">Manual</span>
             </button>
-            
             <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
-              <span class="icon" aria-hidden="true">⚙</span>
+              <span class="label">⚙</span>
             </button>
-
-            <div class="syncInfoBadge" id="syncInfoBadge" title="">
-              <span class="syncInfoLabel">JSON</span>
-              <span class="syncInfoValue" id="syncVersionValue">—</span>
-              <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
-            </div>
           </div>
         </div>
         <div class="sub" id="syncSubText">Offline · Local cache</div>
@@ -802,10 +711,15 @@
         <button class="btn mini danger" id="btnWipeImportSnapshot" title="Delete all local data and replace it with the selected JSON snapshot">Wipe Local and Import JSON</button>
       </div>
 
-      <div class="chip" style="margin-left:auto;">
+      <div class="chip">
         <label>Theme</label>
+        <button class="btn mini" id="btnToggleTheme">Light mode</button>
+      </div>
+
+      <div class="chip" style="margin-left:auto;">
+        <label>About</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <button class="btn mini" id="btnToggleTheme">Light mode</button>
+          <span class="pill" id="appVersionPill" title="App version">v38</span>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -817,11 +731,8 @@
       <div class="grid">
         <section class="card">
           <h2>
-            <span>Prompts</span>
-            <div class="row" style="justify-content:flex-end; gap:8px;">
-              <button class="btn mini" id="btnManageCatsPrompts" title="Manage categories">🗂</button>
-              <button class="btn primary" id="btnAddPrompt">Add</button>
-            </div>
+            <span>Prompts <span class="pill">Global</span></span>
+            <button class="btn primary" id="btnAddPrompt">Add</button>
           </h2>
           <div class="muted">Reusable prompt blocks (Markdown). Shared across all users.</div>
           <div class="divider"></div>
@@ -832,10 +743,7 @@
         <section class="card">
           <h2>
             <span>Personal Info</span>
-            <div class="row" style="justify-content:flex-end; gap:8px;">
-              <button class="btn mini" id="btnManageCatsPersonal" title="Manage categories">🗂</button>
-              <button class="btn primary" id="btnAddPersonal">Add Item</button>
-            </div>
+            <button class="btn primary" id="btnAddPersonal">Add Item</button>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -858,10 +766,7 @@
         <section class="card">
           <h2>
             <span>Career Info</span>
-            <div class="row" style="justify-content:flex-end; gap:8px;">
-              <button class="btn mini" id="btnManageCatsCareer" title="Manage categories">🗂</button>
-              <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
-            </div>
+            <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -881,11 +786,8 @@
 
         <section class="card">
           <h2>
-            <span>Connection</span>
-            <div class="row" style="justify-content:flex-end; gap:8px;">
-              <button class="btn mini" id="btnManageCatsConnections" title="Manage categories">🗂</button>
-              <button class="btn primary" id="btnAddConnection">Add</button>
-            </div>
+            <span>Connection <span class="pill">Global</span></span>
+            <button class="btn primary" id="btnAddConnection">Add</button>
           </h2>
           <div class="muted">
             Global connections. Each connection can select items from Prompt, Personal Info, and Career Info.
@@ -954,18 +856,6 @@
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
-const fmtLocalShort = (iso) => {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch {
-    return String(iso);
-  }
-};
-
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
   const s = String(v ?? "");
@@ -1368,7 +1258,7 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 4;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -1619,31 +1509,6 @@ function openDB() {
         } catch (err) { /* best effort */ }
       }
 
-      // v4: Setup Categories (per Setup section) + order + default collapse
-      if (oldVersion < 4) {
-        try {
-          if (!db.objectStoreNames.contains('setupCategories')) {
-            const sc = db.createObjectStore('setupCategories', { keyPath: 'id' });
-            sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
-            sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
-          }
-        } catch (err) { /* best effort */ }
-      } else {
-        // Safety: ensure store/indexes exist
-        try {
-          if (!db.objectStoreNames.contains('setupCategories')) {
-            const sc = db.createObjectStore('setupCategories', { keyPath: 'id' });
-            sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
-            sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
-          } else {
-            const sc = tx.objectStore('setupCategories');
-            if (!sc.indexNames.contains('by_sectionKey')) sc.createIndex('by_sectionKey', 'sectionKey', { unique: false });
-            if (!sc.indexNames.contains('by_sectionKey_order')) sc.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
-          }
-        } catch (err) { /* best effort */ }
-      }
-
-
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -1658,10 +1523,7 @@ async function withStore(storeName, mode, fn) {
     const tx = db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
     const res = fn(store, tx);
-    tx.oncomplete = () => {
-      try { if (mode === 'readwrite') markLocalModified(); } catch {}
-      resolve(res);
-    };
+    tx.oncomplete = () => resolve(res);
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
@@ -1889,10 +1751,6 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     if (overlay) overlay.classList.add('fullscreen');
     if (modalBox) modalBox.classList.add('fullscreen');
   }
-  // Remember what kind of modal this is (used for import context cleanup)
-  if (overlay) {
-    try { overlay.dataset.kind = (opts && opts.kind) ? String(opts.kind) : ''; } catch {}
-  }
 
   $('#modalTitle').textContent = title;
 
@@ -1918,9 +1776,6 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
-  const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
-  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
-  if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
   if (overlay) {
@@ -2101,437 +1956,6 @@ async function ensureSeed() {
   }
 }
 
-
-/** ========= Setup Categories ========= */
-const SETUP_SECTIONS = [
-  { key: 'promptItems', label: 'Prompts' },
-  { key: 'personalTemplates', label: 'Personal Info' },
-  { key: 'careerTemplates', label: 'Career Info' },
-  { key: 'connections', label: 'Connection' }
-];
-
-async function getSetupCategories(sectionKey){
-  // Prefer index for efficiency, but fall back safely.
-  try {
-    const rows = await getByIndex('setupCategories', 'by_sectionKey', sectionKey);
-    return (rows || []).sort((a,b) => (a.order||0) - (b.order||0));
-  } catch {
-    const all = await safeGetAll('setupCategories');
-    return (all || []).filter(x => x.sectionKey === sectionKey).sort((a,b) => (a.order||0) - (b.order||0));
-  }
-}
-
-function renderCategoryGroups({ listEl, hintEl, sectionKey, categories, items, sortKey, emptyHintText, makeRow }) {
-  const catsAll = Array.isArray(categories) ? categories : [];
-  const cats = catsAll.filter(c => String(c.sectionKey || '') === String(sectionKey || ''))
-    .sort((a, b) => {
-      const ao = (typeof a.order === 'number') ? a.order : 0;
-      const bo = (typeof b.order === 'number') ? b.order : 0;
-      if (ao !== bo) return ao - bo;
-      return String(a.title || '').localeCompare(String(b.title || ''));
-    });
-
-  const itemsArr = Array.isArray(items) ? items : [];
-  const hasAny = (itemsArr.length > 0) || (cats.length > 0);
-
-  if (hintEl) hintEl.style.display = hasAny ? 'none' : 'block';
-  if (!hasAny) return;
-
-  const catIds = new Set(cats.map(c => String(c.id)));
-  const byCat = new Map();
-
-  for (const it of itemsArr) {
-    const raw = String(it?.categoryId || '');
-    const key = catIds.has(raw) ? raw : '';
-    if (!byCat.has(key)) byCat.set(key, []);
-    byCat.get(key).push(it);
-  }
-
-  const groups = [
-    { id: '', title: 'Uncategorized', isCollapsed: false, order: -1, __virtual: true },
-    ...cats
-  ];
-
-  groups.forEach(cat => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'catGroup' + (cat.isCollapsed ? ' isCollapsed' : '');
-    groupEl.dataset.catId = String(cat.id || '');
-
-    const header = document.createElement('div');
-    header.className = 'catGroupHeader';
-
-    const titleWrap = document.createElement('div');
-    titleWrap.className = 'catGroupTitleWrap';
-
-    const chev = document.createElement('span');
-    chev.className = 'catGroupChevron';
-    chev.textContent = groupEl.classList.contains('isCollapsed') ? '▸' : '▾';
-
-    const title = document.createElement('div');
-    title.className = 'catGroupTitle';
-    title.textContent = cat.title || '(Untitled)';
-
-    titleWrap.appendChild(chev);
-    titleWrap.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'catGroupMeta';
-
-    const groupItems = byCat.get(String(cat.id || '')) || [];
-    meta.textContent = String(groupItems.length);
-
-    header.appendChild(titleWrap);
-    header.appendChild(meta);
-
-    // Toggle is UI-only: does not persist or change isCollapsed in the category record.
-    header.onclick = () => {
-      const collapsed = groupEl.classList.toggle('isCollapsed');
-      chev.textContent = collapsed ? '▸' : '▾';
-    };
-
-    const itemsEl = document.createElement('div');
-    itemsEl.className = 'catGroupItems';
-
-    const ordered = groupItems.slice().sort((a, b) => {
-      const ao = (typeof a.sortOrder === 'number') ? a.sortOrder : 0;
-      const bo = (typeof b.sortOrder === 'number') ? b.sortOrder : 0;
-      if (ao !== bo) return ao - bo;
-      return String(a.title || a.name || '').localeCompare(String(b.title || b.name || ''));
-    });
-
-    if (!ordered.length) {
-      const empty = document.createElement('div');
-      empty.className = 'catGroupEmpty';
-      empty.textContent = emptyHintText || 'No items.';
-      itemsEl.appendChild(empty);
-    } else {
-      ordered.forEach(it => itemsEl.appendChild(makeRow(it)));
-    }
-
-    groupEl.appendChild(header);
-    groupEl.appendChild(itemsEl);
-    listEl.appendChild(groupEl);
-  });
-}
-
-
-
-async function upsertSetupCategory(cat){
-  const now = nowISO();
-  const row = {
-    id: cat.id || uid(),
-    sectionKey: cat.sectionKey,
-    title: (cat.title || '').trim() || 'Untitled',
-    order: Number.isFinite(cat.order) ? cat.order : 1000,
-    isCollapsed: !!cat.isCollapsed,
-    createdAt: cat.createdAt || now,
-    updatedAt: now
-  };
-  await putOne('setupCategories', row);
-  return row;
-}
-
-async function deleteSetupCategory(sectionKey, catId){
-  // Delete category row
-  await deleteOne('setupCategories', catId);
-
-  // Move any items in that category to Uncategorized (best effort)
-  await clearCategoryFromItems(sectionKey, catId);
-
-  // Re-normalize category order (keep gaps small)
-  const cats = await getSetupCategories(sectionKey);
-  const tx = await openDB();
-  if (!tx.objectStoreNames.contains('setupCategories')) return;
-  const now = nowISO();
-  const txx = tx.transaction('setupCategories','readwrite');
-  const store = txx.objectStore('setupCategories');
-  cats.forEach((c, i) => {
-    store.put({ ...c, order: (i+1)*1000, updatedAt: now });
-  });
-  await txComplete(txx);
-}
-
-async function clearCategoryFromItems(sectionKey, catId){
-  const storeName = sectionKey; // sectionKey matches store name for the 4 Setup sections
-  const db = await openDB();
-  if (!db.objectStoreNames.contains(storeName)) return;
-  const items = await safeGetAll(storeName);
-  const now = nowISO();
-  const changed = (items || []).filter(x => String(x.categoryId || '') === String(catId));
-  if (!changed.length) return;
-
-  const tx = db.transaction(storeName, 'readwrite');
-  const st = tx.objectStore(storeName);
-  changed.forEach(x => {
-    st.put({ ...x, categoryId: '', updatedAt: now });
-  });
-  await txComplete(tx);
-}
-
-/** Category list drag reorder (persists category.order) */
-let catDragCtx = null;
-function makeCategoryRowSortable(rowEl){
-  if (!rowEl) return;
-  if (rowEl.querySelector('.dragHandle')) return;
-  const handle = document.createElement('div');
-  handle.className = 'dragHandle';
-  handle.textContent = '⋮⋮';
-  handle.title = 'Drag to reorder';
-  rowEl.insertBefore(handle, rowEl.firstChild);
-
-  rowEl.draggable = true;
-  rowEl.classList.add('sortable');
-
-  rowEl.addEventListener('dragstart', (e) => {
-    catDragCtx = { el: rowEl };
-    rowEl.classList.add('dragging');
-    try { e.dataTransfer.effectAllowed = 'move'; } catch {}
-  });
-  rowEl.addEventListener('dragend', () => {
-    rowEl.classList.remove('dragging');
-    catDragCtx = null;
-  });
-
-  // Ensure dragging starts only from handle
-  handle.addEventListener('pointerdown', (e) => {
-    // no-op; presence of handle is the UX cue
-  });
-}
-
-function initSortableCategoryList(listEl, sectionKey, onAfterReorder){
-  if (!listEl) return;
-  listEl.addEventListener('dragover', (e) => {
-    if (!catDragCtx) return;
-    e.preventDefault();
-    const dragging = catDragCtx.el;
-    if (!dragging) return;
-
-    const afterEl = getDragAfterElement(listEl, e.clientY);
-    if (afterEl == null) {
-      listEl.appendChild(dragging);
-    } else if (afterEl !== dragging) {
-      listEl.insertBefore(dragging, afterEl);
-    }
-  });
-
-  listEl.addEventListener('drop', async (e) => {
-    if (!catDragCtx) return;
-    e.preventDefault();
-    await finalizeCategorySort(listEl, sectionKey);
-    if (typeof onAfterReorder === 'function') onAfterReorder();
-  });
-}
-
-async function finalizeCategorySort(listEl, sectionKey){
-  const ids = [...listEl.querySelectorAll('.catItem.sortable[data-cat-id]')]
-    .map(el => el.getAttribute('data-cat-id'))
-    .filter(Boolean);
-
-  if (!ids.length) return;
-
-  const db = await openDB();
-  if (!db.objectStoreNames.contains('setupCategories')) return;
-
-  const cats = await getSetupCategories(sectionKey);
-  const byId = new Map(cats.map(c => [c.id, c]));
-  const now = nowISO();
-  const tx = db.transaction('setupCategories', 'readwrite');
-  const st = tx.objectStore('setupCategories');
-
-  ids.forEach((id, i) => {
-    const c = byId.get(id);
-    if (!c) return;
-    st.put({ ...c, order: (i+1)*1000, updatedAt: now });
-  });
-  await txComplete(tx);
-}
-
-/** Category manager modal */
-async function openCategoryManager(sectionKey){
-  const section = SETUP_SECTIONS.find(s => s.key === sectionKey);
-  const label = section ? section.label : 'Categories';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'modalBody';
-
-  const headerRow = document.createElement('div');
-  headerRow.className = 'row';
-  headerRow.style.justifyContent = 'space-between';
-  headerRow.style.alignItems = 'center';
-
-  const hint = document.createElement('div');
-  hint.className = 'muted';
-  hint.textContent = 'Reorder categories, set default collapse, rename, or delete. Uncategorized is always available.';
-  hint.style.flex = '1';
-
-  const btnAdd = document.createElement('button');
-  btnAdd.className = 'btn mini primary';
-  btnAdd.textContent = 'Add Category';
-
-  headerRow.appendChild(hint);
-  headerRow.appendChild(btnAdd);
-  wrap.appendChild(headerRow);
-
-  wrap.appendChild(document.createElement('div')).className = 'divider';
-
-  const list = document.createElement('div');
-  list.className = 'list';
-  wrap.appendChild(list);
-
-  // Enable drag reorder for the category rows in this modal.
-  initSortableCategoryList(list, sectionKey);
-
-  const rerender = async () => {
-    const cats = await getSetupCategories(sectionKey);
-    list.innerHTML = '';
-
-    // Uncategorized (non-editable)
-    const unc = document.createElement('div');
-    unc.className = 'item catItem catRowUnc';
-    const uncMeta = document.createElement('div');
-    uncMeta.className = 'meta';
-    uncMeta.innerHTML = `<div class="name">Uncategorized</div><div class="small">Items with no category.</div>`;
-    const uncActions = document.createElement('div');
-    uncActions.className = 'actions';
-    uncActions.innerHTML = `<span class="pill">Default</span>`;
-    unc.appendChild(uncMeta);
-    unc.appendChild(uncActions);
-    list.appendChild(unc);
-
-    cats.forEach(cat => {
-      const row = document.createElement('div');
-      row.className = 'item catItem';
-      row.setAttribute('data-cat-id', cat.id);
-
-      const titleWrap = document.createElement('div');
-      titleWrap.className = 'catTitle';
-      titleWrap.title = cat.title || '';
-      titleWrap.textContent = cat.title || 'Untitled';
-
-      const meta = document.createElement('div');
-      meta.className = 'catMeta';
-
-      const collapseLabel = document.createElement('label');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = !!cat.isCollapsed;
-      cb.addEventListener('change', async () => {
-        await upsertSetupCategory({ ...cat, isCollapsed: cb.checked });
-      });
-      const span = document.createElement('span');
-      span.textContent = 'Default collapsed';
-      collapseLabel.appendChild(cb);
-      collapseLabel.appendChild(span);
-
-      meta.appendChild(collapseLabel);
-
-      const actions = document.createElement('div');
-      actions.className = 'actions';
-
-      const btnRename = document.createElement('button');
-      btnRename.className = 'btn mini';
-      btnRename.textContent = 'Rename';
-
-      const btnDelete = document.createElement('button');
-      btnDelete.className = 'btn mini danger';
-      btnDelete.textContent = 'Delete';
-
-      const startInlineRename = () => {
-        const input = document.createElement('input');
-        input.value = cat.title || '';
-        input.style.flex = '1';
-        input.style.minWidth = '180px';
-
-        // replace title
-        row.replaceChild(input, titleWrap);
-
-        actions.innerHTML = '';
-        const bSave = document.createElement('button');
-        bSave.className = 'btn mini primary';
-        bSave.textContent = 'Save';
-        const bCancel = document.createElement('button');
-        bCancel.className = 'btn mini';
-        bCancel.textContent = 'Cancel';
-
-        const finish = async (save) => {
-          if (save) {
-            const v = (input.value || '').trim();
-            if (!v) { toast('Title cannot be empty'); return; }
-            await upsertSetupCategory({ ...cat, title: v });
-          }
-          await rerender();
-        };
-
-        bSave.addEventListener('click', () => finish(true));
-        bCancel.addEventListener('click', () => finish(false));
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') finish(true);
-          if (e.key === 'Escape') finish(false);
-        });
-
-        actions.appendChild(bCancel);
-        actions.appendChild(bSave);
-
-        // focus
-        setTimeout(() => {
-          input.focus();
-          input.select();
-        }, 0);
-      };
-
-      btnRename.addEventListener('click', (e) => {
-        e.preventDefault();
-        startInlineRename();
-      });
-
-      btnDelete.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const ok = confirm(`Delete category "${cat.title || 'Untitled'}"?\n\nItems in this category will become Uncategorized.`);
-        if (!ok) return;
-        await deleteSetupCategory(sectionKey, cat.id);
-        await rerender();
-      });
-
-      actions.appendChild(btnRename);
-      actions.appendChild(btnDelete);
-
-      row.appendChild(titleWrap);
-      row.appendChild(meta);
-      row.appendChild(actions);
-
-      makeCategoryRowSortable(row);
-      list.appendChild(row);
-    });
-  };
-
-  btnAdd.addEventListener('click', async () => {
-    const cats = await getSetupCategories(sectionKey);
-    const maxOrder = (cats || []).reduce((m,c)=>Math.max(m, c.order || 0), 0);
-    const now = nowISO();
-    const cat = await upsertSetupCategory({
-      id: uid(),
-      sectionKey,
-      title: 'New Category',
-      order: maxOrder + 1000,
-      isCollapsed: false,
-      createdAt: now
-    });
-    await rerender();
-
-    // Auto-enter rename for the new row
-    const row = list.querySelector(`.catItem[data-cat-id="${cat.id}"]`);
-    if (row) {
-      const renameBtn = row.querySelector('.actions .btn');
-      if (renameBtn) renameBtn.click();
-    }
-  });
-
-  await rerender();
-
-  openModal(`Manage Categories · ${label}`, wrap, [
-    btn('Close', { onClick: () => closeModal() })
-  ]);
-}
 /** ========= Users ========= */
 async function loadUsersIntoSelect() {
   const users = await getAll('users');
@@ -2652,7 +2076,7 @@ async function addCareerFlow() {
   await loadCareerFilterSelect();
   await setCurrentCareer(row.id);
 
-  await renderPersonalCareerPick(); // so user career dropdown includes the new career
+  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick(); // so user career dropdown includes the new career
 }
 
 async function renameCareerFlow() {
@@ -2684,7 +2108,7 @@ async function deleteCareerFlow() {
   careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
   const next = careers[0]?.id || '';
   await setCurrentCareer(next);
-  await renderPersonalCareerPick();
+  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
 }
 
 /** ========= Career (Edit only) ========= */
@@ -2956,99 +2380,50 @@ function openEditItemModal({ title, initial, onSave, onDelete, previewLabel='Pre
 /** ========= Prompts ========= */
 async function renderPrompts() {
   const list = $('#listPrompts');
-  const hint = $('#hintPrompts');
+  initSortableList(list, 'promptItems');
   list.innerHTML = '';
 
-  const itemsRaw = await getAll('promptItems');
-  const items = Array.isArray(itemsRaw) ? itemsRaw : [];
-  const cats = await getSetupCategories('promptItems');
-
-  renderCategoryGroups({
-    listEl: list,
-    hintEl: hint,
-    sectionKey: 'promptItems',
-    categories: cats,
+  let items = await getAll('promptItems');
+  items = applyUiOrder(
     items,
-    sortKey: 'promptItems',
-    emptyHintText: 'No prompt items in this category.',
-    makeRow: (it) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.id = it.id;
+    'promptItems',
+    (x) => x.id,
+    (a,b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
 
-      const left = document.createElement('div');
-      left.className = 'row-left';
+  $('#hintPrompts').style.display = items.length ? 'none' : 'block';
 
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = it.title || '(Untitled)';
-
-      const subtitle = document.createElement('div');
-      subtitle.className = 'muted';
-      const updated = it.updatedAt || it.createdAt || '';
-      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
-
-      const small = document.createElement('div');
-      small.className = 'small';
-      const preview = String(it.content || '').replace(/\s+/g, ' ').trim();
-      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
-
-      left.appendChild(title);
-      if (subtitle.textContent) left.appendChild(subtitle);
-      left.appendChild(small);
-
-      const right = document.createElement('div');
-      right.className = 'row-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn small';
-      editBtn.textContent = 'Edit';
-      editBtn.onclick = () => openEditItemModal({
+  items.forEach(it => {
+    const actions = [
+      btn('Edit', { mini:true, onClick: () => openEditItemModal({
         title: 'Edit · Prompt Item',
         initial: it,
         onSave: savePromptItem,
         onDelete: deletePromptItem
-      });
-
-      right.appendChild(editBtn);
-
-      row.appendChild(left);
-      row.appendChild(right);
-      return row;
-    }
+      })})
+    ];
+    const row = makeItemRow({
+      title: it.title,
+      subtitle: `Updated: ${formatLocal(it.updatedAt || it.createdAt)}`
+    }, actions);
+    makeRowSortable(row, { sortKey:'promptItems', id: it.id });
+    list.appendChild(row);
   });
 }
-
 async function savePromptItem(payload) {
   const t = nowISO();
   if (!payload.id) {
-    const row = {
-      id: uid(),
-      title: payload.title || '',
-      content: payload.content || '',
-      categoryId: (typeof payload.categoryId === 'string') ? payload.categoryId : '',
-      sortOrder: (typeof payload.sortOrder === 'number') ? payload.sortOrder : Date.now(),
-      createdAt: t,
-      updatedAt: t
-    };
+    const row = { id: uid(), title: payload.title || '', content: payload.content || '', createdAt: t, updatedAt: t };
     await addOne('promptItems', row);
     await logChange({ entityType: 'promptItem', entityId: row.id, action: 'create', after: row });
   } else {
     const before = await getOne('promptItems', payload.id);
-    const after = {
-      ...before,
-      title: payload.title || '',
-      content: payload.content || '',
-      categoryId: (typeof payload.categoryId === 'string') ? payload.categoryId : (before?.categoryId || ''),
-      sortOrder: (typeof payload.sortOrder === 'number') ? payload.sortOrder : (typeof before?.sortOrder === 'number' ? before.sortOrder : Date.now()),
-      updatedAt: t
-    };
+    const after = { ...before, title: payload.title || '', content: payload.content || '', updatedAt: t };
     await putOne('promptItems', after);
     await logChange({ entityType: 'promptItem', entityId: after.id, action: 'update', after, before });
   }
   await refreshAll();
 }
-
 async function deletePromptItem(it) {
   const before = await getOne('promptItems', it.id);
   await deleteOne('promptItems', it.id);
@@ -3061,271 +2436,315 @@ async function deletePromptItem(it) {
 async function renderPersonal() {
   const userId = state.currentUserId;
   const list = $('#listPersonal');
-  const hint = $('#hintPersonal');
+  initSortableList(list, 'personalTemplates');
   list.innerHTML = '';
-
-  const addBtn = $('#btnAddPersonal');
   if (!userId) {
-    if (addBtn) addBtn.disabled = true;
-    if (hint) {
-      hint.style.display = 'block';
-      hint.textContent = 'Select a user to edit personal info items.';
-    }
+    $('#hintPersonal').style.display = 'block';
     return;
   }
 
-  if (addBtn) addBtn.disabled = false;
-
-  let [templatesRaw, contents, conns] = await Promise.all([
+  let [templates, contents, conns] = await Promise.all([
     getAll('personalTemplates'),
     getByIndex('personalContent', 'by_userId', userId),
     getAll('connections')
   ]);
 
-  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
+  templates = applyUiOrder(templates, 'personalTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+  conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+  const assignments = await getOutputAssignments();
   const cMap = new Map((contents || []).map(c => [c.templateId, c]));
+  $('#hintPersonal').style.display = templates.length ? 'none' : 'block';
 
-  conns = Array.isArray(conns) ? conns : [];
-  const connById = new Map(conns.map(c => [c.id, c]));
+  templates.forEach(tpl => {
+    const c = cMap.get(tpl.id);
+    const content = c?.content || '';
+    const isEmpty = !String(content).trim();
+    const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
 
-  const outputConnTitleFor = (tpl) => {
-    const ocid = String(tpl?.outputConnectionId || '');
-    if (!ocid) return '';
-    const conn = connById.get(ocid);
-    return (conn && conn.title) ? String(conn.title) : (tpl.outputConnectionTitle ? String(tpl.outputConnectionTitle) : '');
-  };
-
-  const cats = await getSetupCategories('personalTemplates');
-
-  renderCategoryGroups({
-    listEl: list,
-    hintEl: hint,
-    sectionKey: 'personalTemplates',
-    categories: cats,
-    items: templates,
-    sortKey: 'personalTemplates',
-    emptyHintText: 'No items in this category.',
-    makeRow: (tpl) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.id = tpl.id;
-
-      const left = document.createElement('div');
-      left.className = 'row-left';
-
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = tpl.title || '(Untitled)';
-
-      const pills = document.createElement('div');
-      pills.style.display = 'flex';
-      pills.style.flexWrap = 'wrap';
-      pills.style.gap = '6px';
-      pills.style.marginTop = '6px';
-
-      if (tpl.isOutput !== false) {
-        const p = document.createElement('span');
-        p.className = 'pill';
-        p.textContent = 'Output';
-        pills.appendChild(p);
-
-        const ct = outputConnTitleFor(tpl);
-        if (ct) {
-          const p2 = document.createElement('span');
-          p2.className = 'pill';
-          p2.textContent = `For: ${ct}`;
-          pills.appendChild(p2);
-        }
-      }
-
-      const subtitle = document.createElement('div');
-      subtitle.className = 'muted';
-
-      const c = cMap.get(tpl.id);
-      const updated = (c?.updatedAt || tpl.updatedAt || tpl.createdAt || '');
-      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
-
-      const small = document.createElement('div');
-      small.className = 'small';
-      const preview = (c?.content || '').replace(/\s+/g, ' ').trim();
-      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
-
-      left.appendChild(title);
-      if (pills.childNodes.length) left.appendChild(pills);
-      if (subtitle.textContent) left.appendChild(subtitle);
-      left.appendChild(small);
-
-      const right = document.createElement('div');
-      right.className = 'row-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn small';
-      editBtn.textContent = 'Edit';
-      editBtn.onclick = () => openEditItemModal({
+    const actions = [
+      btn('Edit', { mini:true, onClick: () => openEditItemModal({
         title: 'Edit · Personal Info Item',
-        initial: {
-          templateId: tpl.id,
-          title: tpl.title || '',
-          content: c?.content || '',
-          isOutput: (tpl.isOutput !== false),
-          outputConnectionId: (tpl.outputConnectionId || '')
-        },
-        outputMeta: { connections: conns },
+        initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
+        outputMeta: { connections: conns, assignments },
         onSave: savePersonalTemplateAndContent,
         onDelete: deletePersonalTemplate
-      });
+      })})
+    ];
 
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn small danger';
-      delBtn.textContent = 'Delete';
-      delBtn.onclick = async () => {
-        if (!confirm('Delete this personal info title and all user contents using it?')) return;
-        await deletePersonalTemplate({ templateId: tpl.id });
-      };
-
-      right.appendChild(editBtn);
-      right.appendChild(delBtn);
-
-      row.appendChild(left);
-      row.appendChild(right);
-      return row;
-    }
+    const pills = [
+      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : [])
+    ];
+    const row = makeItemRow({
+      title: tpl.title,
+      subtitle: isEmpty ? 'Content: (empty for this user)' : `Updated: ${formatLocal(updated)}`,
+      pills
+    }, actions);
+    makeRowSortable(row, { sortKey:'personalTemplates', id: tpl.id });
+    list.appendChild(row);
   });
+}
+
+async function savePersonalTemplateAndContent(payload) {
+  const userId = state.currentUserId;
+  if (!userId) { alert('Select a user first.'); return; }
+
+  const t = nowISO();
+
+  // Enforce: one output item per connection (across Personal + Career items).
+  if (payload.isOutput && (payload.outputConnectionId || '')) {
+    const currentKey = (payload.templateId || payload.id || '');
+    const connId = (payload.outputConnectionId || '');
+    const check = await enforceSingleOutputPerConnection({ currentKey, connId });
+    if (!check.ok && check.conflict) {
+      const msg =
+        `This connection is already used as the output for “${check.conflict.title}”.\n\n` +
+        `If you continue, the previous item’s output link will be cleared, and this item will become the output for “${check.connTitle}”.\n\n` +
+        `Do you want to continue?`;
+      const ok = confirm(msg);
+      if (!ok) return false;
+
+      // Clear the previous item's output relationship
+      await clearOutputLink(check.conflict.row, check.conflict.store);
+    }
+  }
+
+  const templateId = payload.templateId || payload.id || uid();
+
+  const beforeTpl = await getOne('personalTemplates', templateId);
+  const beforeContent = await getOne('personalContent', [userId, templateId]);
+
+  const tpl = {
+    id: templateId,
+    title: (payload.title || '').trim(),
+    isOutput: (payload.isOutput !== undefined ? payload.isOutput : (beforeTpl?.isOutput ?? true)),
+    outputConnectionId: (payload.outputConnectionId !== undefined ? (payload.outputConnectionId || '') : (beforeTpl?.outputConnectionId || '')),
+    outputMode: (beforeTpl?.outputMode || 'section'),
+    createdAt: beforeTpl?.createdAt || payload.createdAt || t,
+    updatedAt: t
+  };
+  await putOne('personalTemplates', tpl);
+
+  const contentRow = {
+    userId,
+    templateId,
+    content: payload.content || '',
+    createdAt: beforeContent?.createdAt || payload.createdAt || t,
+    updatedAt: t
+  };
+  await putOne('personalContent', contentRow);
+
+  await logChange({
+    entityType: 'personalTemplate',
+    entityId: templateId,
+    action: beforeTpl ? 'update' : 'create',
+    after: tpl,
+    before: beforeTpl || null
+  });
+  await logChange({
+    entityType: 'personalContent',
+    entityId: `${userId}:${templateId}`,
+    action: beforeContent ? 'update' : 'create',
+    after: contentRow,
+    before: beforeContent || null
+  });
+
+  await renderPersonal();
+  await renderPromptPage();
+}
+
+async function deletePersonalTemplate(payload) {
+  const templateId = payload.templateId || payload.id;
+  if (!templateId) return;
+
+  const before = await getOne('personalTemplates', templateId);
+  await deleteOne('personalTemplates', templateId);
+
+  const all = await getByIndex('personalContent', 'by_templateId', templateId);
+  for (const r of all) {
+    await deleteOne('personalContent', [r.userId, r.templateId]);
+  }
+
+  await logChange({
+    entityType: 'personalTemplate',
+    entityId: templateId,
+    action: 'delete',
+    after: null,
+    before: before || null
+  });
+
+  await renderPersonal();
+  await renderPromptPage();
+}
+
+async function renderPersonalCareerPick() {
+  const userId = state.currentUserId;
+  const row = $('#personalCareerPickRow');
+  const sel = $('#personalCareerPick');
+  row.style.display = userId ? 'flex' : 'none';
+  if (!userId) return;
+
+  const careers = await getAll('careers');
+  careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+
+  const uc = await getOne('userCareer', userId);
+
+  sel.innerHTML = '';
+  const opt0 = document.createElement('option');
+  opt0.value = '';
+  opt0.textContent = '(No career selected)';
+  sel.appendChild(opt0);
+
+  careers.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.title || '(Career)';
+    sel.appendChild(opt);
+  });
+
+  sel.value = uc?.careerId || '';
+  sel.onchange = async () => {
+    const v = sel.value || '';
+    const t = nowISO();
+    const before = await getOne('userCareer', userId);
+    const after = { userId, careerId: v || null, updatedAt: t, createdAt: before?.createdAt || t };
+    await putOne('userCareer', after);
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPromptPage(); // Prompt compile uses user's career
+  };
+}
+
+
+/** ========= Careers + Career Blocks ========= */
+async function renderCareers() {
+  // Career library list removed (managed from the top dropdown/buttons)
+  return;
+}
+function openEditCareerModal(career){
+  const container = document.createElement('div');
+  const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.placeholder = 'Career title';
+  titleInput.value = career?.title || '';
+
+  container.appendChild(inputRow('Title', titleInput));
+  container.appendChild(document.createElement('div')).className = 'divider';
+  const note = document.createElement('div');
+  note.className = 'muted';
+  note.textContent = 'This edits the career name only. Career items are managed on the right list (filtered by the top Career dropdown).';
+  container.appendChild(note);
+
+  const footer = [
+  btn('Save', { primary:true, onClick: async () => {
+    await saveCareer({ ...career, title: titleInput.value.trim() });
+    closeModal();
+  }})
+];
+
+// ✅ 只有已有 career（有 id）才允许删除
+if (career?.id) {
+  footer.push(btn('Delete', { danger:true, onClick: async () => {
+    const ok = confirm('Delete this career?\nThis will also delete all its career items and unselect it for any users.');
+    if (!ok) return;
+    await deleteCareer(career);
+    closeModal();
+  }}));
+}
+
+  openModal('Edit · Career', container, footer);
+}
+async function saveCareer(payload) {
+  const t = nowISO();
+  if (!payload.id) {
+    const row = { id: uid(), title: payload.title || '(Career)', createdAt: t, updatedAt: t };
+    await addOne('careers', row);
+    await logChange({ entityType: 'career', entityId: row.id, action: 'create', after: row });
+  } else {
+    const before = await getOne('careers', payload.id);
+    const after = { ...before, title: payload.title || '(Career)', updatedAt: t };
+    await putOne('careers', after);
+    await logChange({ entityType: 'career', entityId: after.id, action: 'update', after, before });
+  }
+  await refreshAll();
+}
+async function deleteCareer(career) {
+  const before = await getOne('careers', career.id);
+
+  // delete blocks
+  const blocks = await getByIndex('careerBlocks', 'by_careerId', career.id);
+  for (const b of blocks) {
+    await deleteOne('careerBlocks', b.id);
+    await logChange({ entityType: 'careerBlock', entityId: b.id, action: 'delete', after: null, before: b });
+  }
+
+  // remove selections
+  const allUserCareer = await getAll('userCareer');
+  const impacted = allUserCareer.filter(x => x.careerId === career.id);
+  for (const uc of impacted) {
+    await deleteOne('userCareer', uc.userId);
+    await logChange({ entityType: 'userCareer', entityId: uc.userId, action: 'delete', after: null, before: uc });
+  }
+
+  await deleteOne('careers', career.id);
+  await logChange({ entityType: 'career', entityId: career.id, action: 'delete', after: null, before });
+  await refreshAll();
 }
 
 async function renderCareerBlocks() {
   const list = $('#listCareerBlocks');
-  const hint = $('#hintCareerBlocks');
+  initSortableList(list, 'careerTemplates');
   list.innerHTML = '';
 
   const careerId = state.currentCareerId || '';
-  const addBtn = $('#btnAddCareerBlock');
-
   if (!careerId) {
-    if (addBtn) addBtn.disabled = true;
-    if (hint) {
-      hint.style.display = 'block';
-      hint.textContent = 'Select a career to edit career items.';
-    }
+    $('#hintCareerBlocks').style.display = 'block';
+    $('#hintCareerBlocks').textContent = 'Choose a career in the top Career filter to view/edit career items.';
+    $('#btnAddCareerBlock').disabled = true;
     return;
   }
 
-  if (addBtn) addBtn.disabled = false;
+  $('#btnAddCareerBlock').disabled = false;
 
-  let [templatesRaw, contents, conns] = await Promise.all([
+  let [templates, contents, conns] = await Promise.all([
     getAll('careerTemplates'),
     getByIndex('careerContent', 'by_careerId', careerId),
     getAll('connections')
   ]);
 
-  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
-  const contentByTpl = new Map((contents || []).map(r => [r.templateId, r]));
+  templates = applyUiOrder(templates, 'careerTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+  conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+  const assignments = await getOutputAssignments();
+  const cMap = new Map((contents || []).map(c => [c.templateId, c]));
 
-  conns = Array.isArray(conns) ? conns : [];
-  const connById = new Map(conns.map(c => [c.id, c]));
+  $('#hintCareerBlocks').style.display = templates.length ? 'none' : 'block';
+  $('#hintCareerBlocks').textContent = templates.length ? '' : 'No career items yet. Click Add to create.';
 
-  const outputConnTitleFor = (tpl) => {
-    const ocid = String(tpl?.outputConnectionId || '');
-    if (!ocid) return '';
-    const conn = connById.get(ocid);
-    return (conn && conn.title) ? String(conn.title) : (tpl.outputConnectionTitle ? String(tpl.outputConnectionTitle) : '');
-  };
+  templates.forEach(tpl => {
+    const c = cMap.get(tpl.id);
+    const content = c?.content || '';
+    const isEmpty = !String(content).trim();
+    const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
 
-  const cats = await getSetupCategories('careerTemplates');
-
-  renderCategoryGroups({
-    listEl: list,
-    hintEl: hint,
-    sectionKey: 'careerTemplates',
-    categories: cats,
-    items: templates,
-    sortKey: 'careerTemplates',
-    emptyHintText: 'No items in this category.',
-    makeRow: (tpl) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.id = tpl.id;
-
-      const left = document.createElement('div');
-      left.className = 'row-left';
-
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = tpl.title || '(Untitled)';
-
-      const pills = document.createElement('div');
-      pills.style.display = 'flex';
-      pills.style.flexWrap = 'wrap';
-      pills.style.gap = '6px';
-      pills.style.marginTop = '6px';
-
-      if (tpl.isOutput !== false) {
-        const p = document.createElement('span');
-        p.className = 'pill';
-        p.textContent = 'Output';
-        pills.appendChild(p);
-
-        const ct = outputConnTitleFor(tpl);
-        if (ct) {
-          const p2 = document.createElement('span');
-          p2.className = 'pill';
-          p2.textContent = `For: ${ct}`;
-          pills.appendChild(p2);
-        }
-      }
-
-      const subtitle = document.createElement('div');
-      subtitle.className = 'muted';
-
-      const contentRow = contentByTpl.get(tpl.id);
-      const updated = (contentRow?.updatedAt || tpl.updatedAt || tpl.createdAt || '');
-      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
-
-      const small = document.createElement('div');
-      small.className = 'small';
-      const preview = (contentRow?.content || '').replace(/\s+/g, ' ').trim();
-      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
-
-      left.appendChild(title);
-      if (pills.childNodes.length) left.appendChild(pills);
-      if (subtitle.textContent) left.appendChild(subtitle);
-      left.appendChild(small);
-
-      const right = document.createElement('div');
-      right.className = 'row-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn small';
-      editBtn.textContent = 'Edit';
-      editBtn.onclick = () => openEditItemModal({
-        title: 'Edit · Career Info Item',
-        initial: {
-          templateId: tpl.id,
-          title: tpl.title || '',
-          content: contentRow?.content || '',
-          isOutput: (tpl.isOutput !== false),
-          outputConnectionId: (tpl.outputConnectionId || '')
-        },
-        outputMeta: { connections: conns },
+    const actions = [
+      btn('Edit', { mini:true, onClick: () => openEditItemModal({
+        title: 'Edit · Career Item',
+        initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
+        outputMeta: { connections: conns, assignments },
         onSave: saveCareerTemplateAndContentByFilter,
         onDelete: deleteCareerTemplate
-      });
+      })})
+    ];
 
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn small danger';
-      delBtn.textContent = 'Delete';
-      delBtn.onclick = async () => {
-        if (!confirm('Delete this career item title and all career contents using it?')) return;
-        await deleteCareerTemplate({ templateId: tpl.id });
-      };
+    const pills = [
+      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : [])
+    ];
 
-      right.appendChild(editBtn);
-      right.appendChild(delBtn);
-
-      row.appendChild(left);
-      row.appendChild(right);
-      return row;
-    }
+    const row = makeItemRow({
+      title: tpl.title,
+      subtitle: isEmpty ? 'Content: (empty for this career)' : `Updated: ${formatLocal(updated)}`,
+      pills
+    }, actions);
+    makeRowSortable(row, { sortKey:'careerTemplates', id: tpl.id });
+    list.appendChild(row);
   });
 }
 
@@ -3706,101 +3125,308 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
 
 async function renderConnections() {
   const list = $('#listConnections');
-  const hint = $('#hintConnections');
+  initSortableList(list, 'connections');
   list.innerHTML = '';
 
-  const connsRaw = await getAll('connections');
-  const conns = Array.isArray(connsRaw) ? connsRaw : [];
+  let conns = await getAll('connections');
+  conns = applyUiOrder(conns, 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
 
-  const promptItems = await getAll('promptItems');
-  const pBy = new Map((promptItems || []).map(p => [p.id, p]));
+  $('#hintConnections').style.display = conns.length ? 'none' : 'block';
 
-  const pt = await getAll('personalTemplates');
-  const ct = await getAll('careerTemplates');
-  const ptBy = new Map((pt || []).map(t => [t.id, t]));
-  const ctBy = new Map((ct || []).map(t => [t.id, t]));
+  conns.forEach(c => {
+    const actions = [
+      btn('Edit', { mini:true, onClick: () => openConnectionModal({ mode:'edit', initial: c }) })
+    ];
 
-  const cats = await getSetupCategories('connections');
-
-  renderCategoryGroups({
-    listEl: list,
-    hintEl: hint,
-    sectionKey: 'connections',
-    categories: cats,
-    items: conns,
-    sortKey: 'connections',
-    emptyHintText: 'No connections in this category.',
-    makeRow: (c) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.id = c.id;
-
-      const left = document.createElement('div');
-      left.className = 'row-left';
-
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = c.title || '(Untitled)';
-
-      const subtitle = document.createElement('div');
-      subtitle.className = 'muted';
-
-      const pCount = (c.promptItemIds || []).length;
-      const ptCount = (c.personalTemplateIds || []).length;
-      const ctCount = (c.careerTemplateIds || []).length;
-
-      const careerMode = c.careerSource === 'global' ? 'Global' : 'Per-career';
-      subtitle.textContent = `${careerMode} • Prompts: ${pCount} • Personal: ${ptCount} • Career: ${ctCount}`;
-
-      const small = document.createElement('div');
-      small.className = 'small';
-
-      // Show a short readable preview of the linked titles (first few)
-      const pickTitles = (ids, byMap) => (ids || [])
-        .map(id => byMap.get(id)?.title || byMap.get(id)?.name || '')
-        .filter(Boolean)
-        .slice(0, 4);
-
-      const pTitles = pickTitles(c.promptItemIds, pBy);
-      const ptTitles = pickTitles(c.personalTemplateIds, ptBy);
-      const ctTitles = pickTitles(c.careerTemplateIds, ctBy);
-
-      const parts = [];
-      if (pTitles.length) parts.push(`Prompts: ${pTitles.join(', ')}${pCount > 4 ? ', …' : ''}`);
-      if (ptTitles.length) parts.push(`Personal: ${ptTitles.join(', ')}${ptCount > 4 ? ', …' : ''}`);
-      if (ctTitles.length) parts.push(`Career: ${ctTitles.join(', ')}${ctCount > 4 ? ', …' : ''}`);
-      small.textContent = parts.length ? parts.join('  |  ') : '—';
-
-      left.appendChild(title);
-      left.appendChild(subtitle);
-      left.appendChild(small);
-
-      const right = document.createElement('div');
-      right.className = 'row-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn small';
-      editBtn.textContent = 'Edit';
-      editBtn.onclick = async () => openConnectionModal({ mode:'edit', id: c.id });
-
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn small danger';
-      delBtn.textContent = 'Delete';
-      delBtn.onclick = async () => {
-        if (!confirm('Delete this connection?')) return;
-        await deleteConnection({ id: c.id });
-      };
-
-      right.appendChild(editBtn);
-      right.appendChild(delBtn);
-
-      row.appendChild(left);
-      row.appendChild(right);
-      return row;
-    }
+    const pills = [
+      `Prompts: ${(c.promptItemIds || []).length}`,
+      `Personal: ${(c.personalTemplateIds || []).length}`,
+      `Career: ${(c.careerTemplateIds || []).length}`
+    ];
+    const row = makeItemRow({
+      title: c.title,
+      subtitle: `Updated: ${formatLocal(c.updatedAt)}` ,
+      pills
+    }, actions);
+    makeRowSortable(row, { sortKey:'connections', id: c.id });
+    list.appendChild(row);
   });
 }
 
+
+async function openConnectionModal({ mode, initial }) {
+  const prompts = await getAll('promptItems');
+  const personalTemplates = await getAll('personalTemplates');
+  const careerTemplates = await getAll('careerTemplates');
+
+  prompts.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+  personalTemplates.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+  careerTemplates.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+
+  const selectedPrompt = new Set(initial?.promptItemIds || []);
+  const selectedPersonal = new Set(initial?.personalTemplateIds || []);
+  const selectedCareer = new Set(initial?.careerTemplateIds || []);
+
+  let careerSource = (initial?.careerSource || 'user');
+
+
+  // Preload emptiness status for current user, for both "user career" and "current career"
+  const userId = state.currentUserId;
+
+  const personalContent = userId ? await getByIndex('personalContent', 'by_userId', userId) : [];
+  const personalContentMap = new Map((personalContent || []).map(r => [r.templateId, r]));
+
+  // User career mapping (per-user fixed career)
+  let userCareerId = null;
+  if (userId) {
+    const uc = await getOne('userCareer', userId);
+    userCareerId = uc?.careerId || null;
+  }
+  const careerContent_user = userCareerId ? await getByIndex('careerContent', 'by_careerId', userCareerId) : [];
+  const careerContentMap_user = new Map((careerContent_user || []).map(r => [r.templateId, r]));
+
+  // Current career (from Career Info dropdown)
+  const currentCareerId = state.currentCareerId || null;
+  const careerContent_current = currentCareerId ? await getByIndex('careerContent', 'by_careerId', currentCareerId) : [];
+  const careerContentMap_current = new Map((careerContent_current || []).map(r => [r.templateId, r]));
+
+  const getCareerMapForSource = () => (careerSource === 'current' ? careerContentMap_current : careerContentMap_user);
+  const getCareerIdForSource = () => (careerSource === 'current' ? currentCareerId : userCareerId);
+
+  const wrap = document.createElement('div');
+
+  wrap.innerHTML = `
+    <div class="split">
+      <div>
+        <div class="field">
+          <label>Connection Title</label>
+          <input id="connTitleInput" type="text" placeholder="e.g., Onboarding Prompt Pack"/>
+        </div>
+        <div class="field">
+          <label>Career Source</label>
+          <div class="row" style="gap:12px; flex-wrap:wrap; margin-top:6px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="radio" name="connCareerSource" id="connCareerSourceCurrent" value="current" />
+              <span>Current career (dynamic)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="radio" name="connCareerSource" id="connCareerSourceUser" value="user" />
+              <span>User career</span>
+            </label>
+          </div>
+          <div class="hint" style="margin-top:6px;">
+            Current career uses the Career Info dropdown. User career uses the selected user’s saved “User Career”.
+          </div>
+        </div>
+
+
+        <div class="hint" style="margin-top:-6px;">
+          Select items across Prompt, Personal Info, and Career Info. Titles are shared; Personal and Career content may be empty for the current user.
+        </div>
+
+        <div class="sectionTitle">Prompt Items</div>
+        <div id="connPickPrompts" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
+
+        <div class="sectionTitle" style="margin-top:12px;">Personal Info Items</div>
+        <div id="connPickPersonal" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
+
+        <div class="sectionTitle" style="margin-top:12px;">Career Info Items</div>
+        <div id="connPickCareer" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
+      </div>
+
+      <div>
+        <div class="hint" style="margin-bottom:6px;">Preview (for current user)</div>
+        <div class="mdPreview" id="connPreview" style="max-height:62vh; overflow:auto;"></div>
+        <div class="hint" id="connWarn" style="margin-top:8px; display:none;"></div>
+      </div>
+    </div>
+  `;
+
+  const footerButtons = [
+    btn('Save', { primary:true, onClick: async () => {
+      const title = $('#connTitleInput').value.trim() || '(Untitled Connection)';
+      const t = nowISO();
+
+      const row = {
+        id: initial?.id || uid(),
+        title,
+        promptItemIds: [...selectedPrompt],
+        personalTemplateIds: [...selectedPersonal],
+        careerTemplateIds: [...selectedCareer],
+        careerSource,
+        createdAt: initial?.createdAt || t,
+        updatedAt: t
+      };
+
+      const before = initial?.id ? await getOne('connections', initial.id) : null;
+      await putOne('connections', row);
+      await logChange({ entityType:'connection', entityId: row.id, action: before ? 'update' : 'create', after: row, before });
+
+      closeModal();
+      await renderConnections();
+      await renderPromptPage();
+    }}),
+    // Move Cancel to the bottom-right (where Delete used to be)
+    btn('Cancel', { ghost:true, onClick: closeModal })
+  ];
+
+  const headerButtons = [];
+  if (mode === 'edit') {
+    headerButtons.push(
+      // Move Delete next to the modal title to reduce mis-click risk.
+      btn('Delete', { mini:true, danger:true, onClick: async () => {
+        const ok = confirm('Delete this connection?');
+        if (!ok) return;
+        const before = await getOne('connections', initial.id);
+        await deleteOne('connections', initial.id);
+        await logChange({ entityType:'connection', entityId: initial.id, action:'delete', after:null, before });
+        closeModal();
+        await renderConnections();
+        await renderPromptPage();
+      }})
+    );
+  }
+
+  openModal(mode === 'edit' ? 'Edit Connection' : 'New Connection', wrap, footerButtons, headerButtons);
+
+
+  $('#connTitleInput').value = initial?.title || '';
+
+  // Career Source radios
+  const rCur = $('#connCareerSourceCurrent');
+  const rUser = $('#connCareerSourceUser');
+  if (rCur && rUser) {
+    rCur.checked = (careerSource === 'current');
+    rUser.checked = (careerSource !== 'current');
+    rCur.onchange = () => { careerSource = 'current'; renderCareerChoices(); refreshPreview(); };
+    rUser.onchange = () => { careerSource = 'user'; renderCareerChoices(); refreshPreview(); };
+  }
+
+
+  const pickPrompts = $('#connPickPrompts');
+  const pickPersonal = $('#connPickPersonal');
+  const pickCareer = $('#connPickCareer');
+  const preview = $('#connPreview');
+  const warn = $('#connWarn');
+
+  const mkRow = ({ label, checked, onToggle, pill }) => {
+    const row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.justifyContent = 'space-between';
+    row.style.gap = '10px';
+    row.style.padding = '8px 10px';
+    row.style.border = '1px solid rgba(34,49,75,.5)';
+    row.style.borderRadius = '12px';
+    row.style.marginBottom = '8px';
+    row.style.cursor = 'pointer';
+    row.style.userSelect = 'none';
+
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+    left.style.gap = '10px';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = checked;
+    cb.onchange = (e) => onToggle(e.target.checked);
+
+    const text = document.createElement('div');
+    text.textContent = label;
+
+    left.appendChild(cb);
+    left.appendChild(text);
+
+    row.appendChild(left);
+
+    if (pill) {
+      const sp = document.createElement('span');
+      sp.className = 'pill ' + pill.className;
+      sp.textContent = pill.text;
+      row.appendChild(sp);
+    }
+
+    return row;
+  };
+
+  prompts.forEach(p => {
+    pickPrompts.appendChild(mkRow({
+      label: p.title,
+      checked: selectedPrompt.has(p.id),
+      onToggle: (v) => {
+        v ? selectedPrompt.add(p.id) : selectedPrompt.delete(p.id);
+        refreshPreview();
+      }
+    }));
+  });
+
+  personalTemplates.forEach(tpl => {
+    const content = userId ? (personalContentMap.get(tpl.id)?.content || '') : '';
+    const isEmpty = !String(content).trim();
+    pickPersonal.appendChild(mkRow({
+      label: tpl.title,
+      checked: selectedPersonal.has(tpl.id),
+      pill: isEmpty ? { text: 'Empty', className: 'warn' } : null,
+      onToggle: (v) => {
+        v ? selectedPersonal.add(tpl.id) : selectedPersonal.delete(tpl.id);
+        refreshPreview();
+      }
+    }));
+  });
+
+
+  function renderCareerChoices() {
+    pickCareer.innerHTML = '';
+    const cMapActive = getCareerMapForSource();
+    const careerIdActive = getCareerIdForSource();
+    careerTemplates.forEach(tpl => {
+      const content = careerIdActive ? (cMapActive.get(tpl.id)?.content || '') : '';
+      const isEmpty = !String(content).trim();
+      pickCareer.appendChild(mkRow({
+        label: tpl.title,
+        checked: selectedCareer.has(tpl.id),
+        pill: isEmpty ? { text: 'Empty', className: 'warn' } : null,
+        onToggle: (v) => {
+          v ? selectedCareer.add(tpl.id) : selectedCareer.delete(tpl.id);
+          refreshPreview();
+        }
+      }));
+    });
+  }
+  renderCareerChoices();
+
+  async function refreshPreview() {
+    const conn = {
+      promptItemIds: [...selectedPrompt],
+      personalTemplateIds: [...selectedPersonal],
+      careerTemplateIds: [...selectedCareer],
+      careerSource
+    };
+    const info = await analyzeConnectionForCurrentUser(conn);
+    preview.innerHTML = renderMarkdown(info.compiled || '');
+
+    const notes = [];
+    if (info.missingCareer && (conn.careerTemplateIds || []).length) {
+      notes.push('Career is not selected for this user.');
+    }
+    if (info.emptyPersonal.length) notes.push(`Empty personal: ${info.emptyPersonal.join(', ')}`);
+    if (info.emptyCareer.length) notes.push(`Empty career: ${info.emptyCareer.join(', ')}`);
+
+    if (notes.length) {
+      warn.style.display = 'block';
+      warn.textContent = '⚠️ ' + notes.join(' ');
+    } else {
+      warn.style.display = 'none';
+      warn.textContent = '';
+    }
+  }
+
+  await refreshPreview();
+}
+
+
+/** ========= Prompt Page ========= */
 async function renderPromptPickers() {
   const uSel = $('#promptUserSelect');
   const ucSel = $('#promptUserCareerSelect');
@@ -4213,7 +3839,6 @@ async function exportSnapshotJson(options=null) {
 
   // Prompt items are needed when explicitly exporting prompts OR exporting connections (dependencies).
   const promptItems = (exportPromptsRequested || exportConnections) ? await safeGetAll('promptItems') : [];
-  const setupCategories = await safeGetAll('setupCategories');
 
   const changeLogs = exportLogs ? await safeGetAll('changeLogs') : [];
 
@@ -4376,8 +4001,6 @@ async function exportSnapshotJson(options=null) {
 
     changeLogs: exportLogs ? (changeLogs || []) : [],
 
-    setupCategories: (setupCategories || []),
-
     // Optional UI ordering
     uiSort: uiSortOut,
 
@@ -4387,30 +4010,13 @@ async function exportSnapshotJson(options=null) {
   };
 
   const s = getSyncUiState();
-
-  if (s.provider === 'github') {
-    // Online export: upload to GitHub (append-only; never overwrite).
-    try {
-      const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
-      const cfg = GitHubSync.getConfig();
-      snapshot.uploadedBy = cfg.uploader || '';
-      snapshot.uploadedAtLocal = uploadedAtLocal;
-      snapshot.toolVersion = toolVersion;
-      const jsonText = JSON.stringify(snapshot, null, 2);
-      const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
-      toast(`Uploaded: ${up.filename}`);
-    } catch (err) {
-      console.error(err);
-      alert('Online export failed\n\n' + (err?.message || String(err)));
-      throw err;
-    }
-    return snapshot;
-  }
-
-  // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
+
+  if (s.provider === 'github') {
+    // Online export (GitHub) is not implemented yet.
+  }
+
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
@@ -4986,7 +4592,6 @@ async function wipeLocalAndImportAllFromText(rawText) {
 
   toast('Imported. Local data replaced with JSON snapshot.');
   await refreshAll();
-  finalizeOnlineImportMeta();
 }
 
 function normalizeSnapshotForImport(s) {
@@ -5053,7 +4658,6 @@ function normalizeSnapshotForImport(s) {
     careerTemplates,
     careerContent,
     connections: Array.isArray(s.connections) ? s.connections : [],
-    setupCategories: Array.isArray(s.setupCategories) ? s.setupCategories : [],
     uiSort: (s.uiSort && typeof s.uiSort === 'object') ? s.uiSort : null,
   };
 }
@@ -5154,6 +4758,13 @@ async function openImportWizard(snap) {
 
   // Alias for older import UI code paths
   function fmtLocal(iso) { return fmtTime(iso); }
+function fmtLocalShort(iso){
+  const s = fmtLocal(iso);
+  // Compact: keep to minutes
+  const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+  return m ? m[1] : s;
+}
+
 
   function setDupTimesForGroup(group, dupIdSet, localMap, getLabel) {
     group.rowById.forEach((cell, id) => {
@@ -5859,7 +5470,6 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Replace import completed');
         await refreshAll();
-        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Replace import failed: ' + (e?.message || String(e)));
@@ -5871,7 +5481,6 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Add to local import completed');
         await refreshAll();
-        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Add to local import failed: ' + (e?.message || String(e)));
@@ -5879,7 +5488,7 @@ async function openImportWizard(snap) {
     }})
   ];
 
-  openModal('Import Snapshot', container, footerButtons, headerBtns, { kind: 'import' });
+  openModal('Import Snapshot', container, footerButtons, headerBtns);
 }
 
 
@@ -5897,20 +5506,6 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   sel.careerTemplates = sel.careerTemplates || new Set();
   sel.personalContentKeys = sel.personalContentKeys || new Set();
   sel.careerContentKeys = sel.careerContentKeys || new Set();
-
-  // Setup Categories: always import if present (best effort)
-  try {
-    const cats = Array.isArray(snap.setupCategories) ? snap.setupCategories : [];
-    if (cats.length) {
-      const db = await openDB();
-      if (db.objectStoreNames.contains('setupCategories')) {
-        const tx = db.transaction('setupCategories', 'readwrite');
-        const st = tx.objectStore('setupCategories');
-        cats.forEach(c => st.put(c));
-        await txComplete(tx);
-      }
-    }
-  } catch (err) { /* best effort */ }
 
   // Ensure templates referenced by selected connections are included (so connections can be reconstructed)
   try {
@@ -6617,13 +6212,12 @@ async function clearAllLocalData() {
   // NOTE: This app no longer uses a global `db` handle.
   // Always open the DB via openDB() so import flows never fail with "db is not defined".
   const db = await openDB();
-  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','setupCategories','changeLogs'];
+  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','changeLogs'];
   const stores = allStores.filter(n => db.objectStoreNames.contains(n));
   if (!stores.length) return;
   const tx = db.transaction(stores, 'readwrite');
   stores.forEach(n => tx.objectStore(n).clear());
   await txComplete(tx);
-  try { markLocalModified(); } catch {}
 }
 
 async function importSnapshotSelectionReplace(snap, sel) {
@@ -6655,9 +6249,7 @@ async function refreshAll() {
   // 1) Top filters first (so downstream renders can rely on state + selects)
   await loadUsersIntoSelect();
   await loadCareerFilterSelect();
-  await renderPersonalCareerPick();
-
-  // 2) Setup page sections
+  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick(); // 2) Setup page sections
   await renderPrompts();
   await renderPersonal();
   await renderCareerBlocks();
@@ -6721,19 +6313,6 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     initial:{ title:'', promptItemIds:[], personalTemplateIds:[], careerTemplateIds:[] }
   }));
 
-  // Manage Categories (per Setup section)
-  const _mcp = document.getElementById('btnManageCatsPrompts');
-  if (_mcp) _mcp.addEventListener('click', () => openCategoryManager('promptItems'));
-
-  const _mcs = document.getElementById('btnManageCatsPersonal');
-  if (_mcs) _mcs.addEventListener('click', () => openCategoryManager('personalTemplates'));
-
-  const _mcc = document.getElementById('btnManageCatsCareer');
-  if (_mcc) _mcc.addEventListener('click', () => openCategoryManager('careerTemplates'));
-
-  const _mcn = document.getElementById('btnManageCatsConnections');
-  if (_mcn) _mcn.addEventListener('click', () => openCategoryManager('connections'));
-
   $('#btnExportLogs').addEventListener('click', exportLogsCsv);
   $('#btnExportSnapshot').addEventListener('click', openExportWizard);
 
@@ -6741,6 +6320,10 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
     if (s.provider === 'github') {
+      if (s.mode !== 'manual') {
+        toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
+        return;
+      }
       await githubImportFlow({ wipe: false });
       return;
     }
@@ -6767,6 +6350,10 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
       if (s.provider === 'github') {
+        if (s.mode !== 'manual') {
+          toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
+          return;
+        }
         await githubImportFlow({ wipe: true });
         return;
       }
@@ -6779,7 +6366,6 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const text = await f.text();
-        pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6818,7 +6404,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const setupUserSel = $('#userSelect');
     if (setupUserSel) setupUserSel.value = state.currentUserId || '';
 
-    await renderPersonalCareerPick();
+    if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
     await renderPersonal();
     await renderPromptPickers();
     await renderPromptPage();
@@ -6839,7 +6425,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const setupUcSel = $('#personalCareerPick');
     if (setupUcSel) setupUcSel.value = v || '';
 
-    await renderPersonalCareerPick();
+    if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
     await renderPromptPickers();
     await renderPromptPage();
   });
@@ -6865,84 +6451,6 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 /** ========= GitHub Online Manual (Read only) ========= */
 const GITHUB_CFG_KEY = 'mivida_github_cfg';
 
-/** ========= Secrets (token storage) =========
- * We store the GitHub token in IndexedDB (not localStorage) so it persists across refresh/restart
- * while avoiding accidental exposure in plain localStorage dumps.
- * Note: In a pure front-end app, this is still accessible to anyone with browser access/devtools.
- */
-const SecretStore = (() => {
-  const DB_NAME = 'mivida_prompt_builder_secrets';
-  const STORE = 'kv';
-  const KEY_GH = 'github_token';
-  let _tokenCache = '';
-
-  const openDb = () => new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-
-  const get = async (key) => {
-    const db = await openDb();
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const os = tx.objectStore(STORE);
-      const r = os.get(key);
-      r.onsuccess = () => resolve(r.result || '');
-      r.onerror = () => resolve('');
-    });
-  };
-
-  const set = async (key, val) => {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
-      tx.objectStore(STORE).put(String(val || ''), key);
-    });
-  };
-
-  const del = async (key) => {
-    const db = await openDb();
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
-      tx.objectStore(STORE).delete(key);
-    });
-  };
-
-  const init = async () => {
-    // Migrate legacy token from localStorage into IDB once.
-    let legacy = '';
-    try {
-      const cfg = JSON.parse(localStorage.getItem(GITHUB_CFG_KEY) || '{}') || {};
-      legacy = String(cfg.token || '').trim();
-      if (legacy) {
-        cfg.token = ''; // scrub
-        localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(cfg));
-      }
-    } catch {}
-    const stored = (await get(KEY_GH)) || '';
-    _tokenCache = stored || legacy || '';
-    if (legacy && !stored) {
-      await set(KEY_GH, legacy);
-    }
-  };
-
-  const getGitHubToken = () => _tokenCache || '';
-  const setGitHubToken = async (t) => { _tokenCache = String(t || '').trim(); await set(KEY_GH, _tokenCache); };
-  const clearGitHubToken = async () => { _tokenCache = ''; await del(KEY_GH); };
-
-  return { init, getGitHubToken, setGitHubToken, clearGitHubToken };
-})();
-
-
 const GitHubSync = (() => {
   const getConfig = () => {
     let v = {};
@@ -6952,23 +6460,14 @@ const GitHubSync = (() => {
       repo: (v.repo || '').trim(),
       branch: (v.branch || 'main').trim(),
       folder: (v.folder || '').trim().replace(/^\/+|\/+$/g,''),
-      token: (SecretStore.getGitHubToken() || '').trim(),
+      token: (v.token || '').trim(),
       uploader: (v.uploader || '').trim()
     };
   };
 
-  const setConfig = async (cfg) => {
+  const setConfig = (cfg) => {
     const cur = getConfig();
-    const incoming = { ...(cfg || {}) };
-
-    // Token is stored in IndexedDB secrets. If input is blank, keep existing.
-    if (Object.prototype.hasOwnProperty.call(incoming, 'token')) {
-      const t = String(incoming.token || '').trim();
-      if (t) await SecretStore.setGitHubToken(t);
-      delete incoming.token;
-    }
-
-    const next = { ...cur, ...incoming, token: '' }; // never persist token in localStorage
+    const next = { ...cur, ...(cfg || {}) };
     localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(next));
   };
 
@@ -7011,16 +6510,6 @@ const GitHubSync = (() => {
       const t = await rr.text().catch(()=> '');
       throw new Error(`Repo access failed (${rr.status}). ${t || ''}`.trim());
     }
-
-    // Verify folder exists (required for Online import/export)
-    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
-    const folderUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
-    const fr = await ghFetch(folderUrl, c.token);
-    if (!fr.ok) {
-      const t = await fr.text().catch(()=> '');
-      throw new Error(`Folder access failed (${fr.status}). ${t || ''}`.trim());
-    }
-
     return { login: me.login || '', ok: true };
   };
 
@@ -7040,46 +6529,24 @@ const GitHubSync = (() => {
       .map(x => ({ name: x.name, path: x.path, sha: x.sha, size: x.size || 0 }));
   };
 
-    const parseSnapshotFilenameMeta = (name) => {
-    const original = String(name || '');
-    const base = original.replace(/\.json$/i, '');
-    const parts = base.split('__');
-    const stampRaw = parts[0] || base;
-    const uploaderRaw = (parts.length > 1 ? parts.slice(1).join('__') : '');
-    const uploader = uploaderRaw ? uploaderRaw.replace(/_/g, ' ').trim() : '';
-
-    const cleaned = stampRaw
-      .replace(/^mivida_snapshot_/i, '')
-      .replace(/^mivida_snapshot-/i, '')
-      .replace(/^snapshot_/i, '')
-      .replace(/^snapshot-/i, '')
-      .trim();
-
-    // Accept patterns like:
-    // 20260204_131245_123
-    // 2026-02-04_13-12-45-123
-    // 2026-02-04T13-12-45-123
-    let m = cleaned.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)[-_]?([0-5]\d)[-_]?([0-5]\d)(?:[-_]?([0-9]{3}))?/);
-    if (!m) m = cleaned.match(/(20\d{2})([01]\d)([0-3]\d)[-_]?([0-2]\d)([0-5]\d)([0-5]\d)(?:[-_]?([0-9]{3}))?/);
-
-    let ts = 0;
-    let datetime = '';
-    if (m) {
-      const Y = +m[1], Mo = +m[2], D = +m[3];
-      const h = +m[4], mi = +m[5], se = +m[6], ms = +(m[7] || 0);
-      const dt = new Date(Y, Mo - 1, D, h, mi, se, ms); // local time
-      ts = dt.getTime();
-
-      const pad2 = (n) => String(n).padStart(2, '0');
-      const pad3 = (n) => String(n).padStart(3, '0');
-      datetime = `${String(Y).padStart(4, '0')}-${pad2(Mo)}-${pad2(D)} ${pad2(h)}:${pad2(mi)}:${pad2(se)}.${pad3(ms)}`;
-    }
-
-    return { ts, datetime, uploader };
-  };
-
   const parseStamp = (name) => {
-    return parseSnapshotFilenameMeta(name).ts || 0;
+    // Try common patterns like 2026-02-04_13-05-22, 20260204_130522, 2026-02-04-130522
+    const s = String(name || '');
+    let m = s.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)?[-_]?([0-5]\d)?[-_]?([0-5]\d)?/);
+    if (m) {
+      const Y=+m[1], Mo=+m[2], D=+m[3];
+      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
+      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
+      return dt.getTime();
+    }
+    m = s.match(/(20\d{2})([01]\d)([0-3]\d)_?([0-2]\d)?([0-5]\d)?([0-5]\d)?/);
+    if (m) {
+      const Y=+m[1], Mo=+m[2], D=+m[3];
+      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
+      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
+      return dt.getTime();
+    }
+    return 0;
   };
 
   const getLatestFile = async () => {
@@ -7107,85 +6574,10 @@ const GitHubSync = (() => {
     const raw = atob(content.replace(/\s/g,''));
     return raw;
   };
-  const toBase64Utf8 = (str) => {
-    // Safe base64 for unicode
-    const bytes = new TextEncoder().encode(String(str || ''));
-    let bin = '';
-    bytes.forEach(b => { bin += String.fromCharCode(b); });
-    return btoa(bin);
-  };
-
-  const ensureFolderExists = async () => {
-    const c = getConfig();
-    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
-    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
-    const r = await ghFetch(url, c.token);
-    if (!r.ok) {
-      const t = await r.text().catch(()=> '');
-      throw new Error(`Folder access failed (${r.status}). ${t || ''}`.trim());
-    }
-    const data = await r.json().catch(()=>null);
-    if (!Array.isArray(data) && !(data && data.type === 'dir')) {
-      // GitHub returns array for a folder, object for a file.
-      throw new Error('Folder path is not a directory: ' + (c.folder || '(root)'));
-    }
-    return true;
-  };
-
-  const uploadNewFile = async (path, contentText, message) => {
-    const c = getConfig();
-    if (!c.token) throw new Error('Missing GitHub token');
-    await ensureFolderExists();
-
-    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
-    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}`;
-    const payload = {
-      message: message || ('Add snapshot ' + path),
-      content: toBase64Utf8(contentText),
-      branch: c.branch
-    };
-    // For PUT we need fetch with method and body.
-    const doPut = async (useTokenPrefix=false) => fetch(url, {
-      method: 'PUT',
-      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    let pr = await doPut(false);
-    if (pr.status === 401) pr = await doPut(true);
-
-    if (!pr.ok) {
-      const t = await pr.text().catch(()=> '');
-      throw new Error(`Upload failed (${pr.status}). ${t || ''}`.trim());
-    }
-    return pr.json().catch(()=> ({}));
-  };
-
-  const makeLocalStamp = () => {
-    const d = new Date();
-    const pad = (n, w=2) => String(n).padStart(w,'0');
-    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${pad(d.getMilliseconds(),3)}`;
-  };
-
-  const sanitizeFilePart = (s) => String(s || '').trim()
-    .replace(/[\s]+/g,'_')
-    .replace(/[^a-zA-Z0-9._-]+/g,'')
-    .replace(/^_+|_+$/g,'') || 'unknown';
-
-  const uploadSnapshotJsonText = async (jsonText) => {
-    const c = getConfig();
-    const stamp = makeLocalStamp();
-    const uploader = sanitizeFilePart(c.uploader || 'unknown');
-    const filename = `${stamp}__${uploader}.json`;
-    const relPath = (c.folder ? (c.folder.replace(/^\/+|\/+$/g,'') + '/') : '') + filename;
-    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`);
-    return { filename, path: relPath };
-  };
-
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists,
-    parseFilenameMeta: parseSnapshotFilenameMeta
+    testConnection, listJsonFiles, getLatestFile, downloadFileText
   };
 })();
 
@@ -7204,42 +6596,8 @@ async function githubImportFlow({ wipe }){
         return;
       }
       const raw = await GitHubSync.downloadFileText(file.path);
-      // Capture metadata for the top bar (applied only after a successful import)
-      try {
-        let s = JSON.parse(raw);
-        if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
-
-        const looksLikeSnapshot = s && typeof s === 'object' &&
-          (Array.isArray(s.users) || Array.isArray(s.promptItems) || Array.isArray(s.connections) ||
-           Array.isArray(s.careers) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
-           Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks));
-
-        if (looksLikeSnapshot) {
-          pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
-            uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
-            toolVersion: String(s.toolVersion || '').trim(),
-            sourceName: String(file.name || '').trim(),
-            sourcePath: String(file.path || '').trim()
-          };
-        } else {
-          pendingOnlineImportMeta = null;
-        }
-      } catch {
-        pendingOnlineImportMeta = null;
-      }
-
-      if (wipe) {
-        // Confirm destructive wipe with a clear snapshot version (no milliseconds).
-        const dtForPrompt = fmtLocalStampVersion((pendingOnlineImportMeta && pendingOnlineImportMeta.uploadedAtLocal) || parseLocalStampFromFilename(file.name) || '');
-        const byForPrompt = ((pendingOnlineImportMeta && pendingOnlineImportMeta.uploadedBy) || parseUploaderFromFilename(file.name) || 'Unknown').trim();
-        const ok = confirm(`Wipe local data and import this snapshot?\n\nVersion: ${dtForPrompt || '—'} · ${byForPrompt || '—'}\n\nThis will delete all local data on this device. Continue?`);
-        if (!ok) { pendingOnlineImportMeta = null; return; }
-        await wipeLocalAndImportAllFromText(raw);
-      } else {
-        await openImportWizardFromText(raw);
-      }
-
+      if (wipe) await wipeLocalAndImportAllFromText(raw);
+      else await openImportWizardFromText(raw);
     };
 
     if (s.mode === 'auto') {
@@ -7281,11 +6639,7 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
   list.style.gap = '8px';
 
   const rows = (files || []).slice();
-    rows.sort((a,b) => {
-    const ma = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(a.name) : { ts: 0 });
-    const mb = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(b.name) : { ts: 0 });
-    return (mb.ts - ma.ts) || b.name.localeCompare(a.name);
-  });
+  rows.sort((a,b) => b.name.localeCompare(a.name));
 
   rows.forEach(f => {
     const row = document.createElement('button');
@@ -7293,10 +6647,7 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     row.style.cursor = 'pointer';
     row.style.width = '100%';
     row.style.textAlign = 'left';
-        const meta = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(f.name) : { datetime: '', uploader: '' });
-    const dtText = fmtLocalStampVersion(meta.datetime || '') || 'Unknown datetime';
-    const upText = meta.uploader || 'Unknown';
-    row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
+    row.innerHTML = `<div><strong>${escapeHtml(f.name)}</strong><div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(f.path)}</div></div>`;
     row.addEventListener('click', (e) => {
       e.preventDefault();
       closeModal();
@@ -7316,195 +6667,6 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
 /** ========= Sync UI (Offline, Online Auto, Online Manual) ========= */
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
-
-const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last imported snapshot metadata (online only)
-const LOCAL_LAST_MOD_KEY = 'mivida_local_last_modified_at_v1';           // stores last local edit timestamp
-let pendingOnlineImportMeta = null;
-
-function _parseLocalStampToDate(s){
-  const str = String(s || '').trim();
-  if (!str) return null;
-
-  // If ISO-like, let Date parse.
-  if (str.includes('T')) {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) return d;
-  }
-
-  // Accept: YYYY-MM-DD HH:mm[:ss][.mmm]
-  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?$/);
-  if (m){
-    const Y=+m[1], Mo=+m[2], D=+m[3], h=+m[4], mi=+m[5], se=+(m[6]||0), ms=+(m[7]||0);
-    const d = new Date(Y, Mo-1, D, h, mi, se, ms);
-    if (!isNaN(d.getTime())) return d;
-  }
-
-  // Fallback: try Date parse
-  const d = new Date(str);
-  if (!isNaN(d.getTime())) return d;
-  return null;
-}
-function _fmtLocal(d, { seconds=false } = {}){
-  if (!d || isNaN(d.getTime())) return '';
-  const pad = (n,w=2)=>String(n).padStart(w,'0');
-  const base = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (!seconds) return base;
-  return `${base}:${pad(d.getSeconds())}`;
-}
-function fmtLocalStampVersion(isoOrStr){
-  const d = _parseLocalStampToDate(isoOrStr);
-  if (d) return _fmtLocal(d, { seconds:false });
-  // If already looks like YYYY-MM-DD HH:mm..., keep only minutes.
-  const s = String(isoOrStr || '').trim();
-  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-  return m ? m[1] : (s ? s : '');
-}
-function fmtLocalStampFull(isoOrStr){
-  const d = _parseLocalStampToDate(isoOrStr);
-  if (d) return _fmtLocal(d, { seconds:true });
-  const s = String(isoOrStr || '').trim();
-  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
-  return m ? m[1] : (s ? s : '');
-}
-// Backward compatibility
-function fmtLocalStampFromIso(isoOrStr){
-  return fmtLocalStampFull(isoOrStr);
-}
-function fmtStampForBadge(stampOrIso){
-  if (!stampOrIso) return '';
-  const s = String(stampOrIso).trim();
-  // Already a local stamp: YYYY-MM-DD HH:mm:ss.mmm or YYYY-MM-DD HH:mm...
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.slice(0,16); // drop seconds/ms for a cleaner badge
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  const pad = (n)=>String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function fmtStampForTooltip(stampOrIso){
-  if (!stampOrIso) return '';
-  const s = String(stampOrIso).trim();
-  // If it already looks like a local stamp, remove milliseconds if present.
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.replace(/\.\d{3}\b/,'');
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  const pad = (n)=>String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-function isEditedSinceImport(localIso, importedAtIso){
-  if (!localIso || !importedAtIso) return false;
-  const a = new Date(localIso).getTime();
-  const b = new Date(importedAtIso).getTime();
-  if (isNaN(a) || isNaN(b)) return false;
-  // Tolerance to avoid flicker around import completion time.
-  return a > (b + 2500);
-}
-
-function parseLocalStampFromFilename(name){
-  const n = String(name || '');
-  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
-  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
-  if (!m) return '';
-  const [,Y,Mo,D,HH,MM,SS,MS] = m;
-  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
-}
-function parseUploaderFromFilename(name){
-  const base = String(name || '').replace(/\.json$/i,'');
-  const parts = base.split('__');
-  if (parts.length < 2) return '';
-  return parts.slice(1).join('__').replace(/_/g,' ').trim();
-}
-function getLastOnlineImportInfo(){
-  try {
-    const raw = localStorage.getItem(SYNC_LAST_ONLINE_IMPORT_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    return (obj && typeof obj === 'object') ? obj : null;
-  } catch {
-    return null;
-  }
-}
-function setLastOnlineImportInfo(info){
-  try { localStorage.setItem(SYNC_LAST_ONLINE_IMPORT_KEY, JSON.stringify(info || null)); } catch {}
-  applySyncInfoUI();
-}
-function getLocalLastModifiedIso(){
-  try { return localStorage.getItem(LOCAL_LAST_MOD_KEY) || ''; } catch { return ''; }
-}
-
-// Debounced so bulk imports do not spam localStorage.
-let _localModT = null;
-let _localModLatest = 0;
-function markLocalModified(){
-  _localModLatest = Date.now();
-  if (_localModT) return;
-  _localModT = setTimeout(() => {
-    _localModT = null;
-    try { localStorage.setItem(LOCAL_LAST_MOD_KEY, new Date(_localModLatest).toISOString()); } catch {}
-    applySyncInfoUI();
-  }, 250);
-}
-
-function applySyncInfoUI(){
-  const s = getSyncUiState();
-  const badge = document.getElementById('syncInfoBadge');
-  const valueEl = document.getElementById('syncVersionValue');
-  const editedEl = document.getElementById('syncEditedTag');
-  if (!badge || !valueEl || !editedEl) return;
-
-  if (s.provider !== 'github') {
-    badge.style.display = 'none';
-    return;
-  }
-  badge.style.display = 'flex';
-
-  const info = getLastOnlineImportInfo();
-  if (!info) {
-    valueEl.textContent = '—';
-    editedEl.style.display = 'none';
-    badge.title = '';
-    return;
-  }
-
-  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
-  const dt = fmtLocalStampVersion(dtRaw) || '—';
-  const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
-  // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
-  valueEl.textContent = `${dt} · ${by}`;
-
-  // Edited detection: compare local last modified vs baseline captured at import.
-  const baselineIso = String(info.localBaselineIso || '').trim();
-  const localIso = String(getLocalLastModifiedIso() || '').trim();
-  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
-  const localT = localIso ? (new Date(localIso)).getTime() : 0;
-  const isEdited = (!!baselineT && !!localT && localT > baselineT + 500); // small buffer
-
-  if (isEdited) {
-    editedEl.style.display = '';
-    const tip = fmtLocalStampFull(localIso) || '';
-    badge.title = tip ? (`Last local edit: ${tip}`) : 'Last local edit: —';
-  } else {
-    editedEl.style.display = 'none';
-    badge.title = '';
-  }
-}
-
-function finalizeOnlineImportMeta(){
-  if (!pendingOnlineImportMeta) return;
-
-  // Treat the just-imported local state as the baseline (not edited).
-  const baselineIso = new Date().toISOString();
-  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
-
-  // Cancel any pending debounced local-mod writes from the import burst.
-  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
-
-  const meta = { ...(pendingOnlineImportMeta || {}) };
-  meta.localBaselineIso = baselineIso;
-
-  setLastOnlineImportInfo(meta);
-  pendingOnlineImportMeta = null;
-}
-
 
 function getSyncUiState(){
   const provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
@@ -7547,8 +6709,6 @@ function applySyncUiState(){
     else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
 
-  applySyncInfoUI();
-
   // Title hint
   document.title = 'Prompt Builder';
 
@@ -7567,7 +6727,7 @@ function openSyncSettingsModal(){
   wrap.innerHTML = `
     <div class="row">
       <label style="min-width:120px;">Owner</label>
-      <input id="ghOwner" type="text" placeholder="Repo owner (username or org)" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
+      <input id="ghOwner" type="text" placeholder="e.g. your-org-or-username" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
     </div>
     <div class="row">
       <label style="min-width:120px;">Repo</label>
@@ -7587,14 +6747,7 @@ function openSyncSettingsModal(){
     </div>
     <div class="row">
       <label style="min-width:120px;">Token</label>
-      <input id="ghToken" type="password" placeholder="${cfg.token ? 'Token saved (leave blank to keep)' : 'GitHub token'}" value="" style="flex:1;" />
-    </div>
-    <div class="row">
-      <label style="min-width:120px;"></label>
-      <div style="flex:1; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-        <div class="hint" style="margin:0;">Token is saved on this device. Leave blank to keep it.</div>
-        <button class="btn mini danger" id="ghClearToken" type="button">Clear Token</button>
-      </div>
+      <input id="ghToken" type="password" placeholder="GitHub fine-grained token" value="${escapeHtml(cfg.token)}" style="flex:1;" />
     </div>
     <div class="row">
       <label style="min-width:120px;">Status</label>
@@ -7620,17 +6773,10 @@ function openSyncSettingsModal(){
   });
 
   const btnTest = wrap.querySelector('#btnGhTest');
-  const btnClear = wrap.querySelector('#ghClearToken');
-  if (btnClear) btnClear.addEventListener('click', async (e) => {
-    e.preventDefault();
-    await SecretStore.clearGitHubToken();
-    toast('Token cleared');
-  });
-
   if (btnTest) btnTest.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      await GitHubSync.setConfig(readInputs());
+      GitHubSync.setConfig(readInputs());
       if (statusEl) statusEl.textContent = 'Testing...';
       const res = await GitHubSync.testConnection();
       if (statusEl) statusEl.textContent = 'Connected as ' + (res.login || '');
@@ -7644,8 +6790,8 @@ function openSyncSettingsModal(){
 
   openModal('Sync Settings', wrap, [
     btn('Cancel', { onClick: () => closeModal() }),
-    btn('Save', { primary: true, onClick: async () => {
-      await GitHubSync.setConfig(readInputs());
+    btn('Save', { primary: true, onClick: () => {
+      GitHubSync.setConfig(readInputs());
       closeModal();
       toast('Saved');
     }})
@@ -7709,7 +6855,6 @@ function initSyncUi(){
 (async function init(){
   initTheme();
   wireEvents();
-  await SecretStore.init();
   initSyncUi();
   await ensureSeed();
   await refreshAll();
