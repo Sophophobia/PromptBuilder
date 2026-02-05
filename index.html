@@ -954,6 +954,18 @@
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
+const fmtLocalShort = (iso) => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return String(iso);
+  }
+};
+
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
   const s = String(v ?? "");
@@ -2545,53 +2557,6 @@ async function loadUsersIntoSelect() {
     await refreshAll();
   };
 }
-
-async function renderPersonalCareerPick() {
-  const userId = state.currentUserId;
-  const row = $('#personalCareerPickRow');
-  const sel = $('#personalCareerPick');
-  if (!row || !sel) return;
-
-  row.style.display = userId ? 'flex' : 'none';
-  if (!userId) return;
-
-  const careers = await getAll('careers');
-  careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
-
-  const uc = await getOne('userCareer', userId);
-
-  sel.innerHTML = '';
-  const opt0 = document.createElement('option');
-  opt0.value = '';
-  opt0.textContent = '(No career selected)';
-  sel.appendChild(opt0);
-
-  careers.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.title || '(Career)';
-    sel.appendChild(opt);
-  });
-
-  sel.value = uc?.careerId || '';
-
-  sel.onchange = async () => {
-    const v = sel.value || '';
-    const t = nowISO();
-    const before = await getOne('userCareer', userId);
-    const after = { userId, careerId: v || null, updatedAt: t, createdAt: before?.createdAt || t };
-    await putOne('userCareer', after);
-    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-
-    // keep Prompt tab selector in sync
-    const promptUcSel = $('#promptUserCareerSelect');
-    if (promptUcSel) promptUcSel.value = v || '';
-
-    await renderPromptPickers();
-    await renderPromptPage(); // Prompt compile uses user's career
-  };
-}
-
 async function addUserFlow() {
   const name = prompt('User name?');
   if (!name) return;
