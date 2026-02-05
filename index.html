@@ -740,6 +740,20 @@
     .dragHandle:active{ cursor: grabbing; }
     .item.sortable.dragging{ opacity: .55; }
     
+
+    /* Category groups (Setup list) */
+    .catGroup{ border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,0.03); overflow:hidden; }
+    body.light .catGroup{ background: rgba(0,0,0,0.02); }
+    .catGroup + .catGroup{ margin-top:12px; }
+    .catGroupHeader{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; cursor:pointer; user-select:none; }
+    .catGroupTitleWrap{ display:flex; align-items:center; gap:10px; min-width:0; }
+    .catGroupChevron{ font-size:13px; opacity:.75; flex:0 0 auto; }
+    .catGroupTitle{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .catGroupMeta{ font-size:12px; opacity:.7; flex:0 0 auto; }
+    .catGroupItems{ padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px; }
+    .catGroup.isCollapsed .catGroupItems{ display:none; }
+    .catGroupEmpty{ opacity:.65; font-size:12px; padding:6px 0 0; }
+
 </style>
 </head>
 
@@ -2095,6 +2109,101 @@ async function getSetupCategories(sectionKey){
   }
 }
 
+function renderCategoryGroups({ listEl, hintEl, sectionKey, categories, items, sortKey, emptyHintText, makeRow }) {
+  const catsAll = Array.isArray(categories) ? categories : [];
+  const cats = catsAll.filter(c => String(c.sectionKey || '') === String(sectionKey || ''))
+    .sort((a, b) => {
+      const ao = (typeof a.order === 'number') ? a.order : 0;
+      const bo = (typeof b.order === 'number') ? b.order : 0;
+      if (ao !== bo) return ao - bo;
+      return String(a.title || '').localeCompare(String(b.title || ''));
+    });
+
+  const itemsArr = Array.isArray(items) ? items : [];
+  const hasAny = (itemsArr.length > 0) || (cats.length > 0);
+
+  if (hintEl) hintEl.style.display = hasAny ? 'none' : 'block';
+  if (!hasAny) return;
+
+  const catIds = new Set(cats.map(c => String(c.id)));
+  const byCat = new Map();
+
+  for (const it of itemsArr) {
+    const raw = String(it?.categoryId || '');
+    const key = catIds.has(raw) ? raw : '';
+    if (!byCat.has(key)) byCat.set(key, []);
+    byCat.get(key).push(it);
+  }
+
+  const groups = [
+    { id: '', title: 'Uncategorized', isCollapsed: false, order: -1, __virtual: true },
+    ...cats
+  ];
+
+  groups.forEach(cat => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'catGroup' + (cat.isCollapsed ? ' isCollapsed' : '');
+    groupEl.dataset.catId = String(cat.id || '');
+
+    const header = document.createElement('div');
+    header.className = 'catGroupHeader';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'catGroupTitleWrap';
+
+    const chev = document.createElement('span');
+    chev.className = 'catGroupChevron';
+    chev.textContent = groupEl.classList.contains('isCollapsed') ? '▸' : '▾';
+
+    const title = document.createElement('div');
+    title.className = 'catGroupTitle';
+    title.textContent = cat.title || '(Untitled)';
+
+    titleWrap.appendChild(chev);
+    titleWrap.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'catGroupMeta';
+
+    const groupItems = byCat.get(String(cat.id || '')) || [];
+    meta.textContent = String(groupItems.length);
+
+    header.appendChild(titleWrap);
+    header.appendChild(meta);
+
+    // Toggle is UI-only: does not persist or change isCollapsed in the category record.
+    header.onclick = () => {
+      const collapsed = groupEl.classList.toggle('isCollapsed');
+      chev.textContent = collapsed ? '▸' : '▾';
+    };
+
+    const itemsEl = document.createElement('div');
+    itemsEl.className = 'catGroupItems';
+
+    const ordered = groupItems.slice().sort((a, b) => {
+      const ao = (typeof a.sortOrder === 'number') ? a.sortOrder : 0;
+      const bo = (typeof b.sortOrder === 'number') ? b.sortOrder : 0;
+      if (ao !== bo) return ao - bo;
+      return String(a.title || a.name || '').localeCompare(String(b.title || b.name || ''));
+    });
+
+    if (!ordered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'catGroupEmpty';
+      empty.textContent = emptyHintText || 'No items.';
+      itemsEl.appendChild(empty);
+    } else {
+      ordered.forEach(it => itemsEl.appendChild(makeRow(it)));
+    }
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(itemsEl);
+    listEl.appendChild(groupEl);
+  });
+}
+
+
+
 async function upsertSetupCategory(cat){
   const now = nowISO();
   const row = {
@@ -2835,50 +2944,99 @@ function openEditItemModal({ title, initial, onSave, onDelete, previewLabel='Pre
 /** ========= Prompts ========= */
 async function renderPrompts() {
   const list = $('#listPrompts');
-  initSortableList(list, 'promptItems');
+  const hint = $('#hintPrompts');
   list.innerHTML = '';
 
-  let items = await getAll('promptItems');
-  items = applyUiOrder(
+  const itemsRaw = await getAll('promptItems');
+  const items = Array.isArray(itemsRaw) ? itemsRaw : [];
+  const cats = await getSetupCategories('promptItems');
+
+  renderCategoryGroups({
+    listEl: list,
+    hintEl: hint,
+    sectionKey: 'promptItems',
+    categories: cats,
     items,
-    'promptItems',
-    (x) => x.id,
-    (a,b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
-  );
+    sortKey: 'promptItems',
+    emptyHintText: 'No prompt items in this category.',
+    makeRow: (it) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = it.id;
 
-  $('#hintPrompts').style.display = items.length ? 'none' : 'block';
+      const left = document.createElement('div');
+      left.className = 'row-left';
 
-  items.forEach(it => {
-    const actions = [
-      btn('Edit', { mini:true, onClick: () => openEditItemModal({
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = it.title || '(Untitled)';
+
+      const subtitle = document.createElement('div');
+      subtitle.className = 'muted';
+      const updated = it.updatedAt || it.createdAt || '';
+      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
+
+      const small = document.createElement('div');
+      small.className = 'small';
+      const preview = String(it.content || '').replace(/\s+/g, ' ').trim();
+      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
+
+      left.appendChild(title);
+      if (subtitle.textContent) left.appendChild(subtitle);
+      left.appendChild(small);
+
+      const right = document.createElement('div');
+      right.className = 'row-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn small';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = () => openEditItemModal({
         title: 'Edit · Prompt Item',
         initial: it,
         onSave: savePromptItem,
         onDelete: deletePromptItem
-      })})
-    ];
-    const row = makeItemRow({
-      title: it.title,
-      subtitle: `Updated: ${formatLocal(it.updatedAt || it.createdAt)}`
-    }, actions);
-    makeRowSortable(row, { sortKey:'promptItems', id: it.id });
-    list.appendChild(row);
+      });
+
+      right.appendChild(editBtn);
+
+      row.appendChild(left);
+      row.appendChild(right);
+      return row;
+    }
   });
 }
+
 async function savePromptItem(payload) {
   const t = nowISO();
   if (!payload.id) {
-    const row = { id: uid(), title: payload.title || '', content: payload.content || '', createdAt: t, updatedAt: t };
+    const row = {
+      id: uid(),
+      title: payload.title || '',
+      content: payload.content || '',
+      categoryId: (typeof payload.categoryId === 'string') ? payload.categoryId : '',
+      sortOrder: (typeof payload.sortOrder === 'number') ? payload.sortOrder : Date.now(),
+      createdAt: t,
+      updatedAt: t
+    };
     await addOne('promptItems', row);
     await logChange({ entityType: 'promptItem', entityId: row.id, action: 'create', after: row });
   } else {
     const before = await getOne('promptItems', payload.id);
-    const after = { ...before, title: payload.title || '', content: payload.content || '', updatedAt: t };
+    const after = {
+      ...before,
+      title: payload.title || '',
+      content: payload.content || '',
+      categoryId: (typeof payload.categoryId === 'string') ? payload.categoryId : (before?.categoryId || ''),
+      sortOrder: (typeof payload.sortOrder === 'number') ? payload.sortOrder : (typeof before?.sortOrder === 'number' ? before.sortOrder : Date.now()),
+      updatedAt: t
+    };
     await putOne('promptItems', after);
     await logChange({ entityType: 'promptItem', entityId: after.id, action: 'update', after, before });
   }
   await refreshAll();
 }
+
 async function deletePromptItem(it) {
   const before = await getOne('promptItems', it.id);
   await deleteOne('promptItems', it.id);
@@ -2891,315 +3049,271 @@ async function deletePromptItem(it) {
 async function renderPersonal() {
   const userId = state.currentUserId;
   const list = $('#listPersonal');
-  initSortableList(list, 'personalTemplates');
+  const hint = $('#hintPersonal');
   list.innerHTML = '';
+
+  const addBtn = $('#btnAddPersonal');
   if (!userId) {
-    $('#hintPersonal').style.display = 'block';
+    if (addBtn) addBtn.disabled = true;
+    if (hint) {
+      hint.style.display = 'block';
+      hint.textContent = 'Select a user to edit personal info items.';
+    }
     return;
   }
 
-  let [templates, contents, conns] = await Promise.all([
+  if (addBtn) addBtn.disabled = false;
+
+  let [templatesRaw, contents, conns] = await Promise.all([
     getAll('personalTemplates'),
     getByIndex('personalContent', 'by_userId', userId),
     getAll('connections')
   ]);
 
-  templates = applyUiOrder(templates, 'personalTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  const assignments = await getOutputAssignments();
+  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
   const cMap = new Map((contents || []).map(c => [c.templateId, c]));
-  $('#hintPersonal').style.display = templates.length ? 'none' : 'block';
 
-  templates.forEach(tpl => {
-    const c = cMap.get(tpl.id);
-    const content = c?.content || '';
-    const isEmpty = !String(content).trim();
-    const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
+  conns = Array.isArray(conns) ? conns : [];
+  const connById = new Map(conns.map(c => [c.id, c]));
 
-    const actions = [
-      btn('Edit', { mini:true, onClick: () => openEditItemModal({
+  const outputConnTitleFor = (tpl) => {
+    const ocid = String(tpl?.outputConnectionId || '');
+    if (!ocid) return '';
+    const conn = connById.get(ocid);
+    return (conn && conn.title) ? String(conn.title) : (tpl.outputConnectionTitle ? String(tpl.outputConnectionTitle) : '');
+  };
+
+  const cats = await getSetupCategories('personalTemplates');
+
+  renderCategoryGroups({
+    listEl: list,
+    hintEl: hint,
+    sectionKey: 'personalTemplates',
+    categories: cats,
+    items: templates,
+    sortKey: 'personalTemplates',
+    emptyHintText: 'No items in this category.',
+    makeRow: (tpl) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = tpl.id;
+
+      const left = document.createElement('div');
+      left.className = 'row-left';
+
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = tpl.title || '(Untitled)';
+
+      const pills = document.createElement('div');
+      pills.style.display = 'flex';
+      pills.style.flexWrap = 'wrap';
+      pills.style.gap = '6px';
+      pills.style.marginTop = '6px';
+
+      if (tpl.isOutput !== false) {
+        const p = document.createElement('span');
+        p.className = 'pill';
+        p.textContent = 'Output';
+        pills.appendChild(p);
+
+        const ct = outputConnTitleFor(tpl);
+        if (ct) {
+          const p2 = document.createElement('span');
+          p2.className = 'pill';
+          p2.textContent = `For: ${ct}`;
+          pills.appendChild(p2);
+        }
+      }
+
+      const subtitle = document.createElement('div');
+      subtitle.className = 'muted';
+
+      const c = cMap.get(tpl.id);
+      const updated = (c?.updatedAt || tpl.updatedAt || tpl.createdAt || '');
+      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
+
+      const small = document.createElement('div');
+      small.className = 'small';
+      const preview = (c?.content || '').replace(/\s+/g, ' ').trim();
+      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
+
+      left.appendChild(title);
+      if (pills.childNodes.length) left.appendChild(pills);
+      if (subtitle.textContent) left.appendChild(subtitle);
+      left.appendChild(small);
+
+      const right = document.createElement('div');
+      right.className = 'row-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn small';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = () => openEditItemModal({
         title: 'Edit · Personal Info Item',
-        initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
-        outputMeta: { connections: conns, assignments },
+        initial: {
+          templateId: tpl.id,
+          title: tpl.title || '',
+          content: c?.content || '',
+          isOutput: (tpl.isOutput !== false),
+          outputConnectionId: (tpl.outputConnectionId || '')
+        },
+        outputMeta: { connections: conns },
         onSave: savePersonalTemplateAndContent,
         onDelete: deletePersonalTemplate
-      })})
-    ];
+      });
 
-    const pills = [
-      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : [])
-    ];
-    const row = makeItemRow({
-      title: tpl.title,
-      subtitle: isEmpty ? 'Content: (empty for this user)' : `Updated: ${formatLocal(updated)}`,
-      pills
-    }, actions);
-    makeRowSortable(row, { sortKey:'personalTemplates', id: tpl.id });
-    list.appendChild(row);
-  });
-}
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn small danger';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = async () => {
+        if (!confirm('Delete this personal info title and all user contents using it?')) return;
+        await deletePersonalTemplate({ templateId: tpl.id });
+      };
 
-async function savePersonalTemplateAndContent(payload) {
-  const userId = state.currentUserId;
-  if (!userId) { alert('Select a user first.'); return; }
+      right.appendChild(editBtn);
+      right.appendChild(delBtn);
 
-  const t = nowISO();
-
-  // Enforce: one output item per connection (across Personal + Career items).
-  if (payload.isOutput && (payload.outputConnectionId || '')) {
-    const currentKey = (payload.templateId || payload.id || '');
-    const connId = (payload.outputConnectionId || '');
-    const check = await enforceSingleOutputPerConnection({ currentKey, connId });
-    if (!check.ok && check.conflict) {
-      const msg =
-        `This connection is already used as the output for “${check.conflict.title}”.\n\n` +
-        `If you continue, the previous item’s output link will be cleared, and this item will become the output for “${check.connTitle}”.\n\n` +
-        `Do you want to continue?`;
-      const ok = confirm(msg);
-      if (!ok) return false;
-
-      // Clear the previous item's output relationship
-      await clearOutputLink(check.conflict.row, check.conflict.store);
+      row.appendChild(left);
+      row.appendChild(right);
+      return row;
     }
-  }
-
-  const templateId = payload.templateId || payload.id || uid();
-
-  const beforeTpl = await getOne('personalTemplates', templateId);
-  const beforeContent = await getOne('personalContent', [userId, templateId]);
-
-  const tpl = {
-    id: templateId,
-    title: (payload.title || '').trim(),
-    isOutput: (payload.isOutput !== undefined ? payload.isOutput : (beforeTpl?.isOutput ?? true)),
-    outputConnectionId: (payload.outputConnectionId !== undefined ? (payload.outputConnectionId || '') : (beforeTpl?.outputConnectionId || '')),
-    outputMode: (beforeTpl?.outputMode || 'section'),
-    createdAt: beforeTpl?.createdAt || payload.createdAt || t,
-    updatedAt: t
-  };
-  await putOne('personalTemplates', tpl);
-
-  const contentRow = {
-    userId,
-    templateId,
-    content: payload.content || '',
-    createdAt: beforeContent?.createdAt || payload.createdAt || t,
-    updatedAt: t
-  };
-  await putOne('personalContent', contentRow);
-
-  await logChange({
-    entityType: 'personalTemplate',
-    entityId: templateId,
-    action: beforeTpl ? 'update' : 'create',
-    after: tpl,
-    before: beforeTpl || null
   });
-  await logChange({
-    entityType: 'personalContent',
-    entityId: `${userId}:${templateId}`,
-    action: beforeContent ? 'update' : 'create',
-    after: contentRow,
-    before: beforeContent || null
-  });
-
-  await renderPersonal();
-  await renderPromptPage();
-}
-
-async function deletePersonalTemplate(payload) {
-  const templateId = payload.templateId || payload.id;
-  if (!templateId) return;
-
-  const before = await getOne('personalTemplates', templateId);
-  await deleteOne('personalTemplates', templateId);
-
-  const all = await getByIndex('personalContent', 'by_templateId', templateId);
-  for (const r of all) {
-    await deleteOne('personalContent', [r.userId, r.templateId]);
-  }
-
-  await logChange({
-    entityType: 'personalTemplate',
-    entityId: templateId,
-    action: 'delete',
-    after: null,
-    before: before || null
-  });
-
-  await renderPersonal();
-  await renderPromptPage();
-}
-
-async function renderPersonalCareerPick() {
-  const userId = state.currentUserId;
-  const row = $('#personalCareerPickRow');
-  const sel = $('#personalCareerPick');
-  row.style.display = userId ? 'flex' : 'none';
-  if (!userId) return;
-
-  const careers = await getAll('careers');
-  careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
-
-  const uc = await getOne('userCareer', userId);
-
-  sel.innerHTML = '';
-  const opt0 = document.createElement('option');
-  opt0.value = '';
-  opt0.textContent = '(No career selected)';
-  sel.appendChild(opt0);
-
-  careers.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.title || '(Career)';
-    sel.appendChild(opt);
-  });
-
-  sel.value = uc?.careerId || '';
-  sel.onchange = async () => {
-    const v = sel.value || '';
-    const t = nowISO();
-    const before = await getOne('userCareer', userId);
-    const after = { userId, careerId: v || null, updatedAt: t, createdAt: before?.createdAt || t };
-    await putOne('userCareer', after);
-    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-    await renderPromptPage(); // Prompt compile uses user's career
-  };
-}
-
-
-/** ========= Careers + Career Blocks ========= */
-async function renderCareers() {
-  // Career library list removed (managed from the top dropdown/buttons)
-  return;
-}
-function openEditCareerModal(career){
-  const container = document.createElement('div');
-  const titleInput = document.createElement('input');
-  titleInput.type = 'text';
-  titleInput.placeholder = 'Career title';
-  titleInput.value = career?.title || '';
-
-  container.appendChild(inputRow('Title', titleInput));
-  container.appendChild(document.createElement('div')).className = 'divider';
-  const note = document.createElement('div');
-  note.className = 'muted';
-  note.textContent = 'This edits the career name only. Career items are managed on the right list (filtered by the top Career dropdown).';
-  container.appendChild(note);
-
-  const footer = [
-  btn('Save', { primary:true, onClick: async () => {
-    await saveCareer({ ...career, title: titleInput.value.trim() });
-    closeModal();
-  }})
-];
-
-// ✅ 只有已有 career（有 id）才允许删除
-if (career?.id) {
-  footer.push(btn('Delete', { danger:true, onClick: async () => {
-    const ok = confirm('Delete this career?\nThis will also delete all its career items and unselect it for any users.');
-    if (!ok) return;
-    await deleteCareer(career);
-    closeModal();
-  }}));
-}
-
-  openModal('Edit · Career', container, footer);
-}
-async function saveCareer(payload) {
-  const t = nowISO();
-  if (!payload.id) {
-    const row = { id: uid(), title: payload.title || '(Career)', createdAt: t, updatedAt: t };
-    await addOne('careers', row);
-    await logChange({ entityType: 'career', entityId: row.id, action: 'create', after: row });
-  } else {
-    const before = await getOne('careers', payload.id);
-    const after = { ...before, title: payload.title || '(Career)', updatedAt: t };
-    await putOne('careers', after);
-    await logChange({ entityType: 'career', entityId: after.id, action: 'update', after, before });
-  }
-  await refreshAll();
-}
-async function deleteCareer(career) {
-  const before = await getOne('careers', career.id);
-
-  // delete blocks
-  const blocks = await getByIndex('careerBlocks', 'by_careerId', career.id);
-  for (const b of blocks) {
-    await deleteOne('careerBlocks', b.id);
-    await logChange({ entityType: 'careerBlock', entityId: b.id, action: 'delete', after: null, before: b });
-  }
-
-  // remove selections
-  const allUserCareer = await getAll('userCareer');
-  const impacted = allUserCareer.filter(x => x.careerId === career.id);
-  for (const uc of impacted) {
-    await deleteOne('userCareer', uc.userId);
-    await logChange({ entityType: 'userCareer', entityId: uc.userId, action: 'delete', after: null, before: uc });
-  }
-
-  await deleteOne('careers', career.id);
-  await logChange({ entityType: 'career', entityId: career.id, action: 'delete', after: null, before });
-  await refreshAll();
 }
 
 async function renderCareerBlocks() {
   const list = $('#listCareerBlocks');
-  initSortableList(list, 'careerTemplates');
+  const hint = $('#hintCareerBlocks');
   list.innerHTML = '';
 
   const careerId = state.currentCareerId || '';
+  const addBtn = $('#btnAddCareerBlock');
+
   if (!careerId) {
-    $('#hintCareerBlocks').style.display = 'block';
-    $('#hintCareerBlocks').textContent = 'Choose a career in the top Career filter to view/edit career items.';
-    $('#btnAddCareerBlock').disabled = true;
+    if (addBtn) addBtn.disabled = true;
+    if (hint) {
+      hint.style.display = 'block';
+      hint.textContent = 'Select a career to edit career items.';
+    }
     return;
   }
 
-  $('#btnAddCareerBlock').disabled = false;
+  if (addBtn) addBtn.disabled = false;
 
-  let [templates, contents, conns] = await Promise.all([
+  let [templatesRaw, contents, conns] = await Promise.all([
     getAll('careerTemplates'),
     getByIndex('careerContent', 'by_careerId', careerId),
     getAll('connections')
   ]);
 
-  templates = applyUiOrder(templates, 'careerTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  const assignments = await getOutputAssignments();
-  const cMap = new Map((contents || []).map(c => [c.templateId, c]));
+  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
+  const contentByTpl = new Map((contents || []).map(r => [r.templateId, r]));
 
-  $('#hintCareerBlocks').style.display = templates.length ? 'none' : 'block';
-  $('#hintCareerBlocks').textContent = templates.length ? '' : 'No career items yet. Click Add to create.';
+  conns = Array.isArray(conns) ? conns : [];
+  const connById = new Map(conns.map(c => [c.id, c]));
 
-  templates.forEach(tpl => {
-    const c = cMap.get(tpl.id);
-    const content = c?.content || '';
-    const isEmpty = !String(content).trim();
-    const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
+  const outputConnTitleFor = (tpl) => {
+    const ocid = String(tpl?.outputConnectionId || '');
+    if (!ocid) return '';
+    const conn = connById.get(ocid);
+    return (conn && conn.title) ? String(conn.title) : (tpl.outputConnectionTitle ? String(tpl.outputConnectionTitle) : '');
+  };
 
-    const actions = [
-      btn('Edit', { mini:true, onClick: () => openEditItemModal({
-        title: 'Edit · Career Item',
-        initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
-        outputMeta: { connections: conns, assignments },
+  const cats = await getSetupCategories('careerTemplates');
+
+  renderCategoryGroups({
+    listEl: list,
+    hintEl: hint,
+    sectionKey: 'careerTemplates',
+    categories: cats,
+    items: templates,
+    sortKey: 'careerTemplates',
+    emptyHintText: 'No items in this category.',
+    makeRow: (tpl) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = tpl.id;
+
+      const left = document.createElement('div');
+      left.className = 'row-left';
+
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = tpl.title || '(Untitled)';
+
+      const pills = document.createElement('div');
+      pills.style.display = 'flex';
+      pills.style.flexWrap = 'wrap';
+      pills.style.gap = '6px';
+      pills.style.marginTop = '6px';
+
+      if (tpl.isOutput !== false) {
+        const p = document.createElement('span');
+        p.className = 'pill';
+        p.textContent = 'Output';
+        pills.appendChild(p);
+
+        const ct = outputConnTitleFor(tpl);
+        if (ct) {
+          const p2 = document.createElement('span');
+          p2.className = 'pill';
+          p2.textContent = `For: ${ct}`;
+          pills.appendChild(p2);
+        }
+      }
+
+      const subtitle = document.createElement('div');
+      subtitle.className = 'muted';
+
+      const contentRow = contentByTpl.get(tpl.id);
+      const updated = (contentRow?.updatedAt || tpl.updatedAt || tpl.createdAt || '');
+      subtitle.textContent = updated ? `Updated: ${fmtLocalShort(updated)}` : '';
+
+      const small = document.createElement('div');
+      small.className = 'small';
+      const preview = (contentRow?.content || '').replace(/\s+/g, ' ').trim();
+      small.textContent = preview ? preview.slice(0, 160) + (preview.length > 160 ? '…' : '') : '—';
+
+      left.appendChild(title);
+      if (pills.childNodes.length) left.appendChild(pills);
+      if (subtitle.textContent) left.appendChild(subtitle);
+      left.appendChild(small);
+
+      const right = document.createElement('div');
+      right.className = 'row-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn small';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = () => openEditItemModal({
+        title: 'Edit · Career Info Item',
+        initial: {
+          templateId: tpl.id,
+          title: tpl.title || '',
+          content: contentRow?.content || '',
+          isOutput: (tpl.isOutput !== false),
+          outputConnectionId: (tpl.outputConnectionId || '')
+        },
+        outputMeta: { connections: conns },
         onSave: saveCareerTemplateAndContentByFilter,
         onDelete: deleteCareerTemplate
-      })})
-    ];
+      });
 
-    const pills = [
-      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : [])
-    ];
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn small danger';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = async () => {
+        if (!confirm('Delete this career item title and all career contents using it?')) return;
+        await deleteCareerTemplate({ templateId: tpl.id });
+      };
 
-    const row = makeItemRow({
-      title: tpl.title,
-      subtitle: isEmpty ? 'Content: (empty for this career)' : `Updated: ${formatLocal(updated)}`,
-      pills
-    }, actions);
-    makeRowSortable(row, { sortKey:'careerTemplates', id: tpl.id });
-    list.appendChild(row);
+      right.appendChild(editBtn);
+      right.appendChild(delBtn);
+
+      row.appendChild(left);
+      row.appendChild(right);
+      return row;
+    }
   });
 }
 
@@ -3580,308 +3694,101 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
 
 async function renderConnections() {
   const list = $('#listConnections');
-  initSortableList(list, 'connections');
+  const hint = $('#hintConnections');
   list.innerHTML = '';
 
-  let conns = await getAll('connections');
-  conns = applyUiOrder(conns, 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+  const connsRaw = await getAll('connections');
+  const conns = Array.isArray(connsRaw) ? connsRaw : [];
 
-  $('#hintConnections').style.display = conns.length ? 'none' : 'block';
+  const promptItems = await getAll('promptItems');
+  const pBy = new Map((promptItems || []).map(p => [p.id, p]));
 
-  conns.forEach(c => {
-    const actions = [
-      btn('Edit', { mini:true, onClick: () => openConnectionModal({ mode:'edit', initial: c }) })
-    ];
+  const pt = await getAll('personalTemplates');
+  const ct = await getAll('careerTemplates');
+  const ptBy = new Map((pt || []).map(t => [t.id, t]));
+  const ctBy = new Map((ct || []).map(t => [t.id, t]));
 
-    const pills = [
-      `Prompts: ${(c.promptItemIds || []).length}`,
-      `Personal: ${(c.personalTemplateIds || []).length}`,
-      `Career: ${(c.careerTemplateIds || []).length}`
-    ];
-    const row = makeItemRow({
-      title: c.title,
-      subtitle: `Updated: ${formatLocal(c.updatedAt)}` ,
-      pills
-    }, actions);
-    makeRowSortable(row, { sortKey:'connections', id: c.id });
-    list.appendChild(row);
-  });
-}
+  const cats = await getSetupCategories('connections');
 
+  renderCategoryGroups({
+    listEl: list,
+    hintEl: hint,
+    sectionKey: 'connections',
+    categories: cats,
+    items: conns,
+    sortKey: 'connections',
+    emptyHintText: 'No connections in this category.',
+    makeRow: (c) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = c.id;
 
-async function openConnectionModal({ mode, initial }) {
-  const prompts = await getAll('promptItems');
-  const personalTemplates = await getAll('personalTemplates');
-  const careerTemplates = await getAll('careerTemplates');
+      const left = document.createElement('div');
+      left.className = 'row-left';
 
-  prompts.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
-  personalTemplates.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
-  careerTemplates.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = c.title || '(Untitled)';
 
-  const selectedPrompt = new Set(initial?.promptItemIds || []);
-  const selectedPersonal = new Set(initial?.personalTemplateIds || []);
-  const selectedCareer = new Set(initial?.careerTemplateIds || []);
+      const subtitle = document.createElement('div');
+      subtitle.className = 'muted';
 
-  let careerSource = (initial?.careerSource || 'user');
+      const pCount = (c.promptItemIds || []).length;
+      const ptCount = (c.personalTemplateIds || []).length;
+      const ctCount = (c.careerTemplateIds || []).length;
 
+      const careerMode = c.careerSource === 'global' ? 'Global' : 'Per-career';
+      subtitle.textContent = `${careerMode} • Prompts: ${pCount} • Personal: ${ptCount} • Career: ${ctCount}`;
 
-  // Preload emptiness status for current user, for both "user career" and "current career"
-  const userId = state.currentUserId;
+      const small = document.createElement('div');
+      small.className = 'small';
 
-  const personalContent = userId ? await getByIndex('personalContent', 'by_userId', userId) : [];
-  const personalContentMap = new Map((personalContent || []).map(r => [r.templateId, r]));
+      // Show a short readable preview of the linked titles (first few)
+      const pickTitles = (ids, byMap) => (ids || [])
+        .map(id => byMap.get(id)?.title || byMap.get(id)?.name || '')
+        .filter(Boolean)
+        .slice(0, 4);
 
-  // User career mapping (per-user fixed career)
-  let userCareerId = null;
-  if (userId) {
-    const uc = await getOne('userCareer', userId);
-    userCareerId = uc?.careerId || null;
-  }
-  const careerContent_user = userCareerId ? await getByIndex('careerContent', 'by_careerId', userCareerId) : [];
-  const careerContentMap_user = new Map((careerContent_user || []).map(r => [r.templateId, r]));
+      const pTitles = pickTitles(c.promptItemIds, pBy);
+      const ptTitles = pickTitles(c.personalTemplateIds, ptBy);
+      const ctTitles = pickTitles(c.careerTemplateIds, ctBy);
 
-  // Current career (from Career Info dropdown)
-  const currentCareerId = state.currentCareerId || null;
-  const careerContent_current = currentCareerId ? await getByIndex('careerContent', 'by_careerId', currentCareerId) : [];
-  const careerContentMap_current = new Map((careerContent_current || []).map(r => [r.templateId, r]));
+      const parts = [];
+      if (pTitles.length) parts.push(`Prompts: ${pTitles.join(', ')}${pCount > 4 ? ', …' : ''}`);
+      if (ptTitles.length) parts.push(`Personal: ${ptTitles.join(', ')}${ptCount > 4 ? ', …' : ''}`);
+      if (ctTitles.length) parts.push(`Career: ${ctTitles.join(', ')}${ctCount > 4 ? ', …' : ''}`);
+      small.textContent = parts.length ? parts.join('  |  ') : '—';
 
-  const getCareerMapForSource = () => (careerSource === 'current' ? careerContentMap_current : careerContentMap_user);
-  const getCareerIdForSource = () => (careerSource === 'current' ? currentCareerId : userCareerId);
+      left.appendChild(title);
+      left.appendChild(subtitle);
+      left.appendChild(small);
 
-  const wrap = document.createElement('div');
+      const right = document.createElement('div');
+      right.className = 'row-actions';
 
-  wrap.innerHTML = `
-    <div class="split">
-      <div>
-        <div class="field">
-          <label>Connection Title</label>
-          <input id="connTitleInput" type="text" placeholder="e.g., Onboarding Prompt Pack"/>
-        </div>
-        <div class="field">
-          <label>Career Source</label>
-          <div class="row" style="gap:12px; flex-wrap:wrap; margin-top:6px;">
-            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="radio" name="connCareerSource" id="connCareerSourceCurrent" value="current" />
-              <span>Current career (dynamic)</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="radio" name="connCareerSource" id="connCareerSourceUser" value="user" />
-              <span>User career</span>
-            </label>
-          </div>
-          <div class="hint" style="margin-top:6px;">
-            Current career uses the Career Info dropdown. User career uses the selected user’s saved “User Career”.
-          </div>
-        </div>
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn small';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = async () => openConnectionModal({ mode:'edit', id: c.id });
 
-
-        <div class="hint" style="margin-top:-6px;">
-          Select items across Prompt, Personal Info, and Career Info. Titles are shared; Personal and Career content may be empty for the current user.
-        </div>
-
-        <div class="sectionTitle">Prompt Items</div>
-        <div id="connPickPrompts" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
-
-        <div class="sectionTitle" style="margin-top:12px;">Personal Info Items</div>
-        <div id="connPickPersonal" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
-
-        <div class="sectionTitle" style="margin-top:12px;">Career Info Items</div>
-        <div id="connPickCareer" style="margin-top:6px; max-height:18vh; overflow:auto; padding-right:6px;"></div>
-      </div>
-
-      <div>
-        <div class="hint" style="margin-bottom:6px;">Preview (for current user)</div>
-        <div class="mdPreview" id="connPreview" style="max-height:62vh; overflow:auto;"></div>
-        <div class="hint" id="connWarn" style="margin-top:8px; display:none;"></div>
-      </div>
-    </div>
-  `;
-
-  const footerButtons = [
-    btn('Save', { primary:true, onClick: async () => {
-      const title = $('#connTitleInput').value.trim() || '(Untitled Connection)';
-      const t = nowISO();
-
-      const row = {
-        id: initial?.id || uid(),
-        title,
-        promptItemIds: [...selectedPrompt],
-        personalTemplateIds: [...selectedPersonal],
-        careerTemplateIds: [...selectedCareer],
-        careerSource,
-        createdAt: initial?.createdAt || t,
-        updatedAt: t
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn small danger';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = async () => {
+        if (!confirm('Delete this connection?')) return;
+        await deleteConnection({ id: c.id });
       };
 
-      const before = initial?.id ? await getOne('connections', initial.id) : null;
-      await putOne('connections', row);
-      await logChange({ entityType:'connection', entityId: row.id, action: before ? 'update' : 'create', after: row, before });
+      right.appendChild(editBtn);
+      right.appendChild(delBtn);
 
-      closeModal();
-      await renderConnections();
-      await renderPromptPage();
-    }}),
-    // Move Cancel to the bottom-right (where Delete used to be)
-    btn('Cancel', { ghost:true, onClick: closeModal })
-  ];
-
-  const headerButtons = [];
-  if (mode === 'edit') {
-    headerButtons.push(
-      // Move Delete next to the modal title to reduce mis-click risk.
-      btn('Delete', { mini:true, danger:true, onClick: async () => {
-        const ok = confirm('Delete this connection?');
-        if (!ok) return;
-        const before = await getOne('connections', initial.id);
-        await deleteOne('connections', initial.id);
-        await logChange({ entityType:'connection', entityId: initial.id, action:'delete', after:null, before });
-        closeModal();
-        await renderConnections();
-        await renderPromptPage();
-      }})
-    );
-  }
-
-  openModal(mode === 'edit' ? 'Edit Connection' : 'New Connection', wrap, footerButtons, headerButtons);
-
-
-  $('#connTitleInput').value = initial?.title || '';
-
-  // Career Source radios
-  const rCur = $('#connCareerSourceCurrent');
-  const rUser = $('#connCareerSourceUser');
-  if (rCur && rUser) {
-    rCur.checked = (careerSource === 'current');
-    rUser.checked = (careerSource !== 'current');
-    rCur.onchange = () => { careerSource = 'current'; renderCareerChoices(); refreshPreview(); };
-    rUser.onchange = () => { careerSource = 'user'; renderCareerChoices(); refreshPreview(); };
-  }
-
-
-  const pickPrompts = $('#connPickPrompts');
-  const pickPersonal = $('#connPickPersonal');
-  const pickCareer = $('#connPickCareer');
-  const preview = $('#connPreview');
-  const warn = $('#connWarn');
-
-  const mkRow = ({ label, checked, onToggle, pill }) => {
-    const row = document.createElement('label');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.justifyContent = 'space-between';
-    row.style.gap = '10px';
-    row.style.padding = '8px 10px';
-    row.style.border = '1px solid rgba(34,49,75,.5)';
-    row.style.borderRadius = '12px';
-    row.style.marginBottom = '8px';
-    row.style.cursor = 'pointer';
-    row.style.userSelect = 'none';
-
-    const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-    left.style.gap = '10px';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = checked;
-    cb.onchange = (e) => onToggle(e.target.checked);
-
-    const text = document.createElement('div');
-    text.textContent = label;
-
-    left.appendChild(cb);
-    left.appendChild(text);
-
-    row.appendChild(left);
-
-    if (pill) {
-      const sp = document.createElement('span');
-      sp.className = 'pill ' + pill.className;
-      sp.textContent = pill.text;
-      row.appendChild(sp);
+      row.appendChild(left);
+      row.appendChild(right);
+      return row;
     }
-
-    return row;
-  };
-
-  prompts.forEach(p => {
-    pickPrompts.appendChild(mkRow({
-      label: p.title,
-      checked: selectedPrompt.has(p.id),
-      onToggle: (v) => {
-        v ? selectedPrompt.add(p.id) : selectedPrompt.delete(p.id);
-        refreshPreview();
-      }
-    }));
   });
-
-  personalTemplates.forEach(tpl => {
-    const content = userId ? (personalContentMap.get(tpl.id)?.content || '') : '';
-    const isEmpty = !String(content).trim();
-    pickPersonal.appendChild(mkRow({
-      label: tpl.title,
-      checked: selectedPersonal.has(tpl.id),
-      pill: isEmpty ? { text: 'Empty', className: 'warn' } : null,
-      onToggle: (v) => {
-        v ? selectedPersonal.add(tpl.id) : selectedPersonal.delete(tpl.id);
-        refreshPreview();
-      }
-    }));
-  });
-
-
-  function renderCareerChoices() {
-    pickCareer.innerHTML = '';
-    const cMapActive = getCareerMapForSource();
-    const careerIdActive = getCareerIdForSource();
-    careerTemplates.forEach(tpl => {
-      const content = careerIdActive ? (cMapActive.get(tpl.id)?.content || '') : '';
-      const isEmpty = !String(content).trim();
-      pickCareer.appendChild(mkRow({
-        label: tpl.title,
-        checked: selectedCareer.has(tpl.id),
-        pill: isEmpty ? { text: 'Empty', className: 'warn' } : null,
-        onToggle: (v) => {
-          v ? selectedCareer.add(tpl.id) : selectedCareer.delete(tpl.id);
-          refreshPreview();
-        }
-      }));
-    });
-  }
-  renderCareerChoices();
-
-  async function refreshPreview() {
-    const conn = {
-      promptItemIds: [...selectedPrompt],
-      personalTemplateIds: [...selectedPersonal],
-      careerTemplateIds: [...selectedCareer],
-      careerSource
-    };
-    const info = await analyzeConnectionForCurrentUser(conn);
-    preview.innerHTML = renderMarkdown(info.compiled || '');
-
-    const notes = [];
-    if (info.missingCareer && (conn.careerTemplateIds || []).length) {
-      notes.push('Career is not selected for this user.');
-    }
-    if (info.emptyPersonal.length) notes.push(`Empty personal: ${info.emptyPersonal.join(', ')}`);
-    if (info.emptyCareer.length) notes.push(`Empty career: ${info.emptyCareer.join(', ')}`);
-
-    if (notes.length) {
-      warn.style.display = 'block';
-      warn.textContent = '⚠️ ' + notes.join(' ');
-    } else {
-      warn.style.display = 'none';
-      warn.textContent = '';
-    }
-  }
-
-  await refreshPreview();
 }
 
-
-/** ========= Prompt Page ========= */
 async function renderPromptPickers() {
   const uSel = $('#promptUserSelect');
   const ucSel = $('#promptUserCareerSelect');
