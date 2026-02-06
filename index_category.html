@@ -1322,225 +1322,330 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let dbPromise = null;
 
-async function openDB(){
+function openDB() {
   if (dbPromise) return dbPromise;
-
-  const openWithVersion = (version) => new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, version);
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
 
     req.onupgradeneeded = (e) => {
       const db = req.result;
       const tx = req.transaction;
       const oldVersion = e.oldVersion || 0;
 
-      const ensureStore = (name, options, indexes=[]) => {
-        let store;
-        if (!db.objectStoreNames.contains(name)) {
-          store = db.createObjectStore(name, options);
-        } else {
-          store = tx.objectStore(name);
+      // v1 stores
+      if (oldVersion < 1) {
+        const users = db.createObjectStore('users', { keyPath: 'id' });
+        users.createIndex('by_name', 'name', { unique: false });
+
+        const prompts = db.createObjectStore('promptItems', { keyPath: 'id' });
+        prompts.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+
+        const personal = db.createObjectStore('personalItems', { keyPath: 'id' });
+        personal.createIndex('by_userId', 'userId', { unique: false });
+
+        db.createObjectStore('userCareer', { keyPath: 'userId' });
+
+        const connections = db.createObjectStore('connections', { keyPath: 'id' });
+        connections.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+
+        const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
+        logs.createIndex('by_timestamp', 'timestamp', { unique: false });
+      } else {
+        // ensure missing indexes for safety
+        if (!db.objectStoreNames.contains('changeLogs')) {
+          const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
+          logs.createIndex('by_timestamp', 'timestamp', { unique: false });
         }
-        // Ensure indexes exist (safe even for old DBs that lack some indexes)
-        (indexes || []).forEach(ix => {
-          try {
-            if (!store.indexNames.contains(ix.name)) {
-              store.createIndex(ix.name, ix.keyPath, ix.options || {});
-            }
-          } catch {}
-        });
-        return store;
-      };
+      }
 
-      // Core stores (create if missing)
-      ensureStore('users', { keyPath: 'id' });
-      ensureStore('careers', { keyPath: 'id' });
-      ensureStore('promptItems', { keyPath: 'id' });
-      ensureStore('connections', { keyPath: 'id' });
+      // v2: careers + careerBlocks
+      if (!db.objectStoreNames.contains('careers')) {
+        const careers = db.createObjectStore('careers', { keyPath: 'id' });
+        careers.createIndex('by_title', 'title', { unique: false });
+        careers.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('careerBlocks')) {
+        const blocks = db.createObjectStore('careerBlocks', { keyPath: 'id' });
+        blocks.createIndex('by_careerId', 'careerId', { unique: false });
+        blocks.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
+      }
 
-      // Legacy stores (kept for compatibility)
-      ensureStore('personalItems', { keyPath: 'id' }, [
-        { name: 'by_userId', keyPath: 'userId', options: { unique: false } }
-      ]);
-      ensureStore('careerItems', { keyPath: 'id' }, [
-        { name: 'by_careerId', keyPath: 'careerId', options: { unique: false } }
-      ]);
-      ensureStore('careerBlocks', { keyPath: 'id' }, [
-        { name: 'by_careerId', keyPath: 'careerId', options: { unique: false } }
-      ]);
-
-      // v3+ template/content stores
-      ensureStore('personalTemplates', { keyPath: 'id' });
-      ensureStore('careerTemplates', { keyPath: 'id' });
-
-      ensureStore('personalContent', { keyPath: ['userId','templateId'] }, [
-        { name: 'by_userId', keyPath: 'userId', options: { unique: false } },
-        { name: 'by_templateId', keyPath: 'templateId', options: { unique: false } }
-      ]);
-
-      ensureStore('careerContent', { keyPath: ['careerId','templateId'] }, [
-        { name: 'by_careerId', keyPath: 'careerId', options: { unique: false } },
-        { name: 'by_templateId', keyPath: 'templateId', options: { unique: false } }
-      ]);
-
-      ensureStore('userCareer', { keyPath: 'userId' });
-
-      ensureStore('changeLogs', { keyPath: 'id' }, [
-        { name: 'by_timestamp', keyPath: 'timestamp', options: { unique: false } }
-      ]);
-
-      // Categories store (shared via snapshots)
-      ensureStore('categories', { keyPath: 'id' }, [
-        { name: 'by_sectionKey', keyPath: 'sectionKey', options: { unique: false } },
-        { name: 'by_sectionKey_order', keyPath: ['sectionKey','order'], options: { unique: false } }
-      ]);
-
-      // ===== Legacy migrations (best-effort) =====
-      // Migration: careerItems -> careerTemplates + careerContent
+      // Migration (best effort): old 'careerItems' -> careers + careerBlocks(Main)
       if (oldVersion < 2) {
-        try {
-          const ciStore = tx.objectStore('careerItems');
-          const ctStore = tx.objectStore('careerTemplates');
-          const ccStore = tx.objectStore('careerContent');
-          const reqAll = ciStore.getAll();
-          reqAll.onsuccess = () => {
-            const items = reqAll.result || [];
-            const templateByTitle = new Map();
-            const mkId = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
-            const now = nowISO();
+        if (db.objectStoreNames.contains('careerItems')) {
+          const oldStore = tx.objectStore('careerItems');
+          const getAllReq = oldStore.getAll();
+          getAllReq.onsuccess = () => {
+            const oldRows = getAllReq.result || [];
+            const careersStore = tx.objectStore('careers');
+            const blocksStore = tx.objectStore('careerBlocks');
 
-            // Create templates based on unique titles
-            items.forEach(it => {
-              const title = (it?.title || '').trim();
-              if (!title) return;
-              if (!templateByTitle.has(title)) {
-                const tid = mkId();
-                templateByTitle.set(title, tid);
-                ctStore.put({ id: tid, title, createdAt: now, updatedAt: now, isOutput: true, outputConnectionId: '' });
-              }
-            });
+            oldRows.forEach((c) => {
+              const career = {
+                id: c.id,
+                title: c.title || '(Career)',
+                createdAt: c.createdAt || nowISO(),
+                updatedAt: c.updatedAt || c.createdAt || nowISO()
+              };
+              careersStore.put(career);
 
-            // Create content rows
-            items.forEach(it => {
-              const title = (it?.title || '').trim();
-              if (!title || !it?.careerId) return;
-              const tid = templateByTitle.get(title);
-              if (!tid) return;
-              ccStore.put({ careerId: it.careerId, templateId: tid, content: it.content || '', createdAt: now, updatedAt: now });
+              const block = {
+                id: uid(),
+                careerId: c.id,
+                title: 'Main',
+                content: c.content || '',
+                createdAt: career.createdAt,
+                updatedAt: career.updatedAt
+              };
+              blocksStore.add(block);
             });
           };
-        } catch (e) {
-          console.warn('Legacy migration (careerItems) skipped:', e);
+        }
+
+        // Migration: old per-user connections -> global: keep promptItemIds, drop personal selection/userId
+        if (db.objectStoreNames.contains('connections')) {
+          const connStore = tx.objectStore('connections');
+          const reqAll = connStore.getAll();
+          reqAll.onsuccess = () => {
+            const rows = reqAll.result || [];
+            rows.forEach((r) => {
+              const migrated = {
+                id: r.id,
+                title: r.title || '',
+                promptItemIds: r.promptItemIds || [],
+                createdAt: r.createdAt || nowISO(),
+                updatedAt: r.updatedAt || r.createdAt || nowISO()
+              };
+              connStore.put(migrated);
+            });
+          };
         }
       }
-
-      // Migration: personalItems -> personalTemplates + personalContent
+      // v3: Templates for Personal & Career items + per-user/per-career content
       if (oldVersion < 3) {
-        try {
-          const piStore = tx.objectStore('personalItems');
-          const ptStore = tx.objectStore('personalTemplates');
-          const pcStore = tx.objectStore('personalContent');
-          const reqAll = piStore.getAll();
-          reqAll.onsuccess = () => {
-            const items = reqAll.result || [];
-            const templateByTitle = new Map();
-            const mkId = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
-            const now = nowISO();
+        const now = new Date().toISOString();
+        const mkId = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
 
-            items.forEach(it => {
-              const title = (it?.title || '').trim();
-              if (!title) return;
-              if (!templateByTitle.has(title)) {
-                const tid = mkId();
-                templateByTitle.set(title, tid);
-                ptStore.put({ id: tid, title, createdAt: now, updatedAt: now, isOutput: true, outputConnectionId: '' });
-              }
-            });
-
-            items.forEach(it => {
-              const title = (it?.title || '').trim();
-              if (!title || !it?.userId) return;
-              const tid = templateByTitle.get(title);
-              if (!tid) return;
-              pcStore.put({ userId: it.userId, templateId: tid, content: it.content || '', createdAt: now, updatedAt: now });
-            });
-          };
-        } catch (e) {
-          console.warn('Legacy migration (personalItems) skipped:', e);
+        if (!db.objectStoreNames.contains('personalTemplates')) {
+          const st = db.createObjectStore('personalTemplates', { keyPath: 'id' });
+          st.createIndex('by_title', 'title', { unique: false });
+          st.createIndex('by_updatedAt', 'updatedAt', { unique: false });
         }
+        if (!db.objectStoreNames.contains('personalContent')) {
+          const sc = db.createObjectStore('personalContent', { keyPath: ['userId', 'templateId'] });
+          sc.createIndex('by_userId', 'userId', { unique: false });
+          sc.createIndex('by_templateId', 'templateId', { unique: false });
+          sc.createIndex('by_userId_updatedAt', ['userId', 'updatedAt'], { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains('careerTemplates')) {
+          const ct = db.createObjectStore('careerTemplates', { keyPath: 'id' });
+          ct.createIndex('by_title', 'title', { unique: false });
+          ct.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('careerContent')) {
+          const cc = db.createObjectStore('careerContent', { keyPath: ['careerId', 'templateId'] });
+          cc.createIndex('by_careerId', 'careerId', { unique: false });
+          cc.createIndex('by_templateId', 'templateId', { unique: false });
+          cc.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
+        }
+
+        // Migration: personalItems (per-user) -> personalTemplates (global) + personalContent (per-user)
+        try {
+          if (db.objectStoreNames.contains('personalItems')) {
+            const oldStore = tx.objectStore('personalItems');
+            const tplStore = tx.objectStore('personalTemplates');
+            const contentStore = tx.objectStore('personalContent');
+
+            const reqAll = oldStore.getAll();
+            reqAll.onsuccess = () => {
+              const rows = reqAll.result || [];
+              const titleToTpl = new Map();
+
+              // create templates (unique by title)
+              rows.forEach(r => {
+                const title = (r.title || '').trim();
+                if (!title) return;
+                if (!titleToTpl.has(title)) {
+                  titleToTpl.set(title, {
+                    id: mkId(),
+                    title,
+                    createdAt: r.createdAt || now,
+                    updatedAt: r.updatedAt || r.createdAt || now
+                  });
+                } else {
+                  // keep latest updatedAt
+                  const tpl = titleToTpl.get(title);
+                  const u = r.updatedAt || r.createdAt || now;
+                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
+                }
+              });
+
+              titleToTpl.forEach(tpl => tplStore.put(tpl));
+
+              // create content rows
+              rows.forEach(r => {
+                const title = (r.title || '').trim();
+                const tpl = titleToTpl.get(title);
+                if (!tpl) return;
+                contentStore.put({
+                  userId: r.userId,
+                  templateId: tpl.id,
+                  content: r.content || '',
+                  createdAt: r.createdAt || now,
+                  updatedAt: r.updatedAt || r.createdAt || now
+                });
+              });
+            };
+          }
+        } catch (err) { /* best effort */ }
+
+        // Migration: careerBlocks (per-career) -> careerTemplates (global) + careerContent (per-career)
+        try {
+          if (db.objectStoreNames.contains('careerBlocks')) {
+            const oldStore = tx.objectStore('careerBlocks');
+            const tplStore = tx.objectStore('careerTemplates');
+            const contentStore = tx.objectStore('careerContent');
+
+            const reqAll = oldStore.getAll();
+            reqAll.onsuccess = () => {
+              const rows = reqAll.result || [];
+              const titleToTpl = new Map();
+
+              rows.forEach(r => {
+                const title = (r.title || '').trim();
+                if (!title) return;
+                if (!titleToTpl.has(title)) {
+                  titleToTpl.set(title, {
+                    id: mkId(),
+                    title,
+                    createdAt: r.createdAt || now,
+                    updatedAt: r.updatedAt || r.createdAt || now
+                  });
+                } else {
+                  const tpl = titleToTpl.get(title);
+                  const u = r.updatedAt || r.createdAt || now;
+                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
+                }
+              });
+
+              titleToTpl.forEach(tpl => tplStore.put(tpl));
+
+              rows.forEach(r => {
+                const title = (r.title || '').trim();
+                const tpl = titleToTpl.get(title);
+                if (!tpl) return;
+                contentStore.put({
+                  careerId: r.careerId,
+                  templateId: tpl.id,
+                  content: r.content || '',
+                  createdAt: r.createdAt || now,
+                  updatedAt: r.updatedAt || r.createdAt || now
+                });
+              });
+            };
+          }
+        } catch (err) { /* best effort */ }
+
+        // Normalize: ensure connections have arrays for all categories
+        try {
+          if (db.objectStoreNames.contains('connections')) {
+            const connStore = tx.objectStore('connections');
+            const reqAll = connStore.getAll();
+            reqAll.onsuccess = () => {
+              const rows = reqAll.result || [];
+              rows.forEach(r => {
+                const patched = {
+                  ...r,
+                  promptItemIds: r.promptItemIds || [],
+                  personalTemplateIds: r.personalTemplateIds || [],
+                  careerTemplateIds: r.careerTemplateIds || [],
+                  updatedAt: r.updatedAt || r.createdAt || now
+                };
+                connStore.put(patched);
+              });
+            };
+          }
+        } catch (err) { /* best effort */ }
       }
 
-      // Normalize: ensure connections have arrays for all categories
+      // v5: Categories (per section)
+      if (!db.objectStoreNames.contains('categories')) {
+        const cat = db.createObjectStore('categories', { keyPath: 'id' });
+        cat.createIndex('by_sectionKey', 'sectionKey', { unique: false });
+        cat.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
+      }
+
+
+    };
+
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => {
       try {
-        const cStore = tx.objectStore('connections');
-        const reqAll = cStore.getAll();
-        reqAll.onsuccess = () => {
-          const rows = reqAll.result || [];
-          rows.forEach(c => {
-            const patched = {
-              ...c,
-              promptItemIds: Array.isArray(c.promptItemIds) ? c.promptItemIds : [],
-              personalTemplateIds: Array.isArray(c.personalTemplateIds) ? c.personalTemplateIds : [],
-              careerTemplateIds: Array.isArray(c.careerTemplateIds) ? c.careerTemplateIds : [],
-              createdAt: c.createdAt || nowISO(),
-              updatedAt: nowISO()
-            };
-            cStore.put(patched);
-          });
-        };
+        if (req.error && req.error.name === 'VersionError') {
+          toast('IndexedDB version mismatch. Use DevTools → Application → Clear site data, then reload.', 6000);
+        }
       } catch {}
-    };
-
-    req.onsuccess = () => {
-      const db = req.result;
-      // Close on versionchange so other tabs can upgrade cleanly
-      db.onversionchange = () => {
-        try { db.close(); } catch {}
-        toast('Database updated in another tab. Please reload.');
-      };
-      resolve(db);
-    };
-
-    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
-    req.onblocked = () => {
-      toast('Database upgrade is blocked. Close other MiVida Prompt Builder tabs and retry.');
+      reject(req.error);
     };
   });
-
-  dbPromise = (async () => {
-    try {
-      return await openWithVersion(DB_VERSION);
-    } catch (err) {
-      // If the user previously opened a newer DB version, try upgrading from the existing version.
-      if (err && err.name === 'VersionError') {
-        try {
-          const existingDb = await new Promise((resolve, reject) => {
-            const r = indexedDB.open(DB_NAME);
-            r.onsuccess = () => resolve(r.result);
-            r.onerror = () => reject(r.error || new Error('IndexedDB open failed'));
-          });
-          const v = Number(existingDb.version || DB_VERSION);
-          try { existingDb.close(); } catch {}
-          return await openWithVersion(v + 1);
-        } catch (e2) {
-          console.error(e2);
-          throw err;
-        }
-      }
-      throw err;
-    }
-  })();
-
-  try {
-    return await dbPromise;
-  } catch (e) {
-    dbPromise = null; // allow retry after a failure
-    throw e;
-  }
+  return dbPromise;
 }
+
+async function withStore(storeName, mode, fn) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    const res = fn(store, tx);
+    tx.oncomplete = () => {
+      try { if (mode === 'readwrite') markLocalModified(); } catch {}
+      resolve(res);
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+async function getAll(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function getOne(storeName, key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
+async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
+async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
+
+async function getByIndex(storeName, indexName, query) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const idx = store.index(indexName);
+    const req = idx.getAll(query);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 
 /** ========= Categories (per section) ========= */
 const CATEGORY_SECTION_KEYS = Object.freeze({
@@ -2664,7 +2769,7 @@ async function renderPrompts() {
     items,
     'promptItems',
     (x) => x.id,
-    (a,b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+    (a,b) => ((b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))
   );
 
   $('#hintPrompts').style.display = items.length ? 'none' : 'block';
@@ -5850,7 +5955,8 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
     promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
-    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
+    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t])),
+    connections: new Map((snap.connections || []).map(c => [c.id, c]))
   };
 
   // Old -> local/new IDs (merge-aware)
@@ -6510,7 +6616,7 @@ async function clearAllLocalData() {
   // NOTE: This app no longer uses a global `db` handle.
   // Always open the DB via openDB() so import flows never fail with "db is not defined".
   const db = await openDB();
-  const allStores = ['users','categories','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','changeLogs'];
+  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','changeLogs'];
   const stores = allStores.filter(n => db.objectStoreNames.contains(n));
   if (!stores.length) return;
   const tx = db.transaction(stores, 'readwrite');
@@ -6545,20 +6651,34 @@ async function importSnapshotSelectionReplace(snap, sel) {
 
 
 async function refreshAll() {
-  // 1) Top filters first (so downstream renders can rely on state + selects)
-  await loadUsersIntoSelect();
-  await loadCareerFilterSelect();
-  await renderPersonalCareerPick();
+  const steps = [
+    ['loadUsersIntoSelect', loadUsersIntoSelect],
+    ['loadCareerFilterSelect', loadCareerFilterSelect],
+    ['renderPersonalCareerPick', renderPersonalCareerPick],
+    ['renderPrompts', renderPrompts],
+    ['renderPersonal', renderPersonal],
+    ['renderCareer', renderCareer],
+    ['renderConnections', renderConnections],
+    ['renderPromptPickers', renderPromptPickers],
+    ['renderPromptPage', renderPromptPage],
+    ['renderChangeLog', renderChangeLog]
+  ];
 
-  // 2) Setup page sections
-  await renderPrompts();
-  await renderPersonal();
-  await renderCareerBlocks();
-  await renderConnections();
-
-  // 3) Prompt page
-  await renderPromptPickers();
-  await renderPromptPage();
+  const errs = [];
+  for (const [name, fn] of steps) {
+    try {
+      await fn();
+    } catch (e) {
+      console.error(e);
+      errs.push({ name, message: (e && e.message) ? e.message : String(e) });
+    }
+  }
+  if (errs.length) {
+    try {
+      window.__lastRefreshErrors = errs;
+    } catch {}
+    toast(`Refresh finished with ${errs.length} error(s). Open DevTools Console for details.`, 4500);
+  }
 }
 
 /** ========= Wire Events ========= */
