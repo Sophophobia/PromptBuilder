@@ -906,8 +906,10 @@ const escapeCsv = (v) => {
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 };
-const downloadText = (filename, text, mime='text/plain') => {
-  const blob = new Blob([text], { type: mime });
+const downloadText = (filename, text, mime='text/plain;charset=utf-8') => {
+  // Ensure consistent UTF-8 bytes on disk (avoid garbled characters in some environments).
+  const bytes = new TextEncoder().encode(String(text ?? ''));
+  const blob = new Blob([bytes], { type: mime });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -1048,20 +1050,6 @@ function renderMarkdown(md){
       html += top.type === 'ul' ? `</ul>` : `</ol>`;
     }
   };
-
-  function fromBase64Utf8(b64) {
-  const bin = atob(String(b64 || '').replace(/\s/g, ''));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder('utf-8').decode(bytes);
-}
-
-function toBase64Utf8(str) {
-  const bytes = new TextEncoder().encode(String(str || ''));
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
-}
 
   const ensureList = (type, indent) => {
     // Close deeper lists if needed
@@ -1316,7 +1304,7 @@ function toBase64Utf8(str) {
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise = null;
 
@@ -6413,7 +6401,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await f.text();
+    const buf = await f.arrayBuffer();
+    const text = new TextDecoder('utf-8').decode(buf);
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6441,7 +6430,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await f.text();
+        const buf = await f.arrayBuffer();
+        const text = new TextDecoder('utf-8').decode(buf);
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -6767,8 +6757,12 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const raw = atob(content.replace(/\s/g,''));
-    return raw;
+    const b64 = content.replace(/\s/g,'');
+    // base64 -> bytes -> UTF-8 string
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
