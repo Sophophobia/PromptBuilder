@@ -2076,7 +2076,7 @@ async function addCareerFlow() {
   await loadCareerFilterSelect();
   await setCurrentCareer(row.id);
 
-  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick(); // so user career dropdown includes the new career
+  await renderPersonalCareerPick(); // so user career dropdown includes the new career
 }
 
 async function renameCareerFlow() {
@@ -2108,7 +2108,7 @@ async function deleteCareerFlow() {
   careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
   const next = careers[0]?.id || '';
   await setCurrentCareer(next);
-  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
+  await renderPersonalCareerPick();
 }
 
 /** ========= Career (Edit only) ========= */
@@ -4758,13 +4758,6 @@ async function openImportWizard(snap) {
 
   // Alias for older import UI code paths
   function fmtLocal(iso) { return fmtTime(iso); }
-function fmtLocalShort(iso){
-  const s = fmtLocal(iso);
-  // Compact: keep to minutes
-  const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-  return m ? m[1] : s;
-}
-
 
   function setDupTimesForGroup(group, dupIdSet, localMap, getLabel) {
     group.rowById.forEach((cell, id) => {
@@ -6249,7 +6242,9 @@ async function refreshAll() {
   // 1) Top filters first (so downstream renders can rely on state + selects)
   await loadUsersIntoSelect();
   await loadCareerFilterSelect();
-  if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick(); // 2) Setup page sections
+  await renderPersonalCareerPick();
+
+  // 2) Setup page sections
   await renderPrompts();
   await renderPersonal();
   await renderCareerBlocks();
@@ -6404,7 +6399,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const setupUserSel = $('#userSelect');
     if (setupUserSel) setupUserSel.value = state.currentUserId || '';
 
-    if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
+    await renderPersonalCareerPick();
     await renderPersonal();
     await renderPromptPickers();
     await renderPromptPage();
@@ -6425,7 +6420,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const setupUcSel = $('#personalCareerPick');
     if (setupUcSel) setupUcSel.value = v || '';
 
-    if (typeof renderPersonalCareerPick === 'function') await renderPersonalCareerPick();
+    await renderPersonalCareerPick();
     await renderPromptPickers();
     await renderPromptPage();
   });
