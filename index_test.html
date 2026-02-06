@@ -1049,6 +1049,20 @@ function renderMarkdown(md){
     }
   };
 
+  function fromBase64Utf8(b64) {
+  const bin = atob(String(b64 || '').replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function toBase64Utf8(str) {
+  const bytes = new TextEncoder().encode(String(str || ''));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
   const ensureList = (type, indent) => {
     // Close deeper lists if needed
     closeListsToIndent(indent);
@@ -4088,7 +4102,7 @@ async function exportSnapshotJson(options=null) {
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
   toast('Snapshot exported');
   return snapshot;
 }
