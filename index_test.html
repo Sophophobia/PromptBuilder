@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Prompt Builder</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237aa2ff'/%3E%3Cpath d='M22 46V18h13c7 0 11 4 11 10s-4 10-11 10H30v8h-8zm8-16h5c3 0 4-2 4-4s-1-4-4-4h-5v8z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <style>
     :root{
       color-scheme: dark;
@@ -907,7 +908,6 @@ const escapeCsv = (v) => {
   return s;
 };
 const downloadText = (filename, text, mime='text/plain;charset=utf-8') => {
-  // Ensure consistent UTF-8 bytes on disk (avoid garbled characters in some environments).
   const bytes = new TextEncoder().encode(String(text ?? ''));
   const blob = new Blob([bytes], { type: mime });
   const a = document.createElement('a');
@@ -1787,9 +1787,13 @@ function setTab(tab){
   }
 }
 /** ========= Modal helpers ========= */
+let modalReturnFocusEl = null;
 function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
   const overlay = $('#modalOverlay');
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
+
+  // Save focus to restore on close
+  try { modalReturnFocusEl = document.activeElement; } catch { modalReturnFocusEl = null; }
 
   // Reset modal mode
   if (overlay) overlay.classList.remove('fullscreen');
@@ -1826,6 +1830,12 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
   }
+
+  // Move focus into the modal for accessibility
+  try {
+    const closeBtn = $('#btnCloseModal');
+    if (closeBtn) closeBtn.focus({ preventScroll: true });
+  } catch {}
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
@@ -1833,6 +1843,12 @@ function closeModal() {
   if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
+
+  // If focus is inside the modal, move it out before hiding from assistive tech.
+  try {
+    const ae = document.activeElement;
+    if (overlay && ae && overlay.contains(ae)) ae.blur();
+  } catch {}
 
   if (overlay) {
     overlay.classList.remove('open');
@@ -1846,6 +1862,15 @@ function closeModal() {
 
   const footer = $('#modalFooter');
   if (footer) footer.style.display = 'flex';
+
+  // Restore focus to where the user was before opening the modal
+  try {
+    const el = modalReturnFocusEl;
+    modalReturnFocusEl = null;
+    if (el && el.isConnected && typeof el.focus === 'function') {
+      el.focus({ preventScroll: true });
+    }
+  } catch { modalReturnFocusEl = null; }
 }
 function btn(text, opts={}) {
   const b = document.createElement('button');
@@ -3836,7 +3861,7 @@ async function exportLogsCsv() {
   ]);
 
   const csv = [header, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
-  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
+  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 async function exportSnapshotJson(options=null) {
@@ -6402,7 +6427,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   if (!f) return;
   try {
     const buf = await f.arrayBuffer();
-    const text = new TextDecoder('utf-8').decode(buf);
+    const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6431,7 +6456,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const buf = await f.arrayBuffer();
-        const text = new TextDecoder('utf-8').decode(buf);
+        const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -6758,7 +6783,6 @@ const GitHubSync = (() => {
       throw new Error('Unsupported file encoding: ' + enc);
     }
     const b64 = content.replace(/\s/g,'');
-    // base64 -> bytes -> UTF-8 string
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -6954,10 +6978,17 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     const dtText = fmtLocalStampVersion(meta.datetime || '') || 'Unknown datetime';
     const upText = meta.uploader || 'Unknown';
     row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
-    row.addEventListener('click', (e) => {
+    row.addEventListener('click', async (e) => {
       e.preventDefault();
+      try { row.blur(); } catch {}
       closeModal();
-      try { onPick && onPick(f); } catch (err) { console.error(err); }
+      try {
+        if (onPick) await onPick(f);
+      } catch (err) {
+        console.error(err);
+        toast('Import failed: ' + (err?.message || String(err)));
+        try { alert('Import failed.\\n\\n' + (err?.message || String(err))); } catch {}
+}
     });
     list.appendChild(row);
   });
