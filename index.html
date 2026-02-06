@@ -99,6 +99,9 @@
     .modeGroup{ display:flex; align-items:center; gap:8px; }
     .modeChip.iconOnly{ padding:6px 9px; }
     .modeChip.iconOnly .dot{ display:none; }
+    /* icon-only buttons should be compact and truly icon-only */
+    .modeChip.iconOnly{ width:34px; justify-content:center; padding:6px 0; }
+    .modeChip.iconOnly .icon{ font-size:14px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
     .modeChip{
       display:inline-flex;
       align-items:center;
@@ -124,10 +127,49 @@
       background: var(--muted);
       box-shadow: 0 0 0 2px rgba(0,0,0,.15) inset;
     }
-    .modeChip[data-provider="local"] .dot{ background: #6EE7B7; }
-    .modeChip[data-provider="github"] .dot{ background: #f59e0b; }
+    .modeChip[data-provider="local"] .dot{ background: #94a3b8; }
+    .modeChip[data-provider="github"] .dot{ background: #22c55e; }
+    .modeChip[data-provider="github"]{ border-color: rgba(34,197,94,.55); }
+    .modeChip[data-provider="github"]:hover{ background: rgba(34,197,94,.08); }
 
-    .title .sub{ color:var(--muted); font-size:13px; }
+    .syncInfoBadge{
+      display:none;
+      align-items:center;
+      gap:8px;
+      margin-left:8px;
+      padding:6px 10px;
+      border:1px solid var(--border);
+      border-radius:999px;
+      background: var(--panelB);
+      max-width: 560px;
+      white-space:nowrap;
+      flex-wrap:nowrap;
+    }
+    .syncInfoLabel{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--muted);
+      white-space:nowrap;
+      opacity:.9;
+    }
+    .syncInfoValue{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--text);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width: 420px;
+    }
+    .syncEditedTag{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--warn);
+      white-space:nowrap;
+      opacity:.95;
+    }
+
+.title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
       display:flex; gap:10px; background: var(--panelA);
       border:1px solid var(--border); border-radius: 999px; padding:6px; box-shadow: var(--shadow);
@@ -689,9 +731,16 @@
               <span class="dot" aria-hidden="true"></span>
               <span class="label">Manual</span>
             </button>
+            
             <button class="modeChip iconOnly" id="btnSyncSettings" title="Sync settings">
-              <span class="label">⚙</span>
+              <span class="icon" aria-hidden="true">⚙</span>
             </button>
+
+            <div class="syncInfoBadge" id="syncInfoBadge" title="">
+              <span class="syncInfoLabel">JSON</span>
+              <span class="syncInfoValue" id="syncVersionValue">—</span>
+              <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
+            </div>
           </div>
         </div>
         <div class="sub" id="syncSubText">Offline · Local cache</div>
@@ -711,15 +760,10 @@
         <button class="btn mini danger" id="btnWipeImportSnapshot" title="Delete all local data and replace it with the selected JSON snapshot">Wipe Local and Import JSON</button>
       </div>
 
-      <div class="chip">
-        <label>Theme</label>
-        <button class="btn mini" id="btnToggleTheme">Light mode</button>
-      </div>
-
       <div class="chip" style="margin-left:auto;">
-        <label>About</label>
+        <label>Theme</label>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <span class="pill" id="appVersionPill" title="App version">v38</span>
+          <button class="btn mini" id="btnToggleTheme">Light mode</button>
           <button class="btn mini" id="btnHardRefresh" title="Hard refresh (bypass cache)">↻</button>
         </div>
       </div>
@@ -1523,7 +1567,10 @@ async function withStore(storeName, mode, fn) {
     const tx = db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
     const res = fn(store, tx);
-    tx.oncomplete = () => resolve(res);
+    tx.oncomplete = () => {
+      try { if (mode === 'readwrite') markLocalModified(); } catch {}
+      resolve(res);
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
@@ -1751,6 +1798,10 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     if (overlay) overlay.classList.add('fullscreen');
     if (modalBox) modalBox.classList.add('fullscreen');
   }
+  // Remember what kind of modal this is (used for import context cleanup)
+  if (overlay) {
+    try { overlay.dataset.kind = (opts && opts.kind) ? String(opts.kind) : ''; } catch {}
+  }
 
   $('#modalTitle').textContent = title;
 
@@ -1776,6 +1827,9 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
+  const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
+  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
+  if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
   if (overlay) {
@@ -4010,13 +4064,30 @@ async function exportSnapshotJson(options=null) {
   };
 
   const s = getSyncUiState();
-  const stamp = new Date().toISOString().replace(/[:.]/g,'-');
-  const jsonText = JSON.stringify(snapshot, null, 2);
 
   if (s.provider === 'github') {
-    // Online export (GitHub) is not implemented yet.
+    // Online export: upload to GitHub (append-only; never overwrite).
+    try {
+      const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
+      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
+      const cfg = GitHubSync.getConfig();
+      snapshot.uploadedBy = cfg.uploader || '';
+      snapshot.uploadedAtLocal = uploadedAtLocal;
+      snapshot.toolVersion = toolVersion;
+      const jsonText = JSON.stringify(snapshot, null, 2);
+      const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
+      toast(`Uploaded: ${up.filename}`);
+    } catch (err) {
+      console.error(err);
+      alert('Online export failed\n\n' + (err?.message || String(err)));
+      throw err;
+    }
+    return snapshot;
   }
 
+  // Offline export: download locally
+  const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+  const jsonText = JSON.stringify(snapshot, null, 2);
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
@@ -4592,6 +4663,7 @@ async function wipeLocalAndImportAllFromText(rawText) {
 
   toast('Imported. Local data replaced with JSON snapshot.');
   await refreshAll();
+  finalizeOnlineImportMeta();
 }
 
 function normalizeSnapshotForImport(s) {
@@ -5463,6 +5535,7 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Replace import completed');
         await refreshAll();
+        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Replace import failed: ' + (e?.message || String(e)));
@@ -5474,6 +5547,7 @@ async function openImportWizard(snap) {
         closeModal();
         toast('Add to local import completed');
         await refreshAll();
+        finalizeOnlineImportMeta();
       } catch (e) {
         console.error(e);
         toast('Add to local import failed: ' + (e?.message || String(e)));
@@ -5481,7 +5555,7 @@ async function openImportWizard(snap) {
     }})
   ];
 
-  openModal('Import Snapshot', container, footerButtons, headerBtns);
+  openModal('Import Snapshot', container, footerButtons, headerBtns, { kind: 'import' });
 }
 
 
@@ -6211,6 +6285,7 @@ async function clearAllLocalData() {
   const tx = db.transaction(stores, 'readwrite');
   stores.forEach(n => tx.objectStore(n).clear());
   await txComplete(tx);
+  try { markLocalModified(); } catch {}
 }
 
 async function importSnapshotSelectionReplace(snap, sel) {
@@ -6315,10 +6390,6 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   $('#btnImportSnapshot').addEventListener('click', async () => {
     const s = getSyncUiState();
     if (s.provider === 'github') {
-      if (s.mode !== 'manual') {
-        toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
-        return;
-      }
       await githubImportFlow({ wipe: false });
       return;
     }
@@ -6345,10 +6416,6 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     btnWipeImport.addEventListener('click', async () => {
       const s = getSyncUiState();
       if (s.provider === 'github') {
-        if (s.mode !== 'manual') {
-          toast('GitHub Auto is not implemented yet. Switch to Manual or use settings.');
-          return;
-        }
         await githubImportFlow({ wipe: true });
         return;
       }
@@ -6361,6 +6428,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const text = await f.text();
+        pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6446,6 +6514,84 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
 /** ========= GitHub Online Manual (Read only) ========= */
 const GITHUB_CFG_KEY = 'mivida_github_cfg';
 
+/** ========= Secrets (token storage) =========
+ * We store the GitHub token in IndexedDB (not localStorage) so it persists across refresh/restart
+ * while avoiding accidental exposure in plain localStorage dumps.
+ * Note: In a pure front-end app, this is still accessible to anyone with browser access/devtools.
+ */
+const SecretStore = (() => {
+  const DB_NAME = 'mivida_prompt_builder_secrets';
+  const STORE = 'kv';
+  const KEY_GH = 'github_token';
+  let _tokenCache = '';
+
+  const openDb = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  const get = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const os = tx.objectStore(STORE);
+      const r = os.get(key);
+      r.onsuccess = () => resolve(r.result || '');
+      r.onerror = () => resolve('');
+    });
+  };
+
+  const set = async (key, val) => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore(STORE).put(String(val || ''), key);
+    });
+  };
+
+  const del = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.objectStore(STORE).delete(key);
+    });
+  };
+
+  const init = async () => {
+    // Migrate legacy token from localStorage into IDB once.
+    let legacy = '';
+    try {
+      const cfg = JSON.parse(localStorage.getItem(GITHUB_CFG_KEY) || '{}') || {};
+      legacy = String(cfg.token || '').trim();
+      if (legacy) {
+        cfg.token = ''; // scrub
+        localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(cfg));
+      }
+    } catch {}
+    const stored = (await get(KEY_GH)) || '';
+    _tokenCache = stored || legacy || '';
+    if (legacy && !stored) {
+      await set(KEY_GH, legacy);
+    }
+  };
+
+  const getGitHubToken = () => _tokenCache || '';
+  const setGitHubToken = async (t) => { _tokenCache = String(t || '').trim(); await set(KEY_GH, _tokenCache); };
+  const clearGitHubToken = async () => { _tokenCache = ''; await del(KEY_GH); };
+
+  return { init, getGitHubToken, setGitHubToken, clearGitHubToken };
+})();
+
+
 const GitHubSync = (() => {
   const getConfig = () => {
     let v = {};
@@ -6455,14 +6601,23 @@ const GitHubSync = (() => {
       repo: (v.repo || '').trim(),
       branch: (v.branch || 'main').trim(),
       folder: (v.folder || '').trim().replace(/^\/+|\/+$/g,''),
-      token: (v.token || '').trim(),
+      token: (SecretStore.getGitHubToken() || '').trim(),
       uploader: (v.uploader || '').trim()
     };
   };
 
-  const setConfig = (cfg) => {
+  const setConfig = async (cfg) => {
     const cur = getConfig();
-    const next = { ...cur, ...(cfg || {}) };
+    const incoming = { ...(cfg || {}) };
+
+    // Token is stored in IndexedDB secrets. If input is blank, keep existing.
+    if (Object.prototype.hasOwnProperty.call(incoming, 'token')) {
+      const t = String(incoming.token || '').trim();
+      if (t) await SecretStore.setGitHubToken(t);
+      delete incoming.token;
+    }
+
+    const next = { ...cur, ...incoming, token: '' }; // never persist token in localStorage
     localStorage.setItem(GITHUB_CFG_KEY, JSON.stringify(next));
   };
 
@@ -6505,6 +6660,16 @@ const GitHubSync = (() => {
       const t = await rr.text().catch(()=> '');
       throw new Error(`Repo access failed (${rr.status}). ${t || ''}`.trim());
     }
+
+    // Verify folder exists (required for Online import/export)
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const folderUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
+    const fr = await ghFetch(folderUrl, c.token);
+    if (!fr.ok) {
+      const t = await fr.text().catch(()=> '');
+      throw new Error(`Folder access failed (${fr.status}). ${t || ''}`.trim());
+    }
+
     return { login: me.login || '', ok: true };
   };
 
@@ -6524,24 +6689,46 @@ const GitHubSync = (() => {
       .map(x => ({ name: x.name, path: x.path, sha: x.sha, size: x.size || 0 }));
   };
 
+    const parseSnapshotFilenameMeta = (name) => {
+    const original = String(name || '');
+    const base = original.replace(/\.json$/i, '');
+    const parts = base.split('__');
+    const stampRaw = parts[0] || base;
+    const uploaderRaw = (parts.length > 1 ? parts.slice(1).join('__') : '');
+    const uploader = uploaderRaw ? uploaderRaw.replace(/_/g, ' ').trim() : '';
+
+    const cleaned = stampRaw
+      .replace(/^mivida_snapshot_/i, '')
+      .replace(/^mivida_snapshot-/i, '')
+      .replace(/^snapshot_/i, '')
+      .replace(/^snapshot-/i, '')
+      .trim();
+
+    // Accept patterns like:
+    // 20260204_131245_123
+    // 2026-02-04_13-12-45-123
+    // 2026-02-04T13-12-45-123
+    let m = cleaned.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)[-_]?([0-5]\d)[-_]?([0-5]\d)(?:[-_]?([0-9]{3}))?/);
+    if (!m) m = cleaned.match(/(20\d{2})([01]\d)([0-3]\d)[-_]?([0-2]\d)([0-5]\d)([0-5]\d)(?:[-_]?([0-9]{3}))?/);
+
+    let ts = 0;
+    let datetime = '';
+    if (m) {
+      const Y = +m[1], Mo = +m[2], D = +m[3];
+      const h = +m[4], mi = +m[5], se = +m[6], ms = +(m[7] || 0);
+      const dt = new Date(Y, Mo - 1, D, h, mi, se, ms); // local time
+      ts = dt.getTime();
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const pad3 = (n) => String(n).padStart(3, '0');
+      datetime = `${String(Y).padStart(4, '0')}-${pad2(Mo)}-${pad2(D)} ${pad2(h)}:${pad2(mi)}:${pad2(se)}.${pad3(ms)}`;
+    }
+
+    return { ts, datetime, uploader };
+  };
+
   const parseStamp = (name) => {
-    // Try common patterns like 2026-02-04_13-05-22, 20260204_130522, 2026-02-04-130522
-    const s = String(name || '');
-    let m = s.match(/(20\d{2})[-_]?([01]\d)[-_]?([0-3]\d)[T_ -]?([0-2]\d)?[-_]?([0-5]\d)?[-_]?([0-5]\d)?/);
-    if (m) {
-      const Y=+m[1], Mo=+m[2], D=+m[3];
-      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
-      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
-      return dt.getTime();
-    }
-    m = s.match(/(20\d{2})([01]\d)([0-3]\d)_?([0-2]\d)?([0-5]\d)?([0-5]\d)?/);
-    if (m) {
-      const Y=+m[1], Mo=+m[2], D=+m[3];
-      const h=+(m[4]||0), mi=+(m[5]||0), se=+(m[6]||0);
-      const dt = new Date(Date.UTC(Y,Mo-1,D,h,mi,se));
-      return dt.getTime();
-    }
-    return 0;
+    return parseSnapshotFilenameMeta(name).ts || 0;
   };
 
   const getLatestFile = async () => {
@@ -6569,10 +6756,85 @@ const GitHubSync = (() => {
     const raw = atob(content.replace(/\s/g,''));
     return raw;
   };
+  const toBase64Utf8 = (str) => {
+    // Safe base64 for unicode
+    const bytes = new TextEncoder().encode(String(str || ''));
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    return btoa(bin);
+  };
+
+  const ensureFolderExists = async () => {
+    const c = getConfig();
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Folder access failed (${r.status}). ${t || ''}`.trim());
+    }
+    const data = await r.json().catch(()=>null);
+    if (!Array.isArray(data) && !(data && data.type === 'dir')) {
+      // GitHub returns array for a folder, object for a file.
+      throw new Error('Folder path is not a directory: ' + (c.folder || '(root)'));
+    }
+    return true;
+  };
+
+  const uploadNewFile = async (path, contentText, message) => {
+    const c = getConfig();
+    if (!c.token) throw new Error('Missing GitHub token');
+    await ensureFolderExists();
+
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}`;
+    const payload = {
+      message: message || ('Add snapshot ' + path),
+      content: toBase64Utf8(contentText),
+      branch: c.branch
+    };
+    // For PUT we need fetch with method and body.
+    const doPut = async (useTokenPrefix=false) => fetch(url, {
+      method: 'PUT',
+      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    let pr = await doPut(false);
+    if (pr.status === 401) pr = await doPut(true);
+
+    if (!pr.ok) {
+      const t = await pr.text().catch(()=> '');
+      throw new Error(`Upload failed (${pr.status}). ${t || ''}`.trim());
+    }
+    return pr.json().catch(()=> ({}));
+  };
+
+  const makeLocalStamp = () => {
+    const d = new Date();
+    const pad = (n, w=2) => String(n).padStart(w,'0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${pad(d.getMilliseconds(),3)}`;
+  };
+
+  const sanitizeFilePart = (s) => String(s || '').trim()
+    .replace(/[\s]+/g,'_')
+    .replace(/[^a-zA-Z0-9._-]+/g,'')
+    .replace(/^_+|_+$/g,'') || 'unknown';
+
+  const uploadSnapshotJsonText = async (jsonText) => {
+    const c = getConfig();
+    const stamp = makeLocalStamp();
+    const uploader = sanitizeFilePart(c.uploader || 'unknown');
+    const filename = `${stamp}__${uploader}.json`;
+    const relPath = (c.folder ? (c.folder.replace(/^\/+|\/+$/g,'') + '/') : '') + filename;
+    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`);
+    return { filename, path: relPath };
+  };
+
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText
+    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists,
+    parseFilenameMeta: parseSnapshotFilenameMeta
   };
 })();
 
@@ -6591,8 +6853,42 @@ async function githubImportFlow({ wipe }){
         return;
       }
       const raw = await GitHubSync.downloadFileText(file.path);
-      if (wipe) await wipeLocalAndImportAllFromText(raw);
-      else await openImportWizardFromText(raw);
+      // Capture metadata for the top bar (applied only after a successful import)
+      try {
+        let s = JSON.parse(raw);
+        if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+
+        const looksLikeSnapshot = s && typeof s === 'object' &&
+          (Array.isArray(s.users) || Array.isArray(s.promptItems) || Array.isArray(s.connections) ||
+           Array.isArray(s.careers) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
+           Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks));
+
+        if (looksLikeSnapshot) {
+          pendingOnlineImportMeta = {
+            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
+            toolVersion: String(s.toolVersion || '').trim(),
+            sourceName: String(file.name || '').trim(),
+            sourcePath: String(file.path || '').trim()
+          };
+        } else {
+          pendingOnlineImportMeta = null;
+        }
+      } catch {
+        pendingOnlineImportMeta = null;
+      }
+
+      if (wipe) {
+        // Confirm destructive wipe with a clear snapshot version (no milliseconds).
+        const dtForPrompt = fmtLocalStampVersion((pendingOnlineImportMeta && pendingOnlineImportMeta.uploadedAtLocal) || parseLocalStampFromFilename(file.name) || '');
+        const byForPrompt = ((pendingOnlineImportMeta && pendingOnlineImportMeta.uploadedBy) || parseUploaderFromFilename(file.name) || 'Unknown').trim();
+        const ok = confirm(`Wipe local data and import this snapshot?\n\nVersion: ${dtForPrompt || '—'} · ${byForPrompt || '—'}\n\nThis will delete all local data on this device. Continue?`);
+        if (!ok) { pendingOnlineImportMeta = null; return; }
+        await wipeLocalAndImportAllFromText(raw);
+      } else {
+        await openImportWizardFromText(raw);
+      }
+
     };
 
     if (s.mode === 'auto') {
@@ -6634,7 +6930,11 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
   list.style.gap = '8px';
 
   const rows = (files || []).slice();
-  rows.sort((a,b) => b.name.localeCompare(a.name));
+    rows.sort((a,b) => {
+    const ma = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(a.name) : { ts: 0 });
+    const mb = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(b.name) : { ts: 0 });
+    return (mb.ts - ma.ts) || b.name.localeCompare(a.name);
+  });
 
   rows.forEach(f => {
     const row = document.createElement('button');
@@ -6642,7 +6942,10 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     row.style.cursor = 'pointer';
     row.style.width = '100%';
     row.style.textAlign = 'left';
-    row.innerHTML = `<div><strong>${escapeHtml(f.name)}</strong><div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(f.path)}</div></div>`;
+        const meta = (GitHubSync.parseFilenameMeta ? GitHubSync.parseFilenameMeta(f.name) : { datetime: '', uploader: '' });
+    const dtText = fmtLocalStampVersion(meta.datetime || '') || 'Unknown datetime';
+    const upText = meta.uploader || 'Unknown';
+    row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
     row.addEventListener('click', (e) => {
       e.preventDefault();
       closeModal();
@@ -6662,6 +6965,195 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
 /** ========= Sync UI (Offline, Online Auto, Online Manual) ========= */
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
+
+const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last imported snapshot metadata (online only)
+const LOCAL_LAST_MOD_KEY = 'mivida_local_last_modified_at_v1';           // stores last local edit timestamp
+let pendingOnlineImportMeta = null;
+
+function _parseLocalStampToDate(s){
+  const str = String(s || '').trim();
+  if (!str) return null;
+
+  // If ISO-like, let Date parse.
+  if (str.includes('T')) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Accept: YYYY-MM-DD HH:mm[:ss][.mmm]
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?$/);
+  if (m){
+    const Y=+m[1], Mo=+m[2], D=+m[3], h=+m[4], mi=+m[5], se=+(m[6]||0), ms=+(m[7]||0);
+    const d = new Date(Y, Mo-1, D, h, mi, se, ms);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Fallback: try Date parse
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return d;
+  return null;
+}
+function _fmtLocal(d, { seconds=false } = {}){
+  if (!d || isNaN(d.getTime())) return '';
+  const pad = (n,w=2)=>String(n).padStart(w,'0');
+  const base = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (!seconds) return base;
+  return `${base}:${pad(d.getSeconds())}`;
+}
+function fmtLocalStampVersion(isoOrStr){
+  const d = _parseLocalStampToDate(isoOrStr);
+  if (d) return _fmtLocal(d, { seconds:false });
+  // If already looks like YYYY-MM-DD HH:mm..., keep only minutes.
+  const s = String(isoOrStr || '').trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+  return m ? m[1] : (s ? s : '');
+}
+function fmtLocalStampFull(isoOrStr){
+  const d = _parseLocalStampToDate(isoOrStr);
+  if (d) return _fmtLocal(d, { seconds:true });
+  const s = String(isoOrStr || '').trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+  return m ? m[1] : (s ? s : '');
+}
+// Backward compatibility
+function fmtLocalStampFromIso(isoOrStr){
+  return fmtLocalStampFull(isoOrStr);
+}
+function fmtStampForBadge(stampOrIso){
+  if (!stampOrIso) return '';
+  const s = String(stampOrIso).trim();
+  // Already a local stamp: YYYY-MM-DD HH:mm:ss.mmm or YYYY-MM-DD HH:mm...
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.slice(0,16); // drop seconds/ms for a cleaner badge
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n)=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtStampForTooltip(stampOrIso){
+  if (!stampOrIso) return '';
+  const s = String(stampOrIso).trim();
+  // If it already looks like a local stamp, remove milliseconds if present.
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.replace(/\.\d{3}\b/,'');
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const pad = (n)=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function isEditedSinceImport(localIso, importedAtIso){
+  if (!localIso || !importedAtIso) return false;
+  const a = new Date(localIso).getTime();
+  const b = new Date(importedAtIso).getTime();
+  if (isNaN(a) || isNaN(b)) return false;
+  // Tolerance to avoid flicker around import completion time.
+  return a > (b + 2500);
+}
+
+function parseLocalStampFromFilename(name){
+  const n = String(name || '');
+  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
+  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (!m) return '';
+  const [,Y,Mo,D,HH,MM,SS,MS] = m;
+  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+}
+function parseUploaderFromFilename(name){
+  const base = String(name || '').replace(/\.json$/i,'');
+  const parts = base.split('__');
+  if (parts.length < 2) return '';
+  return parts.slice(1).join('__').replace(/_/g,' ').trim();
+}
+function getLastOnlineImportInfo(){
+  try {
+    const raw = localStorage.getItem(SYNC_LAST_ONLINE_IMPORT_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object') ? obj : null;
+  } catch {
+    return null;
+  }
+}
+function setLastOnlineImportInfo(info){
+  try { localStorage.setItem(SYNC_LAST_ONLINE_IMPORT_KEY, JSON.stringify(info || null)); } catch {}
+  applySyncInfoUI();
+}
+function getLocalLastModifiedIso(){
+  try { return localStorage.getItem(LOCAL_LAST_MOD_KEY) || ''; } catch { return ''; }
+}
+
+// Debounced so bulk imports do not spam localStorage.
+let _localModT = null;
+let _localModLatest = 0;
+function markLocalModified(){
+  _localModLatest = Date.now();
+  if (_localModT) return;
+  _localModT = setTimeout(() => {
+    _localModT = null;
+    try { localStorage.setItem(LOCAL_LAST_MOD_KEY, new Date(_localModLatest).toISOString()); } catch {}
+    applySyncInfoUI();
+  }, 250);
+}
+
+function applySyncInfoUI(){
+  const s = getSyncUiState();
+  const badge = document.getElementById('syncInfoBadge');
+  const valueEl = document.getElementById('syncVersionValue');
+  const editedEl = document.getElementById('syncEditedTag');
+  if (!badge || !valueEl || !editedEl) return;
+
+  if (s.provider !== 'github') {
+    badge.style.display = 'none';
+    return;
+  }
+  badge.style.display = 'flex';
+
+  const info = getLastOnlineImportInfo();
+  if (!info) {
+    valueEl.textContent = '—';
+    editedEl.style.display = 'none';
+    badge.title = '';
+    return;
+  }
+
+  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
+  const dt = fmtLocalStampVersion(dtRaw) || '—';
+  const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
+  // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
+  valueEl.textContent = `${dt} · ${by}`;
+
+  // Edited detection: compare local last modified vs baseline captured at import.
+  const baselineIso = String(info.localBaselineIso || '').trim();
+  const localIso = String(getLocalLastModifiedIso() || '').trim();
+  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
+  const localT = localIso ? (new Date(localIso)).getTime() : 0;
+  const isEdited = (!!baselineT && !!localT && localT > baselineT + 500); // small buffer
+
+  if (isEdited) {
+    editedEl.style.display = '';
+    const tip = fmtLocalStampFull(localIso) || '';
+    badge.title = tip ? (`Last local edit: ${tip}`) : 'Last local edit: —';
+  } else {
+    editedEl.style.display = 'none';
+    badge.title = '';
+  }
+}
+
+function finalizeOnlineImportMeta(){
+  if (!pendingOnlineImportMeta) return;
+
+  // Treat the just-imported local state as the baseline (not edited).
+  const baselineIso = new Date().toISOString();
+  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
+
+  // Cancel any pending debounced local-mod writes from the import burst.
+  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
+
+  const meta = { ...(pendingOnlineImportMeta || {}) };
+  meta.localBaselineIso = baselineIso;
+
+  setLastOnlineImportInfo(meta);
+  pendingOnlineImportMeta = null;
+}
+
 
 function getSyncUiState(){
   const provider = (localStorage.getItem(SYNC_UI_PROVIDER_KEY) || 'local').toLowerCase();
@@ -6704,6 +7196,8 @@ function applySyncUiState(){
     else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
 
+  applySyncInfoUI();
+
   // Title hint
   document.title = 'Prompt Builder';
 
@@ -6722,7 +7216,7 @@ function openSyncSettingsModal(){
   wrap.innerHTML = `
     <div class="row">
       <label style="min-width:120px;">Owner</label>
-      <input id="ghOwner" type="text" placeholder="e.g. your-org-or-username" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
+      <input id="ghOwner" type="text" placeholder="Repo owner (username or org)" value="${escapeHtml(cfg.owner)}" style="flex:1;" />
     </div>
     <div class="row">
       <label style="min-width:120px;">Repo</label>
@@ -6742,7 +7236,14 @@ function openSyncSettingsModal(){
     </div>
     <div class="row">
       <label style="min-width:120px;">Token</label>
-      <input id="ghToken" type="password" placeholder="GitHub fine-grained token" value="${escapeHtml(cfg.token)}" style="flex:1;" />
+      <input id="ghToken" type="password" placeholder="${cfg.token ? 'Token saved (leave blank to keep)' : 'GitHub token'}" value="" style="flex:1;" />
+    </div>
+    <div class="row">
+      <label style="min-width:120px;"></label>
+      <div style="flex:1; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div class="hint" style="margin:0;">Token is saved on this device. Leave blank to keep it.</div>
+        <button class="btn mini danger" id="ghClearToken" type="button">Clear Token</button>
+      </div>
     </div>
     <div class="row">
       <label style="min-width:120px;">Status</label>
@@ -6768,10 +7269,17 @@ function openSyncSettingsModal(){
   });
 
   const btnTest = wrap.querySelector('#btnGhTest');
+  const btnClear = wrap.querySelector('#ghClearToken');
+  if (btnClear) btnClear.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await SecretStore.clearGitHubToken();
+    toast('Token cleared');
+  });
+
   if (btnTest) btnTest.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      GitHubSync.setConfig(readInputs());
+      await GitHubSync.setConfig(readInputs());
       if (statusEl) statusEl.textContent = 'Testing...';
       const res = await GitHubSync.testConnection();
       if (statusEl) statusEl.textContent = 'Connected as ' + (res.login || '');
@@ -6785,8 +7293,8 @@ function openSyncSettingsModal(){
 
   openModal('Sync Settings', wrap, [
     btn('Cancel', { onClick: () => closeModal() }),
-    btn('Save', { primary: true, onClick: () => {
-      GitHubSync.setConfig(readInputs());
+    btn('Save', { primary: true, onClick: async () => {
+      await GitHubSync.setConfig(readInputs());
       closeModal();
       toast('Saved');
     }})
@@ -6850,6 +7358,7 @@ function initSyncUi(){
 (async function init(){
   initTheme();
   wireEvents();
+  await SecretStore.init();
   initSyncUi();
   await ensureSeed();
   await refreshAll();
