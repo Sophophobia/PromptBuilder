@@ -959,6 +959,88 @@ const copyToClipboard = async (text) => {
 };
 
 
+
+/** ========= IDB helper polyfills =========
+ * Some builds split helper functions during merges. If a helper like getAll is missing,
+ * init will break (import appears to work but UI shows nothing). These polyfills make the
+ * app resilient by providing fallbacks on window.* and creating a global binding in sloppy mode.
+ */
+(function ensureIdbHelpers(){
+  function makeGetAll(){
+    return async function(storeName){
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    };
+  }
+  function makeGetOne(){
+    return async function(storeName, key){
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result ?? null);
+        req.onerror = () => reject(req.error);
+      });
+    };
+  }
+  function makePutOne(){
+    return async function(storeName, value){
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.put(value);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    };
+  }
+  function makeAddOne(){
+    return async function(storeName, value){
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.add(value);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    };
+  }
+  function makeDeleteOne(){
+    return async function(storeName, key){
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+      });
+    };
+  }
+
+  if (typeof window.getAll !== 'function') window.getAll = makeGetAll();
+  if (typeof window.getOne !== 'function') window.getOne = makeGetOne();
+  if (typeof window.putOne !== 'function') window.putOne = makePutOne();
+  if (typeof window.addOne !== 'function') window.addOne = makeAddOne();
+  if (typeof window.deleteOne !== 'function') window.deleteOne = makeDeleteOne();
+
+  // Create global bindings in non-strict script mode if missing
+  try { if (typeof getAll !== 'function') getAll = window.getAll; } catch(e) {}
+  try { if (typeof getOne !== 'function') getOne = window.getOne; } catch(e) {}
+  try { if (typeof putOne !== 'function') putOne = window.putOne; } catch(e) {}
+  try { if (typeof addOne !== 'function') addOne = window.addOne; } catch(e) {}
+  try { if (typeof deleteOne !== 'function') deleteOne = window.deleteOne; } catch(e) {}
+})();
+
 /** ========= Theme ========= */
 function setTheme(theme) {
   const t = (theme === 'light') ? 'light' : 'dark';
