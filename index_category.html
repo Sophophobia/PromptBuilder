@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Prompt Builder</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237aa2ff'/%3E%3Cpath d='M22 46V18h13c7 0 11 4 11 10s-4 10-11 10H30v8h-8zm8-16h5c3 0 4-2 4-4s-1-4-4-4h-5v8z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <style>
     :root{
       color-scheme: dark;
@@ -229,14 +230,6 @@
       margin: 0 0 10px; font-size: 14px; letter-spacing:.2px;
       display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
-    .h2Actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-
-    /* Categories modal */
-    .catRow{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--divider); }
-    .catRow:last-child{ border-bottom:none; }
-    .catName{ flex:1; font-weight:600; }
-    .catHint{ font-size:12px; color:var(--muted); }
-
     .muted{ color: var(--muted); font-size: 12px; }
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 
@@ -783,11 +776,8 @@
       <div class="grid">
         <section class="card">
           <h2>
-            <span>Prompts</span>
-            <div class="h2Actions">
-              <button class="btn mini" id="btnManageCategoriesPrompts">Manage Categories</button>
-              <button class="btn primary" id="btnAddPrompt">Add</button>
-            </div>
+            <span>Prompts <span class="pill">Global</span></span>
+            <button class="btn primary" id="btnAddPrompt">Add</button>
           </h2>
           <div class="muted">Reusable prompt blocks (Markdown). Shared across all users.</div>
           <div class="divider"></div>
@@ -798,10 +788,7 @@
         <section class="card">
           <h2>
             <span>Personal Info</span>
-            <div class="h2Actions">
-              <button class="btn mini" id="btnManageCategoriesPersonal">Manage Categories</button>
-              <button class="btn primary" id="btnAddPersonal">Add Item</button>
-            </div>
+            <button class="btn primary" id="btnAddPersonal">Add Item</button>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -824,10 +811,7 @@
         <section class="card">
           <h2>
             <span>Career Info</span>
-            <div class="h2Actions">
-              <button class="btn mini" id="btnManageCategoriesCareer">Manage Categories</button>
-              <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
-            </div>
+            <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -847,14 +831,11 @@
 
         <section class="card">
           <h2>
-            <span>Connection</span>
-            <div class="h2Actions">
-              <button class="btn mini" id="btnManageCategoriesConnections">Manage Categories</button>
-              <button class="btn primary" id="btnAddConnection">Add</button>
-            </div>
+            <span>Connection <span class="pill">Global</span></span>
+            <button class="btn primary" id="btnAddConnection">Add</button>
           </h2>
           <div class="muted">
-            Connections that can select items from Prompt, Personal Info, and Career Info.
+            Global connections. Each connection can select items from Prompt, Personal Info, and Career Info.
             When you view/copy in the Prompt tab, it compiles using the current user and that user’s selected career.
             If a selected Personal/Career item has no content for the current user/career, the title is kept and the content is empty (you’ll see an “Empty” warning).
           </div>
@@ -926,8 +907,9 @@ const escapeCsv = (v) => {
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 };
-const downloadText = (filename, text, mime='text/plain') => {
-  const blob = new Blob([text], { type: mime });
+const downloadText = (filename, text, mime='text/plain;charset=utf-8') => {
+  const bytes = new TextEncoder().encode(String(text ?? ''));
+  const blob = new Blob([bytes], { type: mime });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -958,88 +940,6 @@ const copyToClipboard = async (text) => {
   }
 };
 
-
-
-/** ========= IDB helper polyfills =========
- * Some builds split helper functions during merges. If a helper like getAll is missing,
- * init will break (import appears to work but UI shows nothing). These polyfills make the
- * app resilient by providing fallbacks on window.* and creating a global binding in sloppy mode.
- */
-(function ensureIdbHelpers(){
-  function makeGetAll(){
-    return async function(storeName){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const req = store.getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => reject(req.error);
-      });
-    };
-  }
-  function makeGetOne(){
-    return async function(storeName, key){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result ?? null);
-        req.onerror = () => reject(req.error);
-      });
-    };
-  }
-  function makePutOne(){
-    return async function(storeName, value){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const req = store.put(value);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-    };
-  }
-  function makeAddOne(){
-    return async function(storeName, value){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const req = store.add(value);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-    };
-  }
-  function makeDeleteOne(){
-    return async function(storeName, key){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const req = store.delete(key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => reject(req.error);
-      });
-    };
-  }
-
-  if (typeof window.getAll !== 'function') window.getAll = makeGetAll();
-  if (typeof window.getOne !== 'function') window.getOne = makeGetOne();
-  if (typeof window.putOne !== 'function') window.putOne = makePutOne();
-  if (typeof window.addOne !== 'function') window.addOne = makeAddOne();
-  if (typeof window.deleteOne !== 'function') window.deleteOne = makeDeleteOne();
-
-  // Create global bindings in non-strict script mode if missing
-  try { if (typeof getAll !== 'function') getAll = window.getAll; } catch(e) {}
-  try { if (typeof getOne !== 'function') getOne = window.getOne; } catch(e) {}
-  try { if (typeof putOne !== 'function') putOne = window.putOne; } catch(e) {}
-  try { if (typeof addOne !== 'function') addOne = window.addOne; } catch(e) {}
-  try { if (typeof deleteOne !== 'function') deleteOne = window.deleteOne; } catch(e) {}
-})();
 
 /** ========= Theme ========= */
 function setTheme(theme) {
@@ -1403,513 +1303,150 @@ function renderMarkdown(md){
 
 
 /** ========= IndexedDB ========= */
+// Adaptive open: never request a lower version than what's already on the client.
 const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 8;
+const MIN_DB_VERSION = 4;
 
-let dbPromise = null;
+// All object stores used by this file (plus 'categories' for upcoming work).
+const REQUIRED_STORES = [
+  'users',
+  'careers',
+  'userCareer',
+  'promptItems',
+  'personalItems',
+  'careerBlocks',
+  'personalTemplates',
+  'careerTemplates',
+  'personalContent',
+  'careerContent',
+  'connections',
+  'changeLogs',
+  'categories',
+];
 
-function openDB() {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+function idbOpen(name, version, onUpgrade) {
+  return new Promise((resolve, reject) => {
+    const req = (version === undefined || version === null)
+      ? indexedDB.open(name)
+      : indexedDB.open(name, version);
 
-    req.onupgradeneeded = (e) => {
-      const db = req.result;
-      const tx = req.transaction;
-      const oldVersion = e.oldVersion || 0;
-
-      // v1 stores
-      if (oldVersion < 1) {
-        const users = db.createObjectStore('users', { keyPath: 'id' });
-        users.createIndex('by_name', 'name', { unique: false });
-
-        const prompts = db.createObjectStore('promptItems', { keyPath: 'id' });
-        prompts.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-
-        const personal = db.createObjectStore('personalItems', { keyPath: 'id' });
-        personal.createIndex('by_userId', 'userId', { unique: false });
-
-        db.createObjectStore('userCareer', { keyPath: 'userId' });
-
-        const connections = db.createObjectStore('connections', { keyPath: 'id' });
-        connections.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-
-        const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
-        logs.createIndex('by_timestamp', 'timestamp', { unique: false });
-      } else {
-        // ensure missing indexes for safety
-        if (!db.objectStoreNames.contains('changeLogs')) {
-          const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
-          logs.createIndex('by_timestamp', 'timestamp', { unique: false });
-        }
+    req.onupgradeneeded = () => {
+      try {
+        const db = req.result;
+        const tx = req.transaction;
+        if (onUpgrade) onUpgrade(db, tx);
+      } catch (e) {
+        reject(e);
       }
-
-      // v2: careers + careerBlocks
-      if (!db.objectStoreNames.contains('careers')) {
-        const careers = db.createObjectStore('careers', { keyPath: 'id' });
-        careers.createIndex('by_title', 'title', { unique: false });
-        careers.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-      }
-      if (!db.objectStoreNames.contains('careerBlocks')) {
-        const blocks = db.createObjectStore('careerBlocks', { keyPath: 'id' });
-        blocks.createIndex('by_careerId', 'careerId', { unique: false });
-        blocks.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
-      }
-
-      // Migration (best effort): old 'careerItems' -> careers + careerBlocks(Main)
-      if (oldVersion < 2) {
-        if (db.objectStoreNames.contains('careerItems')) {
-          const oldStore = tx.objectStore('careerItems');
-          const getAllReq = oldStore.getAll();
-          getAllReq.onsuccess = () => {
-            const oldRows = getAllReq.result || [];
-            const careersStore = tx.objectStore('careers');
-            const blocksStore = tx.objectStore('careerBlocks');
-
-            oldRows.forEach((c) => {
-              const career = {
-                id: c.id,
-                title: c.title || '(Career)',
-                createdAt: c.createdAt || nowISO(),
-                updatedAt: c.updatedAt || c.createdAt || nowISO()
-              };
-              careersStore.put(career);
-
-              const block = {
-                id: uid(),
-                careerId: c.id,
-                title: 'Main',
-                content: c.content || '',
-                createdAt: career.createdAt,
-                updatedAt: career.updatedAt
-              };
-              blocksStore.add(block);
-            });
-          };
-        }
-
-        // Migration: old per-user connections -> global: keep promptItemIds, drop personal selection/userId
-        if (db.objectStoreNames.contains('connections')) {
-          const connStore = tx.objectStore('connections');
-          const reqAll = connStore.getAll();
-          reqAll.onsuccess = () => {
-            const rows = reqAll.result || [];
-            rows.forEach((r) => {
-              const migrated = {
-                id: r.id,
-                title: r.title || '',
-                promptItemIds: r.promptItemIds || [],
-                createdAt: r.createdAt || nowISO(),
-                updatedAt: r.updatedAt || r.createdAt || nowISO()
-              };
-              connStore.put(migrated);
-            });
-          };
-        }
-      }
-      // v3: Templates for Personal & Career items + per-user/per-career content
-      if (oldVersion < 3) {
-        const now = new Date().toISOString();
-        const mkId = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
-
-        if (!db.objectStoreNames.contains('personalTemplates')) {
-          const st = db.createObjectStore('personalTemplates', { keyPath: 'id' });
-          st.createIndex('by_title', 'title', { unique: false });
-          st.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-        }
-        if (!db.objectStoreNames.contains('personalContent')) {
-          const sc = db.createObjectStore('personalContent', { keyPath: ['userId', 'templateId'] });
-          sc.createIndex('by_userId', 'userId', { unique: false });
-          sc.createIndex('by_templateId', 'templateId', { unique: false });
-          sc.createIndex('by_userId_updatedAt', ['userId', 'updatedAt'], { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('careerTemplates')) {
-          const ct = db.createObjectStore('careerTemplates', { keyPath: 'id' });
-          ct.createIndex('by_title', 'title', { unique: false });
-          ct.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-        }
-        if (!db.objectStoreNames.contains('careerContent')) {
-          const cc = db.createObjectStore('careerContent', { keyPath: ['careerId', 'templateId'] });
-          cc.createIndex('by_careerId', 'careerId', { unique: false });
-          cc.createIndex('by_templateId', 'templateId', { unique: false });
-          cc.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
-        }
-
-        // Migration: personalItems (per-user) -> personalTemplates (global) + personalContent (per-user)
-        try {
-          if (db.objectStoreNames.contains('personalItems')) {
-            const oldStore = tx.objectStore('personalItems');
-            const tplStore = tx.objectStore('personalTemplates');
-            const contentStore = tx.objectStore('personalContent');
-
-            const reqAll = oldStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              const titleToTpl = new Map();
-
-              // create templates (unique by title)
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                if (!title) return;
-                if (!titleToTpl.has(title)) {
-                  titleToTpl.set(title, {
-                    id: mkId(),
-                    title,
-                    createdAt: r.createdAt || now,
-                    updatedAt: r.updatedAt || r.createdAt || now
-                  });
-                } else {
-                  // keep latest updatedAt
-                  const tpl = titleToTpl.get(title);
-                  const u = r.updatedAt || r.createdAt || now;
-                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
-                }
-              });
-
-              titleToTpl.forEach(tpl => tplStore.put(tpl));
-
-              // create content rows
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                const tpl = titleToTpl.get(title);
-                if (!tpl) return;
-                contentStore.put({
-                  userId: r.userId,
-                  templateId: tpl.id,
-                  content: r.content || '',
-                  createdAt: r.createdAt || now,
-                  updatedAt: r.updatedAt || r.createdAt || now
-                });
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-
-        // Migration: careerBlocks (per-career) -> careerTemplates (global) + careerContent (per-career)
-        try {
-          if (db.objectStoreNames.contains('careerBlocks')) {
-            const oldStore = tx.objectStore('careerBlocks');
-            const tplStore = tx.objectStore('careerTemplates');
-            const contentStore = tx.objectStore('careerContent');
-
-            const reqAll = oldStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              const titleToTpl = new Map();
-
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                if (!title) return;
-                if (!titleToTpl.has(title)) {
-                  titleToTpl.set(title, {
-                    id: mkId(),
-                    title,
-                    createdAt: r.createdAt || now,
-                    updatedAt: r.updatedAt || r.createdAt || now
-                  });
-                } else {
-                  const tpl = titleToTpl.get(title);
-                  const u = r.updatedAt || r.createdAt || now;
-                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
-                }
-              });
-
-              titleToTpl.forEach(tpl => tplStore.put(tpl));
-
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                const tpl = titleToTpl.get(title);
-                if (!tpl) return;
-                contentStore.put({
-                  careerId: r.careerId,
-                  templateId: tpl.id,
-                  content: r.content || '',
-                  createdAt: r.createdAt || now,
-                  updatedAt: r.updatedAt || r.createdAt || now
-                });
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-
-        // Normalize: ensure connections have arrays for all categories
-        try {
-          if (db.objectStoreNames.contains('connections')) {
-            const connStore = tx.objectStore('connections');
-            const reqAll = connStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              rows.forEach(r => {
-                const patched = {
-                  ...r,
-                  promptItemIds: r.promptItemIds || [],
-                  personalTemplateIds: r.personalTemplateIds || [],
-                  careerTemplateIds: r.careerTemplateIds || [],
-                  updatedAt: r.updatedAt || r.createdAt || now
-                };
-                connStore.put(patched);
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-      }
-
-      // v5: Categories (per section)
-      if (!db.objectStoreNames.contains('categories')) {
-        const cat = db.createObjectStore('categories', { keyPath: 'id' });
-        cat.createIndex('by_sectionKey', 'sectionKey', { unique: false });
-        cat.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
-      }
-
-
     };
 
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => {
-      try {
-        if (req.error && req.error.name === 'VersionError') {
-          toast('IndexedDB version mismatch. Use DevTools → Application → Clear site data, then reload.', 6000);
-        }
-      } catch {}
-      reject(req.error);
-    };
-  });
-  return dbPromise;
-}
-
-async function withStore(storeName, mode, fn) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, mode);
-    const store = tx.objectStore(storeName);
-    const res = fn(store, tx);
-    tx.oncomplete = () => {
-      try { if (mode === 'readwrite') markLocalModified(); } catch {}
-      resolve(res);
-    };
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
-async function getAll(storeName) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
-  });
-}
-async function getOne(storeName, key) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const req = store.get(key);
-    req.onsuccess = () => resolve(req.result ?? null);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
-async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
-async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
-
-async function getByIndex(storeName, indexName, query) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const idx = store.index(indexName);
-    const req = idx.getAll(query);
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another tab.'));
   });
 }
 
+function ensureSchema(db, tx) {
+  // Create stores if missing. (No delete/rename; keep backward compatibility.)
+  if (!db.objectStoreNames.contains('users')) db.createObjectStore('users', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('careers')) db.createObjectStore('careers', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('userCareer')) db.createObjectStore('userCareer', { keyPath: 'userId' });
 
-/** ========= Categories (per section) ========= */
-const CATEGORY_SECTION_KEYS = Object.freeze({
-  PROMPTS: 'promptItems',
-  PERSONAL: 'personalTemplates',
-  CAREER: 'careerTemplates',
-  CONNECTIONS: 'connections'
-});
+  if (!db.objectStoreNames.contains('promptItems')) db.createObjectStore('promptItems', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('personalItems')) db.createObjectStore('personalItems', { keyPath: 'id' }); // legacy
+  if (!db.objectStoreNames.contains('careerBlocks')) db.createObjectStore('careerBlocks', { keyPath: 'id' });   // legacy
 
-const CATEGORY_LABELS = Object.freeze({
-  [CATEGORY_SECTION_KEYS.PROMPTS]: 'Prompts',
-  [CATEGORY_SECTION_KEYS.PERSONAL]: 'Personal Info',
-  [CATEGORY_SECTION_KEYS.CAREER]: 'Career Info',
-  [CATEGORY_SECTION_KEYS.CONNECTIONS]: 'Connection'
-});
+  if (!db.objectStoreNames.contains('personalTemplates')) db.createObjectStore('personalTemplates', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('careerTemplates')) db.createObjectStore('careerTemplates', { keyPath: 'id' });
 
-const _normCatName = (s) => (s || '').trim();
-const _normCatKey = (s) => (s || '').trim().toLowerCase();
-const _isReservedCategoryName = (name) => _normCatKey(name) === 'uncategorized';
+  if (!db.objectStoreNames.contains('personalContent')) db.createObjectStore('personalContent', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('careerContent')) db.createObjectStore('careerContent', { keyPath: 'id' });
 
-async function getCategoriesBySectionKey(sectionKey) {
-  try {
-    const rows = await getByIndex('categories', 'by_sectionKey', sectionKey);
-    return (rows || []).slice().sort((a,b) => {
-      const ao = (a?.order ?? 999999);
-      const bo = (b?.order ?? 999999);
-      if (ao !== bo) return ao - bo;
-      const an = (a?.name || '').toLowerCase();
-      const bn = (b?.name || '').toLowerCase();
-      return an.localeCompare(bn);
-    });
-  } catch {
-    return [];
+  if (!db.objectStoreNames.contains('connections')) db.createObjectStore('connections', { keyPath: 'id' });
+  if (!db.objectStoreNames.contains('changeLogs')) db.createObjectStore('changeLogs', { keyPath: 'id' });
+
+  if (!db.objectStoreNames.contains('categories')) db.createObjectStore('categories', { keyPath: 'id' });
+}
+
+function hasAllStores(db) {
+  for (const s of REQUIRED_STORES) {
+    if (!db.objectStoreNames.contains(s)) return false;
   }
+  return true;
 }
 
-async function getAllCategories() {
-  try { return await getAll('categories'); } catch { return []; }
-}
+let _dbPromise = null;
+async function openDB() {
+  if (_dbPromise) return _dbPromise;
 
-async function _nextCategoryOrder(sectionKey) {
-  const cats = await getCategoriesBySectionKey(sectionKey);
-  const maxO = cats.reduce((m,c) => Math.max(m, Number(c.order || 0)), 0);
-  return maxO + 1;
-}
+  _dbPromise = (async () => {
+    // 1) Open existing DB (no version => never triggers VersionError).
+    let db = await idbOpen(DB_NAME, undefined, (db, tx) => ensureSchema(db, tx));
 
-async function addCategory(sectionKey, name) {
-  const nm = _normCatName(name);
-  if (!nm) throw new Error('Category name is required.');
-  if (_isReservedCategoryName(nm)) throw new Error('Category name is reserved.');
-
-  const existing = await getCategoriesBySectionKey(sectionKey);
-  const dup = existing.find(c => _normCatKey(c.name) === _normCatKey(nm));
-  if (dup) throw new Error('A category with the same name already exists.');
-
-  const cat = {
-    id: uid(),
-    sectionKey,
-    name: nm,
-    order: await _nextCategoryOrder(sectionKey),
-    isCollapsed: false,
-    createdAt: nowISO(),
-    updatedAt: nowISO()
-  };
-  await putOne('categories', cat);
-  return cat;
-}
-
-async function renameCategory(catId, newName) {
-  const nm = _normCatName(newName);
-  if (!nm) throw new Error('Category name is required.');
-  if (_isReservedCategoryName(nm)) throw new Error('Category name is reserved.');
-
-  const cat = await getOne('categories', catId);
-  if (!cat) return null;
-
-  const existing = await getCategoriesBySectionKey(cat.sectionKey);
-  const dup = existing.find(c => c.id !== catId && _normCatKey(c.name) === _normCatKey(nm));
-  if (dup) throw new Error('A category with the same name already exists.');
-
-  cat.name = nm;
-  cat.updatedAt = nowISO();
-  await putOne('categories', cat);
-  return cat;
-}
-
-async function _remapCategoryIdInStore(storeName, oldId, newId) {
-  const rows = await getAll(storeName);
-  const touched = (rows || []).filter(r => r && r.categoryId === oldId);
-  if (!touched.length) return;
-
-  const now = nowISO();
-  await withStore(storeName, 'readwrite', (s) => {
-    touched.forEach(r => {
-      const patched = { ...r, categoryId: newId || null };
-      if (patched.updatedAt) patched.updatedAt = now;
-      s.put(patched);
-    });
-  });
-}
-
-async function _unassignCategoryFromItems(sectionKey, categoryId, remapToId=null) {
-  // Categories apply to the 4 setup sections:
-  // - promptItems
-  // - personalTemplates
-  // - careerTemplates
-  // - connections
-  const store = sectionKey; // store names match sectionKey
-  try { await _remapCategoryIdInStore(store, categoryId, remapToId); } catch {}
-}
-
-async function deleteCategoryById(catId) {
-  const cat = await getOne('categories', catId);
-  if (!cat) return;
-
-  // Unassign items -> Uncategorized (null)
-  await _unassignCategoryFromItems(cat.sectionKey, catId, null);
-  await deleteOne('categories', catId);
-  await normalizeCategoryOrder(cat.sectionKey);
-}
-
-async function normalizeCategoryOrder(sectionKey) {
-  const cats = await getCategoriesBySectionKey(sectionKey);
-  if (!cats.length) return;
-  const now = nowISO();
-  await withStore('categories', 'readwrite', (s) => {
-    cats.forEach((c, i) => {
-      const desired = i + 1;
-      if (Number(c.order || 0) !== desired) {
-        s.put({ ...c, order: desired, updatedAt: now });
-      }
-    });
-  });
-}
-
-async function exportCategoriesForSnapshot() {
-  return await getAllCategories();
-}
-
-async function importCategoriesFromSnapshot(snap) {
-  const incoming = Array.isArray(snap?.categories) ? snap.categories : [];
-  if (!incoming.length) return;
-
-  // Build local maps by id and by (sectionKey + name)
-  const local = await getAllCategories();
-  const byId = new Map((local || []).map(c => [c.id, c]));
-  const byKeyName = new Map();
-  (local || []).forEach(c => {
-    if (!c || !c.sectionKey) return;
-    byKeyName.set(`${c.sectionKey}::${_normCatKey(c.name)}`, c);
-  });
-
-  for (const sc of incoming) {
-    if (!sc || !sc.id || !sc.sectionKey) continue;
-    const keyName = `${sc.sectionKey}::${_normCatKey(sc.name)}`;
-
-    // If id exists, upsert.
-    if (byId.has(sc.id)) {
-      await putOne('categories', { ...byId.get(sc.id), ...sc });
-      continue;
+    // 2) Ensure DB version is at least MIN_DB_VERSION.
+    if ((db.version || 1) < MIN_DB_VERSION) {
+      const nextV = MIN_DB_VERSION;
+      db.close();
+      db = await idbOpen(DB_NAME, nextV, (db, tx) => ensureSchema(db, tx));
     }
 
-    // If same name exists with different id, remap local items to snapshot id, then replace.
-    if (byKeyName.has(keyName)) {
-      const lc = byKeyName.get(keyName);
-      if (lc && lc.id !== sc.id) {
-        await _unassignCategoryFromItems(sc.sectionKey, lc.id, sc.id);
-        await deleteOne('categories', lc.id);
-      }
+    // 3) Ensure all required stores exist; bump version once if needed.
+    if (!hasAllStores(db)) {
+      const nextV = Math.max((db.version || MIN_DB_VERSION) + 1, MIN_DB_VERSION);
+      db.close();
+      db = await idbOpen(DB_NAME, nextV, (db, tx) => ensureSchema(db, tx));
     }
 
-    await putOne('categories', sc);
-  }
+    return db;
+  })();
 
-  // Normalize order per section for clean UI
-  const sections = new Set(incoming.map(c => c?.sectionKey).filter(Boolean));
-  for (const sk of sections) {
-    try { await normalizeCategoryOrder(sk); } catch {}
-  }
+  return _dbPromise;
 }
 
+// Basic IDB helpers
+function txStore(db, storeName, mode='readonly') {
+  return db.transaction(storeName, mode).objectStore(storeName);
+}
 
+function getAll(storeName) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const req = txStore(db, storeName, 'readonly').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function getOne(storeName, key) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const req = txStore(db, storeName, 'readonly').get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function addOne(storeName, value) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const req = txStore(db, storeName, 'readwrite').add(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function putOne(storeName, value) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const req = txStore(db, storeName, 'readwrite').put(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function deleteOne(storeName, key) {
+  return openDB().then(db => new Promise((resolve, reject) => {
+    const req = txStore(db, storeName, 'readwrite').delete(key);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  }));
+}
 /** ========= Change Log ========= */
 async function logChange({ entityType, entityId, action, after, before=null }) {
   const row = { id: uid(), timestamp: nowISO(), entityType, entityId, action, after, before };
@@ -2084,9 +1621,13 @@ function setTab(tab){
   }
 }
 /** ========= Modal helpers ========= */
+let modalReturnFocusEl = null;
 function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
   const overlay = $('#modalOverlay');
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
+
+  // Save focus to restore on close
+  try { modalReturnFocusEl = document.activeElement; } catch { modalReturnFocusEl = null; }
 
   // Reset modal mode
   if (overlay) overlay.classList.remove('fullscreen');
@@ -2123,6 +1664,12 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
   }
+
+  // Move focus into the modal for accessibility
+  try {
+    const closeBtn = $('#btnCloseModal');
+    if (closeBtn) closeBtn.focus({ preventScroll: true });
+  } catch {}
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
@@ -2130,6 +1677,12 @@ function closeModal() {
   if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
+
+  // If focus is inside the modal, move it out before hiding from assistive tech.
+  try {
+    const ae = document.activeElement;
+    if (overlay && ae && overlay.contains(ae)) ae.blur();
+  } catch {}
 
   if (overlay) {
     overlay.classList.remove('open');
@@ -2143,116 +1696,15 @@ function closeModal() {
 
   const footer = $('#modalFooter');
   if (footer) footer.style.display = 'flex';
-}
 
-
-function openManageCategoriesModal(sectionKey) {
-  const label = CATEGORY_LABELS[sectionKey] || sectionKey;
-  const body = document.createElement('div');
-
-  const top = document.createElement('div');
-  top.className = 'fieldRow';
-  top.style.alignItems = 'center';
-  top.innerHTML = `
-    <label style="min-width:140px;">New Category</label>
-    <input id="catNewName" placeholder="Type a category name" />
-  `;
-
-  const addBtn = btn('Add', { primary: true, mini: true });
-  top.appendChild(addBtn);
-
-  const hint = document.createElement('div');
-  hint.className = 'catHint';
-  hint.style.marginTop = '8px';
-  hint.textContent = 'Uncategorized is always available. Categories are shared across the team via snapshots.';
-
-  const divider = document.createElement('div');
-  divider.className = 'divider';
-  divider.style.marginTop = '12px';
-
-  const list = document.createElement('div');
-  list.id = 'catList';
-
-  const renderRow = (cat, locked=false) => {
-    const row = document.createElement('div');
-    row.className = 'catRow';
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'catName';
-    nameEl.textContent = cat.name || '';
-    row.appendChild(nameEl);
-
-    if (locked) {
-      const badge = document.createElement('span');
-      badge.className = 'pill';
-      badge.textContent = 'Reserved';
-      row.appendChild(badge);
-      return row;
+  // Restore focus to where the user was before opening the modal
+  try {
+    const el = modalReturnFocusEl;
+    modalReturnFocusEl = null;
+    if (el && el.isConnected && typeof el.focus === 'function') {
+      el.focus({ preventScroll: true });
     }
-
-    const renameBtn = btn('Rename', { mini: true });
-    renameBtn.addEventListener('click', async () => {
-      const next = prompt('Rename category:', cat.name || '');
-      if (next == null) return;
-      try {
-        await renameCategory(cat.id, next);
-        await refresh();
-      } catch (e) {
-        toast(String(e?.message || e), 'danger');
-      }
-    });
-
-    const delBtn = btn('Delete', { mini: true, danger: true });
-    delBtn.addEventListener('click', async () => {
-      const ok = confirm(`Delete category "${cat.name}"?\n\nAny items assigned to it will move to Uncategorized.`);
-      if (!ok) return;
-      try {
-        await deleteCategoryById(cat.id);
-        await refresh();
-      } catch (e) {
-        toast(String(e?.message || e), 'danger');
-      }
-    });
-
-    row.appendChild(renameBtn);
-    row.appendChild(delBtn);
-    return row;
-  };
-
-  const refresh = async () => {
-    const cats = await getCategoriesBySectionKey(sectionKey);
-    list.innerHTML = '';
-
-    list.appendChild(renderRow({ id:'__uncat__', name:'Uncategorized' }, true));
-
-    cats.forEach(c => list.appendChild(renderRow(c, false)));
-  };
-
-  addBtn.addEventListener('click', async () => {
-    const input = top.querySelector('#catNewName');
-    const name = input?.value || '';
-    try {
-      await addCategory(sectionKey, name);
-      if (input) input.value = '';
-      await refresh();
-    } catch (e) {
-      toast(String(e?.message || e), 'danger');
-    }
-  });
-
-  // Enter to add
-  top.querySelector('#catNewName')?.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') addBtn.click();
-  });
-
-  body.appendChild(top);
-  body.appendChild(hint);
-  body.appendChild(divider);
-  body.appendChild(list);
-
-  openModal(`Manage Categories · ${label}`, body, [btn('Close', { onClick: closeModal })]);
-
-  refresh();
+  } catch { modalReturnFocusEl = null; }
 }
 function btn(text, opts={}) {
   const b = document.createElement('button');
@@ -2851,7 +2303,7 @@ async function renderPrompts() {
     items,
     'promptItems',
     (x) => x.id,
-    (a,b) => ((b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))
+    (a,b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
   );
 
   $('#hintPrompts').style.display = items.length ? 'none' : 'block';
@@ -3304,7 +2756,7 @@ async function deleteCareerTemplate(payload) {
 }
 
 
-/** ========= Connections ========= */
+/** ========= Connections (Global) ========= */
 async function compileForUserWithConnection(conn, ctx='setup') {
   const userId = state.currentUserId;
 
@@ -4243,7 +3695,7 @@ async function exportLogsCsv() {
   ]);
 
   const csv = [header, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
-  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
+  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 async function exportSnapshotJson(options=null) {
@@ -4445,14 +3897,9 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
-  const categoriesOut = await exportCategoriesForSnapshot();
-
   const snapshot = {
     version: DB_VERSION,
     exportedAt: nowISO(),
-
-    // Shared metadata
-    categories: categoriesOut || [],
 
     // Sections (always present as arrays for predictable import)
     users: usersOut || [],
@@ -4502,7 +3949,7 @@ async function exportSnapshotJson(options=null) {
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -5988,9 +5435,6 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   sel.personalContentKeys = sel.personalContentKeys || new Set();
   sel.careerContentKeys = sel.careerContentKeys || new Set();
 
-  // Categories (team-shared metadata)
-  try { await importCategoriesFromSnapshot(snap); } catch {}
-
   // Ensure templates referenced by selected connections are included (so connections can be reconstructed)
   try {
     const needPT = new Set();
@@ -6035,10 +5479,8 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const snapBy = {
     users: new Map((snap.users || []).map(u => [u.id, u])),
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
-    promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
-    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t])),
-    connections: new Map((snap.connections || []).map(c => [c.id, c]))
+    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
   };
 
   // Old -> local/new IDs (merge-aware)
@@ -6733,34 +6175,20 @@ async function importSnapshotSelectionReplace(snap, sel) {
 
 
 async function refreshAll() {
-  const steps = [
-    ['loadUsersIntoSelect', loadUsersIntoSelect],
-    ['loadCareerFilterSelect', loadCareerFilterSelect],
-    ['renderPersonalCareerPick', renderPersonalCareerPick],
-    ['renderPrompts', renderPrompts],
-    ['renderPersonal', renderPersonal],
-    ['renderCareer', renderCareer],
-    ['renderConnections', renderConnections],
-    ['renderPromptPickers', renderPromptPickers],
-    ['renderPromptPage', renderPromptPage],
-    ['renderChangeLog', renderChangeLog]
-  ];
+  // 1) Top filters first (so downstream renders can rely on state + selects)
+  await loadUsersIntoSelect();
+  await loadCareerFilterSelect();
+  await renderPersonalCareerPick();
 
-  const errs = [];
-  for (const [name, fn] of steps) {
-    try {
-      await fn();
-    } catch (e) {
-      console.error(e);
-      errs.push({ name, message: (e && e.message) ? e.message : String(e) });
-    }
-  }
-  if (errs.length) {
-    try {
-      window.__lastRefreshErrors = errs;
-    } catch {}
-    toast(`Refresh finished with ${errs.length} error(s). Open DevTools Console for details.`, 4500);
-  }
+  // 2) Setup page sections
+  await renderPrompts();
+  await renderPersonal();
+  await renderCareerBlocks();
+  await renderConnections();
+
+  // 3) Prompt page
+  await renderPromptPickers();
+  await renderPromptPage();
 }
 
 /** ========= Wire Events ========= */
@@ -6787,11 +6215,6 @@ function wireEvents() {
   $('#btnAddCareerTop').addEventListener('click', addCareerFlow);
   $('#btnRenameCareer').addEventListener('click', renameCareerFlow);
   $('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
-
-  $('#btnManageCategoriesPrompts')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.PROMPTS));
-  $('#btnManageCategoriesPersonal')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.PERSONAL));
-  $('#btnManageCategoriesCareer')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.CAREER));
-  $('#btnManageCategoriesConnections')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.CONNECTIONS));
 
   $('#btnAddPrompt').addEventListener('click', () => openEditItemModal({
     title: 'Edit · Prompt Item',
@@ -6837,7 +6260,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await f.text();
+    const buf = await f.arrayBuffer();
+    const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6865,7 +6289,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await f.text();
+        const buf = await f.arrayBuffer();
+        const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -7191,8 +6616,11 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const raw = atob(content.replace(/\s/g,''));
-    return raw;
+    const b64 = content.replace(/\s/g,'');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
@@ -7384,10 +6812,17 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     const dtText = fmtLocalStampVersion(meta.datetime || '') || 'Unknown datetime';
     const upText = meta.uploader || 'Unknown';
     row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
-    row.addEventListener('click', (e) => {
+    row.addEventListener('click', async (e) => {
       e.preventDefault();
+      try { row.blur(); } catch {}
       closeModal();
-      try { onPick && onPick(f); } catch (err) { console.error(err); }
+      try {
+        if (onPick) await onPick(f);
+      } catch (err) {
+        console.error(err);
+        toast('Import failed: ' + (err?.message || String(err)));
+        try { alert('Import failed.\\n\\n' + (err?.message || String(err))); } catch {}
+}
     });
     list.appendChild(row);
   });
