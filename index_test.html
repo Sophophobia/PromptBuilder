@@ -1303,264 +1303,118 @@ function renderMarkdown(md){
 
 
 /** ========= IndexedDB ========= */
-const DB_NAME = 'mivida_prompt_builder_offline';
-const DB_VERSION = 4;
+// 1) 只保留“最低期望版本”，不再拿它强行 open
+const DB_NAME = 'mivida_prompt_builder_offline'; // 用你项目现有的名字
+const MIN_DB_VERSION = 4; // 你可以留着，代表“我们至少支持到哪一代结构”
 
-let dbPromise = null;
+// 2) 你项目实际需要的 stores：把这里改成你当前代码里用到的所有 store 名称
+const REQUIRED_STORES = [
+  'users',
+  'careers',
+  'userCareer',
 
-function openDB() {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+  'promptItems',
+  'personalItems',
+  'careerBlocks',
 
-    req.onupgradeneeded = (e) => {
-      const db = req.result;
-      const tx = req.transaction;
-      const oldVersion = e.oldVersion || 0;
+  'personalTemplates',
+  'careerTemplates',
 
-      // v1 stores
-      if (oldVersion < 1) {
-        const users = db.createObjectStore('users', { keyPath: 'id' });
-        users.createIndex('by_name', 'name', { unique: false });
+  'personalContent',
+  'careerContent',
 
-        const prompts = db.createObjectStore('promptItems', { keyPath: 'id' });
-        prompts.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+  'connections',
+  'changeLogs',
 
-        const personal = db.createObjectStore('personalItems', { keyPath: 'id' });
-        personal.createIndex('by_userId', 'userId', { unique: false });
+  'categories',
+];
 
-        db.createObjectStore('userCareer', { keyPath: 'userId' });
+// 可选：如果你还要检查 index 是否存在，也可以写 REQUIRED_INDEXES（见下方注释）
 
-        const connections = db.createObjectStore('connections', { keyPath: 'id' });
-        connections.createIndex('by_updatedAt', 'updatedAt', { unique: false });
+function idbOpen(name, version, onUpgrade) {
+  return new Promise((resolve, reject) => {
+    const db = await openDB();
 
-        const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
-        logs.createIndex('by_timestamp', 'timestamp', { unique: false });
-      } else {
-        // ensure missing indexes for safety
-        if (!db.objectStoreNames.contains('changeLogs')) {
-          const logs = db.createObjectStore('changeLogs', { keyPath: 'id' });
-          logs.createIndex('by_timestamp', 'timestamp', { unique: false });
-        }
+    req.onupgradeneeded = () => {
+      try {
+        const db = req.result;
+        const tx = req.transaction;
+        if (onUpgrade) onUpgrade(db, tx);
+      } catch (e) {
+        reject(e);
       }
-
-      // v2: careers + careerBlocks
-      if (!db.objectStoreNames.contains('careers')) {
-        const careers = db.createObjectStore('careers', { keyPath: 'id' });
-        careers.createIndex('by_title', 'title', { unique: false });
-        careers.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-      }
-      if (!db.objectStoreNames.contains('careerBlocks')) {
-        const blocks = db.createObjectStore('careerBlocks', { keyPath: 'id' });
-        blocks.createIndex('by_careerId', 'careerId', { unique: false });
-        blocks.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
-      }
-
-      // Migration (best effort): old 'careerItems' -> careers + careerBlocks(Main)
-      if (oldVersion < 2) {
-        if (db.objectStoreNames.contains('careerItems')) {
-          const oldStore = tx.objectStore('careerItems');
-          const getAllReq = oldStore.getAll();
-          getAllReq.onsuccess = () => {
-            const oldRows = getAllReq.result || [];
-            const careersStore = tx.objectStore('careers');
-            const blocksStore = tx.objectStore('careerBlocks');
-
-            oldRows.forEach((c) => {
-              const career = {
-                id: c.id,
-                title: c.title || '(Career)',
-                createdAt: c.createdAt || nowISO(),
-                updatedAt: c.updatedAt || c.createdAt || nowISO()
-              };
-              careersStore.put(career);
-
-              const block = {
-                id: uid(),
-                careerId: c.id,
-                title: 'Main',
-                content: c.content || '',
-                createdAt: career.createdAt,
-                updatedAt: career.updatedAt
-              };
-              blocksStore.add(block);
-            });
-          };
-        }
-
-        // Migration: old per-user connections -> global: keep promptItemIds, drop personal selection/userId
-        if (db.objectStoreNames.contains('connections')) {
-          const connStore = tx.objectStore('connections');
-          const reqAll = connStore.getAll();
-          reqAll.onsuccess = () => {
-            const rows = reqAll.result || [];
-            rows.forEach((r) => {
-              const migrated = {
-                id: r.id,
-                title: r.title || '',
-                promptItemIds: r.promptItemIds || [],
-                createdAt: r.createdAt || nowISO(),
-                updatedAt: r.updatedAt || r.createdAt || nowISO()
-              };
-              connStore.put(migrated);
-            });
-          };
-        }
-      }
-      // v3: Templates for Personal & Career items + per-user/per-career content
-      if (oldVersion < 3) {
-        const now = new Date().toISOString();
-        const mkId = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
-
-        if (!db.objectStoreNames.contains('personalTemplates')) {
-          const st = db.createObjectStore('personalTemplates', { keyPath: 'id' });
-          st.createIndex('by_title', 'title', { unique: false });
-          st.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-        }
-        if (!db.objectStoreNames.contains('personalContent')) {
-          const sc = db.createObjectStore('personalContent', { keyPath: ['userId', 'templateId'] });
-          sc.createIndex('by_userId', 'userId', { unique: false });
-          sc.createIndex('by_templateId', 'templateId', { unique: false });
-          sc.createIndex('by_userId_updatedAt', ['userId', 'updatedAt'], { unique: false });
-        }
-
-        if (!db.objectStoreNames.contains('careerTemplates')) {
-          const ct = db.createObjectStore('careerTemplates', { keyPath: 'id' });
-          ct.createIndex('by_title', 'title', { unique: false });
-          ct.createIndex('by_updatedAt', 'updatedAt', { unique: false });
-        }
-        if (!db.objectStoreNames.contains('careerContent')) {
-          const cc = db.createObjectStore('careerContent', { keyPath: ['careerId', 'templateId'] });
-          cc.createIndex('by_careerId', 'careerId', { unique: false });
-          cc.createIndex('by_templateId', 'templateId', { unique: false });
-          cc.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
-        }
-
-        // Migration: personalItems (per-user) -> personalTemplates (global) + personalContent (per-user)
-        try {
-          if (db.objectStoreNames.contains('personalItems')) {
-            const oldStore = tx.objectStore('personalItems');
-            const tplStore = tx.objectStore('personalTemplates');
-            const contentStore = tx.objectStore('personalContent');
-
-            const reqAll = oldStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              const titleToTpl = new Map();
-
-              // create templates (unique by title)
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                if (!title) return;
-                if (!titleToTpl.has(title)) {
-                  titleToTpl.set(title, {
-                    id: mkId(),
-                    title,
-                    createdAt: r.createdAt || now,
-                    updatedAt: r.updatedAt || r.createdAt || now
-                  });
-                } else {
-                  // keep latest updatedAt
-                  const tpl = titleToTpl.get(title);
-                  const u = r.updatedAt || r.createdAt || now;
-                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
-                }
-              });
-
-              titleToTpl.forEach(tpl => tplStore.put(tpl));
-
-              // create content rows
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                const tpl = titleToTpl.get(title);
-                if (!tpl) return;
-                contentStore.put({
-                  userId: r.userId,
-                  templateId: tpl.id,
-                  content: r.content || '',
-                  createdAt: r.createdAt || now,
-                  updatedAt: r.updatedAt || r.createdAt || now
-                });
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-
-        // Migration: careerBlocks (per-career) -> careerTemplates (global) + careerContent (per-career)
-        try {
-          if (db.objectStoreNames.contains('careerBlocks')) {
-            const oldStore = tx.objectStore('careerBlocks');
-            const tplStore = tx.objectStore('careerTemplates');
-            const contentStore = tx.objectStore('careerContent');
-
-            const reqAll = oldStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              const titleToTpl = new Map();
-
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                if (!title) return;
-                if (!titleToTpl.has(title)) {
-                  titleToTpl.set(title, {
-                    id: mkId(),
-                    title,
-                    createdAt: r.createdAt || now,
-                    updatedAt: r.updatedAt || r.createdAt || now
-                  });
-                } else {
-                  const tpl = titleToTpl.get(title);
-                  const u = r.updatedAt || r.createdAt || now;
-                  if ((tpl.updatedAt || '') < u) tpl.updatedAt = u;
-                }
-              });
-
-              titleToTpl.forEach(tpl => tplStore.put(tpl));
-
-              rows.forEach(r => {
-                const title = (r.title || '').trim();
-                const tpl = titleToTpl.get(title);
-                if (!tpl) return;
-                contentStore.put({
-                  careerId: r.careerId,
-                  templateId: tpl.id,
-                  content: r.content || '',
-                  createdAt: r.createdAt || now,
-                  updatedAt: r.updatedAt || r.createdAt || now
-                });
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-
-        // Normalize: ensure connections have arrays for all categories
-        try {
-          if (db.objectStoreNames.contains('connections')) {
-            const connStore = tx.objectStore('connections');
-            const reqAll = connStore.getAll();
-            reqAll.onsuccess = () => {
-              const rows = reqAll.result || [];
-              rows.forEach(r => {
-                const patched = {
-                  ...r,
-                  promptItemIds: r.promptItemIds || [],
-                  personalTemplateIds: r.personalTemplateIds || [],
-                  careerTemplateIds: r.careerTemplateIds || [],
-                  updatedAt: r.updatedAt || r.createdAt || now
-                };
-                connStore.put(patched);
-              });
-            };
-          }
-        } catch (err) { /* best effort */ }
-      }
-
     };
 
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another tab.'));
   });
-  return dbPromise;
+}
+
+function hasAllStores(db) {
+  for (const s of REQUIRED_STORES) {
+    if (!db.objectStoreNames.contains(s)) return false;
+  }
+  return true;
+}
+
+// 这里放你原来 onupgradeneeded 创建 store/index 的逻辑，但一定要 “if not exists”
+function ensureSchema(db, tx) {
+  // 示例：用你的真实 schema 替换
+  if (!db.objectStoreNames.contains('prompt_items')) {
+    db.createObjectStore('prompt_items', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('personal')) {
+    db.createObjectStore('personal', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('career')) {
+    db.createObjectStore('career', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('connections')) {
+    db.createObjectStore('connections', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('outputs')) {
+    db.createObjectStore('outputs', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('categories')) {
+    db.createObjectStore('categories', { keyPath: 'key' }); // 你的 categories 用什么 keyPath 就用什么
+  }
+  if (!db.objectStoreNames.contains('settings')) {
+    db.createObjectStore('settings', { keyPath: 'key' });
+  }
+
+  // 如果你要保证 index 存在：
+  // const store = tx.objectStore('prompt_items');
+  // if (!store.indexNames.contains('by_updatedAt')) store.createIndex('by_updatedAt', 'updatedAt');
+}
+
+async function openDB() {
+  // A) 先尝试用 MIN_DB_VERSION 打开（新用户/空库直接建好）
+  try {
+    const db = await idbOpen(DB_NAME, MIN_DB_VERSION, ensureSchema);
+    db.onversionchange = () => db.close();
+    return db;
+  } catch (e) {
+    // B) 如果 VersionError（本地已有更高版本），不要再指定 version，直接打开现有库
+    if (e && e.name !== 'VersionError') throw e;
+  }
+
+  // C) 打开现有版本（不会触发 onupgradeneeded）
+  const existing = await idbOpen(DB_NAME, undefined, null);
+
+  // D) 检查 schema 是否齐全，如果缺 store/index，就触发一次 “+1 升级” 来补齐
+  const needUpgrade = !hasAllStores(existing);
+  if (!needUpgrade) {
+    existing.onversionchange = () => existing.close();
+    return existing;
+  }
+
+  const nextVersion = existing.version + 1;
+  existing.close();
+
+  const upgraded = await idbOpen(DB_NAME, nextVersion, ensureSchema);
+  upgraded.onversionchange = () => upgraded.close();
+  return upgraded;
 }
 
 async function withStore(storeName, mode, fn) {
@@ -6555,7 +6409,7 @@ const SecretStore = (() => {
   let _tokenCache = '';
 
   const openDb = () => new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const db = await openDB();
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
