@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Prompt Builder</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237aa2ff'/%3E%3Cpath d='M22 46V18h13c7 0 11 4 11 10s-4 10-11 10H30v8h-8zm8-16h5c3 0 4-2 4-4s-1-4-4-4h-5v8z' fill='%23ffffff'/%3E%3C/svg%3E" />
   <style>
     :root{
       color-scheme: dark;
@@ -907,9 +906,8 @@ const escapeCsv = (v) => {
   if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 };
-const downloadText = (filename, text, mime='text/plain;charset=utf-8') => {
-  const bytes = new TextEncoder().encode(String(text ?? ''));
-  const blob = new Blob([bytes], { type: mime });
+const downloadText = (filename, text, mime='text/plain') => {
+  const blob = new Blob([text], { type: mime });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -1304,6 +1302,9 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
+// IMPORTANT: DB_VERSION must be monotonically increasing.
+// Some users already have v4 in their browser; keeping this at 3 will cause:
+// "The requested version (3) is less than the existing version (4)".
 const DB_VERSION = 4;
 
 let dbPromise = null;
@@ -1787,13 +1788,9 @@ function setTab(tab){
   }
 }
 /** ========= Modal helpers ========= */
-let modalReturnFocusEl = null;
 function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
   const overlay = $('#modalOverlay');
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
-
-  // Save focus to restore on close
-  try { modalReturnFocusEl = document.activeElement; } catch { modalReturnFocusEl = null; }
 
   // Reset modal mode
   if (overlay) overlay.classList.remove('fullscreen');
@@ -1830,12 +1827,6 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
   }
-
-  // Move focus into the modal for accessibility
-  try {
-    const closeBtn = $('#btnCloseModal');
-    if (closeBtn) closeBtn.focus({ preventScroll: true });
-  } catch {}
 }
 function closeModal() {
   const overlay = $('#modalOverlay');
@@ -1843,12 +1834,6 @@ function closeModal() {
   if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
-
-  // If focus is inside the modal, move it out before hiding from assistive tech.
-  try {
-    const ae = document.activeElement;
-    if (overlay && ae && overlay.contains(ae)) ae.blur();
-  } catch {}
 
   if (overlay) {
     overlay.classList.remove('open');
@@ -1862,15 +1847,6 @@ function closeModal() {
 
   const footer = $('#modalFooter');
   if (footer) footer.style.display = 'flex';
-
-  // Restore focus to where the user was before opening the modal
-  try {
-    const el = modalReturnFocusEl;
-    modalReturnFocusEl = null;
-    if (el && el.isConnected && typeof el.focus === 'function') {
-      el.focus({ preventScroll: true });
-    }
-  } catch { modalReturnFocusEl = null; }
 }
 function btn(text, opts={}) {
   const b = document.createElement('button');
@@ -3861,7 +3837,7 @@ async function exportLogsCsv() {
   ]);
 
   const csv = [header, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
-  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
+  downloadText(`mivida_change_log_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
 }
 
 async function exportSnapshotJson(options=null) {
@@ -4115,7 +4091,7 @@ async function exportSnapshotJson(options=null) {
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -6426,8 +6402,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const buf = await f.arrayBuffer();
-    const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
+    const text = await f.text();
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6455,8 +6430,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const buf = await f.arrayBuffer();
-        const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
+        const text = await f.text();
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -6782,11 +6756,8 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const b64 = content.replace(/\s/g,'');
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder('utf-8').decode(bytes);
+    const raw = atob(content.replace(/\s/g,''));
+    return raw;
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
@@ -6978,17 +6949,10 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
     const dtText = fmtLocalStampVersion(meta.datetime || '') || 'Unknown datetime';
     const upText = meta.uploader || 'Unknown';
     row.innerHTML = `<div class="meta"><div class="name">${escapeHtml(dtText)}</div><div class="small">Uploaded by ${escapeHtml(upText)}</div></div>`;
-    row.addEventListener('click', async (e) => {
+    row.addEventListener('click', (e) => {
       e.preventDefault();
-      try { row.blur(); } catch {}
       closeModal();
-      try {
-        if (onPick) await onPick(f);
-      } catch (err) {
-        console.error(err);
-        toast('Import failed: ' + (err?.message || String(err)));
-        try { alert('Import failed.\\n\\n' + (err?.message || String(err))); } catch {}
-}
+      try { onPick && onPick(f); } catch (err) { console.error(err); }
     });
     list.appendChild(row);
   });
