@@ -1598,8 +1598,119 @@ async function getOne(storeName, key) {
     req.onerror = () => reject(req.error);
   });
 }
-async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
-async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
+function _keyPathOk(keyPath, obj) {
+  if (!keyPath) return true;
+  if (Array.isArray(keyPath)) {
+    return keyPath.every(k => obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '');
+  }
+  return obj && obj[keyPath] !== undefined && obj[keyPath] !== null && obj[keyPath] !== '';
+}
+
+function _ensureIdLike(obj, candidate) {
+  if (obj.id === undefined || obj.id === null || obj.id === '') obj.id = candidate;
+}
+
+function _ensureKeyLike(obj, candidate) {
+  if (obj.key === undefined || obj.key === null || obj.key === '') obj.key = candidate;
+}
+
+// Make the object compatible with whatever keyPath the *existing* IndexedDB store was created with.
+// This prevents "Evaluating the object store's key path did not yield a value" when the DB schema
+// differs across page versions.
+function _normalizeForStorePut(storeName, keyPath, value) {
+  const v = (value && typeof value === 'object') ? { ...value } : value;
+  if (!v || typeof v !== 'object') return v;
+
+  const makePair = (a, b) => (a && b) ? `${a}::${b}` : '';
+
+  // Common aliases (older snapshots / older schema)
+  if (v.id && !v.key) v.key = v.id;
+  if (v.key && !v.id) v.id = v.key;
+
+  // Store-specific stabilizers
+  if (storeName === 'personalContent') {
+    if (!v.id) v.id = makePair(v.userId, v.templateId) || v.id;
+  }
+  if (storeName === 'careerContent') {
+    if (!v.id) v.id = makePair(v.careerId, v.templateId) || v.id;
+  }
+  if (storeName === 'userCareer') {
+    if (!v.id) v.id = makePair(v.userId, v.careerId) || v.id;
+  }
+
+  // KeyPath-specific fills
+  if (Array.isArray(keyPath)) {
+    for (const k of keyPath) {
+      if (v[k] === undefined || v[k] === null || v[k] === '') {
+        // Try derive from id patterns like "userId::templateId"
+        if (typeof v.id === 'string' && v.id.includes('::')) {
+          const [a, b] = v.id.split('::');
+          if (k === 'userId') v.userId = a;
+          if (k === 'careerId') v.careerId = a;
+          if (k === 'templateId') v.templateId = b;
+        }
+        // Try derive from key patterns
+        if (typeof v.key === 'string' && v.key.includes('::')) {
+          const [a, b] = v.key.split('::');
+          if (k === 'userId') v.userId = a;
+          if (k === 'careerId') v.careerId = a;
+          if (k === 'templateId') v.templateId = b;
+        }
+        // Fallback: if the schema expects userId/careerId, use id as a last resort
+        if ((k === 'userId' || k === 'careerId') && v.id) v[k] = v.id;
+      }
+    }
+    return v;
+  }
+
+  if (typeof keyPath === 'string' && keyPath) {
+    if (v[keyPath] === undefined || v[keyPath] === null || v[keyPath] === '') {
+      if (keyPath === 'id') {
+        // Provide stable IDs for known composite rows
+        if (storeName === 'personalContent') _ensureIdLike(v, makePair(v.userId, v.templateId) || uid());
+        else if (storeName === 'careerContent') _ensureIdLike(v, makePair(v.careerId, v.templateId) || uid());
+        else if (storeName === 'userCareer') _ensureIdLike(v, makePair(v.userId, v.careerId) || uid());
+        else _ensureIdLike(v, uid());
+      } else if (keyPath === 'key') {
+        _ensureKeyLike(v, v.id || uid());
+      } else if (keyPath === 'userId') {
+        if (v.userId === undefined || v.userId === null || v.userId === '') v.userId = v.id || '';
+      } else if (keyPath === 'careerId') {
+        if (v.careerId === undefined || v.careerId === null || v.careerId === '') v.careerId = v.id || '';
+      } else if (keyPath === 'templateId') {
+        if (v.templateId === undefined || v.templateId === null || v.templateId === '') v.templateId = '';
+      } else {
+        // Generic fallback
+        v[keyPath] = v.id || uid();
+      }
+    }
+  }
+  return v;
+}
+
+async function putOne(storeName, value) {
+  return withStore(storeName, 'readwrite', (s) => {
+    const v = _normalizeForStorePut(storeName, s.keyPath, value);
+    // If we still can't satisfy the keyPath, skip instead of crashing the whole import.
+    if (!_keyPathOk(s.keyPath, v)) {
+      console.warn('Skipped put due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
+      return null;
+    }
+    return s.put(v);
+  });
+}
+
+async function addOne(storeName, value) {
+  return withStore(storeName, 'readwrite', (s) => {
+    const v = _normalizeForStorePut(storeName, s.keyPath, value);
+    if (!_keyPathOk(s.keyPath, v)) {
+      console.warn('Skipped add due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
+      return null;
+    }
+    return s.add(v);
+  });
+}
+
 async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
 
 async function getByIndex(storeName, indexName, query) {
@@ -5621,6 +5732,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const snapBy = {
     users: new Map((snap.users || []).map(u => [u.id, u])),
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
+    promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
     careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
   };
