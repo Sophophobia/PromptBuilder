@@ -916,6 +916,67 @@ const downloadText = (filename, text, mime='text/plain') => {
   a.remove();
   URL.revokeObjectURL(a.href);
 };
+
+// --- UTF-8 safe helpers (Import/Export) ---
+const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
+
+// Decode GitHub contents API (base64) into a proper UTF-8 string.
+const decodeBase64Utf8 = (b64) => {
+  const bin = atob(String(b64 || '').replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return stripBom(new TextDecoder('utf-8').decode(bytes));
+};
+
+// Read local file as UTF-8 (handles BOM consistently).
+const readFileUtf8 = async (file) => {
+  const buf = await file.arrayBuffer();
+  return stripBom(new TextDecoder('utf-8').decode(new Uint8Array(buf)));
+};
+
+// Best-effort repair for common mojibake (e.g., "Ã¢ÂÂ" -> "—").
+// Applied during import/export to keep snapshots clean across versions.
+const repairMojibake = (s) => {
+  if (typeof s !== 'string' || s.length < 3) return s;
+  if (!/[ÃÂâ]/.test(s)) return s;
+
+  const score = (t) => ((t.match(/[ÃÂ]/g) || []).length + (t.match(/â\u0080/g) || []).length);
+
+  const decodeLatin1SegAsUtf8 = (seg) => {
+    const bytes = new Uint8Array(seg.length);
+    for (let i = 0; i < seg.length; i++) bytes[i] = seg.charCodeAt(i) & 0xFF;
+    return new TextDecoder('utf-8').decode(bytes);
+  };
+
+  // Only attempt repairs on Latin-1 byte segments so we don't harm Chinese/emoji, etc.
+  return s.replace(/[\x00-\xFF]+/g, (seg) => {
+    if (!/[ÃÂâ]/.test(seg)) return seg;
+    let cur = seg;
+    for (let i = 0; i < 2; i++) {
+      // Stop once the segment no longer looks like mojibake.
+      if (!/[ÃÂâ]/.test(cur)) break;
+      const next = decodeLatin1SegAsUtf8(cur);
+      if (!next || next === cur) break;
+      if (score(next) <= score(cur)) cur = next;
+      else break;
+    }
+    return cur;
+  });
+};
+
+const deepRepairStringsInPlace = (v) => {
+  if (typeof v === 'string') return repairMojibake(v);
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = deepRepairStringsInPlace(v[i]);
+    return v;
+  }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) v[k] = deepRepairStringsInPlace(v[k]);
+    return v;
+  }
+  return v;
+};
+
 const copyToClipboard = async (text) => {
   try {
     await navigator.clipboard.writeText(text);
@@ -1598,119 +1659,8 @@ async function getOne(storeName, key) {
     req.onerror = () => reject(req.error);
   });
 }
-function _keyPathOk(keyPath, obj) {
-  if (!keyPath) return true;
-  if (Array.isArray(keyPath)) {
-    return keyPath.every(k => obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '');
-  }
-  return obj && obj[keyPath] !== undefined && obj[keyPath] !== null && obj[keyPath] !== '';
-}
-
-function _ensureIdLike(obj, candidate) {
-  if (obj.id === undefined || obj.id === null || obj.id === '') obj.id = candidate;
-}
-
-function _ensureKeyLike(obj, candidate) {
-  if (obj.key === undefined || obj.key === null || obj.key === '') obj.key = candidate;
-}
-
-// Make the object compatible with whatever keyPath the *existing* IndexedDB store was created with.
-// This prevents "Evaluating the object store's key path did not yield a value" when the DB schema
-// differs across page versions.
-function _normalizeForStorePut(storeName, keyPath, value) {
-  const v = (value && typeof value === 'object') ? { ...value } : value;
-  if (!v || typeof v !== 'object') return v;
-
-  const makePair = (a, b) => (a && b) ? `${a}::${b}` : '';
-
-  // Common aliases (older snapshots / older schema)
-  if (v.id && !v.key) v.key = v.id;
-  if (v.key && !v.id) v.id = v.key;
-
-  // Store-specific stabilizers
-  if (storeName === 'personalContent') {
-    if (!v.id) v.id = makePair(v.userId, v.templateId) || v.id;
-  }
-  if (storeName === 'careerContent') {
-    if (!v.id) v.id = makePair(v.careerId, v.templateId) || v.id;
-  }
-  if (storeName === 'userCareer') {
-    if (!v.id) v.id = makePair(v.userId, v.careerId) || v.id;
-  }
-
-  // KeyPath-specific fills
-  if (Array.isArray(keyPath)) {
-    for (const k of keyPath) {
-      if (v[k] === undefined || v[k] === null || v[k] === '') {
-        // Try derive from id patterns like "userId::templateId"
-        if (typeof v.id === 'string' && v.id.includes('::')) {
-          const [a, b] = v.id.split('::');
-          if (k === 'userId') v.userId = a;
-          if (k === 'careerId') v.careerId = a;
-          if (k === 'templateId') v.templateId = b;
-        }
-        // Try derive from key patterns
-        if (typeof v.key === 'string' && v.key.includes('::')) {
-          const [a, b] = v.key.split('::');
-          if (k === 'userId') v.userId = a;
-          if (k === 'careerId') v.careerId = a;
-          if (k === 'templateId') v.templateId = b;
-        }
-        // Fallback: if the schema expects userId/careerId, use id as a last resort
-        if ((k === 'userId' || k === 'careerId') && v.id) v[k] = v.id;
-      }
-    }
-    return v;
-  }
-
-  if (typeof keyPath === 'string' && keyPath) {
-    if (v[keyPath] === undefined || v[keyPath] === null || v[keyPath] === '') {
-      if (keyPath === 'id') {
-        // Provide stable IDs for known composite rows
-        if (storeName === 'personalContent') _ensureIdLike(v, makePair(v.userId, v.templateId) || uid());
-        else if (storeName === 'careerContent') _ensureIdLike(v, makePair(v.careerId, v.templateId) || uid());
-        else if (storeName === 'userCareer') _ensureIdLike(v, makePair(v.userId, v.careerId) || uid());
-        else _ensureIdLike(v, uid());
-      } else if (keyPath === 'key') {
-        _ensureKeyLike(v, v.id || uid());
-      } else if (keyPath === 'userId') {
-        if (v.userId === undefined || v.userId === null || v.userId === '') v.userId = v.id || '';
-      } else if (keyPath === 'careerId') {
-        if (v.careerId === undefined || v.careerId === null || v.careerId === '') v.careerId = v.id || '';
-      } else if (keyPath === 'templateId') {
-        if (v.templateId === undefined || v.templateId === null || v.templateId === '') v.templateId = '';
-      } else {
-        // Generic fallback
-        v[keyPath] = v.id || uid();
-      }
-    }
-  }
-  return v;
-}
-
-async function putOne(storeName, value) {
-  return withStore(storeName, 'readwrite', (s) => {
-    const v = _normalizeForStorePut(storeName, s.keyPath, value);
-    // If we still can't satisfy the keyPath, skip instead of crashing the whole import.
-    if (!_keyPathOk(s.keyPath, v)) {
-      console.warn('Skipped put due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
-      return null;
-    }
-    return s.put(v);
-  });
-}
-
-async function addOne(storeName, value) {
-  return withStore(storeName, 'readwrite', (s) => {
-    const v = _normalizeForStorePut(storeName, s.keyPath, value);
-    if (!_keyPathOk(s.keyPath, v)) {
-      console.warn('Skipped add due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
-      return null;
-    }
-    return s.add(v);
-  });
-}
-
+async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
+async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
 async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
 
 async function getByIndex(storeName, indexName, query) {
@@ -4188,6 +4138,7 @@ async function exportSnapshotJson(options=null) {
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
       snapshot.toolVersion = toolVersion;
+      deepRepairStringsInPlace(snapshot);
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
@@ -4201,8 +4152,9 @@ async function exportSnapshotJson(options=null) {
 
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+  deepRepairStringsInPlace(snapshot);
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -4678,7 +4630,7 @@ sync();
 async function openImportWizardFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(rawText);
+    s = JSON.parse(stripBom(rawText));
   } catch (e) {
     toast('Invalid JSON snapshot');
     return;
@@ -4709,7 +4661,7 @@ async function openImportWizardFromText(rawText) {
 async function wipeLocalAndImportAllFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(rawText);
+    s = JSON.parse(stripBom(rawText));
   } catch {
     toast('Invalid JSON snapshot');
     return;
@@ -4783,6 +4735,9 @@ async function wipeLocalAndImportAllFromText(rawText) {
 function normalizeSnapshotForImport(s) {
   const tNow = nowISO();
   const mkId = () => uid();
+
+  // Repair any mojibake strings inside the snapshot (best-effort).
+  try { deepRepairStringsInPlace(s); } catch {}
 
   // Personal: prefer v3; fall back to legacy personalItems
   let personalTemplates = Array.isArray(s.personalTemplates) ? s.personalTemplates : [];
@@ -5732,7 +5687,6 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const snapBy = {
     users: new Map((snap.users || []).map(u => [u.id, u])),
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
-    promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
     careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
   };
@@ -6514,7 +6468,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await f.text();
+    const text = await readFileUtf8(f);
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6542,7 +6496,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await f.text();
+        const text = await readFileUtf8(f);
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -6868,7 +6822,7 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const raw = atob(content.replace(/\s/g,''));
+    const raw = decodeBase64Utf8(content);
     return raw;
   };
   const toBase64Utf8 = (str) => {
