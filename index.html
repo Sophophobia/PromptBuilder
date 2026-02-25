@@ -916,6 +916,67 @@ const downloadText = (filename, text, mime='text/plain') => {
   a.remove();
   URL.revokeObjectURL(a.href);
 };
+
+// --- UTF-8 safe helpers (Import/Export) ---
+const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
+
+// Decode GitHub contents API (base64) into a proper UTF-8 string.
+const decodeBase64Utf8 = (b64) => {
+  const bin = atob(String(b64 || '').replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return stripBom(new TextDecoder('utf-8').decode(bytes));
+};
+
+// Read local file as UTF-8 (handles BOM consistently).
+const readFileUtf8 = async (file) => {
+  const buf = await file.arrayBuffer();
+  return stripBom(new TextDecoder('utf-8').decode(new Uint8Array(buf)));
+};
+
+// Best-effort repair for common mojibake (e.g., "Ã¢ÂÂ" -> "—").
+// Applied during import/export to keep snapshots clean across versions.
+const repairMojibake = (s) => {
+  if (typeof s !== 'string' || s.length < 3) return s;
+  if (!/[ÃÂâ]/.test(s)) return s;
+
+  const score = (t) => ((t.match(/[ÃÂ]/g) || []).length + (t.match(/â\u0080/g) || []).length);
+
+  const decodeLatin1SegAsUtf8 = (seg) => {
+    const bytes = new Uint8Array(seg.length);
+    for (let i = 0; i < seg.length; i++) bytes[i] = seg.charCodeAt(i) & 0xFF;
+    return new TextDecoder('utf-8').decode(bytes);
+  };
+
+  // Only attempt repairs on Latin-1 byte segments so we don't harm Chinese/emoji, etc.
+  return s.replace(/[\x00-\xFF]+/g, (seg) => {
+    if (!/[ÃÂâ]/.test(seg)) return seg;
+    let cur = seg;
+    for (let i = 0; i < 2; i++) {
+      // Stop once the segment no longer looks like mojibake.
+      if (!/[ÃÂâ]/.test(cur)) break;
+      const next = decodeLatin1SegAsUtf8(cur);
+      if (!next || next === cur) break;
+      if (score(next) <= score(cur)) cur = next;
+      else break;
+    }
+    return cur;
+  });
+};
+
+const deepRepairStringsInPlace = (v) => {
+  if (typeof v === 'string') return repairMojibake(v);
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = deepRepairStringsInPlace(v[i]);
+    return v;
+  }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) v[k] = deepRepairStringsInPlace(v[k]);
+    return v;
+  }
+  return v;
+};
+
 const copyToClipboard = async (text) => {
   try {
     await navigator.clipboard.writeText(text);
@@ -1302,6 +1363,9 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
+// IMPORTANT: DB_VERSION must be monotonically increasing.
+// Some users already have v4 in their browser; keeping this at 3 will cause:
+// "The requested version (3) is less than the existing version (4)".
 const DB_VERSION = 4;
 
 let dbPromise = null;
@@ -4074,6 +4138,7 @@ async function exportSnapshotJson(options=null) {
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
       snapshot.toolVersion = toolVersion;
+      deepRepairStringsInPlace(snapshot);
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
@@ -4087,8 +4152,9 @@ async function exportSnapshotJson(options=null) {
 
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+  deepRepairStringsInPlace(snapshot);
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -4564,7 +4630,7 @@ sync();
 async function openImportWizardFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(rawText);
+    s = JSON.parse(stripBom(rawText));
   } catch (e) {
     toast('Invalid JSON snapshot');
     return;
@@ -4595,7 +4661,7 @@ async function openImportWizardFromText(rawText) {
 async function wipeLocalAndImportAllFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(rawText);
+    s = JSON.parse(stripBom(rawText));
   } catch {
     toast('Invalid JSON snapshot');
     return;
@@ -4669,6 +4735,9 @@ async function wipeLocalAndImportAllFromText(rawText) {
 function normalizeSnapshotForImport(s) {
   const tNow = nowISO();
   const mkId = () => uid();
+
+  // Repair any mojibake strings inside the snapshot (best-effort).
+  try { deepRepairStringsInPlace(s); } catch {}
 
   // Personal: prefer v3; fall back to legacy personalItems
   let personalTemplates = Array.isArray(s.personalTemplates) ? s.personalTemplates : [];
@@ -6399,7 +6468,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await f.text();
+    const text = await readFileUtf8(f);
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6427,7 +6496,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await f.text();
+        const text = await readFileUtf8(f);
         pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
@@ -6753,7 +6822,7 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const raw = atob(content.replace(/\s/g,''));
+    const raw = decodeBase64Utf8(content);
     return raw;
   };
   const toBase64Utf8 = (str) => {
