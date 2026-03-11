@@ -795,8 +795,7 @@
               <select id="userSelect"></select>
               <button class="btn mini" id="btnAddUser">Add</button>
               <button class="btn mini" id="btnRenameUser">Rename</button>
-                            <button class="btn mini" id="btnDuplicateUser">Duplicate</button>
-<button class="btn mini danger" id="btnDeleteUser">Delete</button>
+              <button class="btn mini danger" id="btnDeleteUser">Delete</button>
             </div>
           </div>
           <div class="fieldRow" id="personalCareerPickRow">
@@ -819,8 +818,7 @@
               <select id="careerFilter"></select>
               <button class="btn mini" id="btnAddCareerTop">Add</button>
               <button class="btn mini" id="btnRenameCareer">Rename</button>
-                            <button class="btn mini" id="btnDuplicateCareer">Duplicate</button>
-<button class="btn mini danger" id="btnDeleteCareer">Delete</button>
+              <button class="btn mini danger" id="btnDeleteCareer">Delete</button>
             </div>
           </div>
           <div class="divider"></div>
@@ -901,12 +899,6 @@
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
-const makeLocalVersionStamp = () => {
-  const d = new Date();
-  const pad = (n, w=2) => String(n).padStart(w,'0');
-  // Format: YYYY-MM-DD HH:mm:ss.mmm (local time)
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
-};
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
@@ -1310,10 +1302,7 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-// IMPORTANT: DB_VERSION must be monotonically increasing.
-// Some users already have v4 in their browser; keeping this at 3 will cause:
-// "The requested version (3) is less than the existing version (4)".
-const DB_VERSION = 4;
+const DB_VERSION = 8;
 
 let dbPromise = null;
 
@@ -1567,7 +1556,14 @@ function openDB() {
     };
 
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      try {
+        if (req.error && req.error.name === 'VersionError') {
+          toast('IndexedDB version mismatch. Use DevTools → Application → Clear site data, then reload.', 6000);
+        }
+      } catch {}
+      reject(req.error);
+    };
   });
   return dbPromise;
 }
@@ -1606,119 +1602,8 @@ async function getOne(storeName, key) {
     req.onerror = () => reject(req.error);
   });
 }
-function _keyPathOk(keyPath, obj) {
-  if (!keyPath) return true;
-  if (Array.isArray(keyPath)) {
-    return keyPath.every(k => obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '');
-  }
-  return obj && obj[keyPath] !== undefined && obj[keyPath] !== null && obj[keyPath] !== '';
-}
-
-function _ensureIdLike(obj, candidate) {
-  if (obj.id === undefined || obj.id === null || obj.id === '') obj.id = candidate;
-}
-
-function _ensureKeyLike(obj, candidate) {
-  if (obj.key === undefined || obj.key === null || obj.key === '') obj.key = candidate;
-}
-
-// Make the object compatible with whatever keyPath the *existing* IndexedDB store was created with.
-// This prevents "Evaluating the object store's key path did not yield a value" when the DB schema
-// differs across page versions.
-function _normalizeForStorePut(storeName, keyPath, value) {
-  const v = (value && typeof value === 'object') ? { ...value } : value;
-  if (!v || typeof v !== 'object') return v;
-
-  const makePair = (a, b) => (a && b) ? `${a}::${b}` : '';
-
-  // Common aliases (older snapshots / older schema)
-  if (v.id && !v.key) v.key = v.id;
-  if (v.key && !v.id) v.id = v.key;
-
-  // Store-specific stabilizers
-  if (storeName === 'personalContent') {
-    if (!v.id) v.id = makePair(v.userId, v.templateId) || v.id;
-  }
-  if (storeName === 'careerContent') {
-    if (!v.id) v.id = makePair(v.careerId, v.templateId) || v.id;
-  }
-  if (storeName === 'userCareer') {
-    if (!v.id) v.id = makePair(v.userId, v.careerId) || v.id;
-  }
-
-  // KeyPath-specific fills
-  if (Array.isArray(keyPath)) {
-    for (const k of keyPath) {
-      if (v[k] === undefined || v[k] === null || v[k] === '') {
-        // Try derive from id patterns like "userId::templateId"
-        if (typeof v.id === 'string' && v.id.includes('::')) {
-          const [a, b] = v.id.split('::');
-          if (k === 'userId') v.userId = a;
-          if (k === 'careerId') v.careerId = a;
-          if (k === 'templateId') v.templateId = b;
-        }
-        // Try derive from key patterns
-        if (typeof v.key === 'string' && v.key.includes('::')) {
-          const [a, b] = v.key.split('::');
-          if (k === 'userId') v.userId = a;
-          if (k === 'careerId') v.careerId = a;
-          if (k === 'templateId') v.templateId = b;
-        }
-        // Fallback: if the schema expects userId/careerId, use id as a last resort
-        if ((k === 'userId' || k === 'careerId') && v.id) v[k] = v.id;
-      }
-    }
-    return v;
-  }
-
-  if (typeof keyPath === 'string' && keyPath) {
-    if (v[keyPath] === undefined || v[keyPath] === null || v[keyPath] === '') {
-      if (keyPath === 'id') {
-        // Provide stable IDs for known composite rows
-        if (storeName === 'personalContent') _ensureIdLike(v, makePair(v.userId, v.templateId) || uid());
-        else if (storeName === 'careerContent') _ensureIdLike(v, makePair(v.careerId, v.templateId) || uid());
-        else if (storeName === 'userCareer') _ensureIdLike(v, makePair(v.userId, v.careerId) || uid());
-        else _ensureIdLike(v, uid());
-      } else if (keyPath === 'key') {
-        _ensureKeyLike(v, v.id || uid());
-      } else if (keyPath === 'userId') {
-        if (v.userId === undefined || v.userId === null || v.userId === '') v.userId = v.id || '';
-      } else if (keyPath === 'careerId') {
-        if (v.careerId === undefined || v.careerId === null || v.careerId === '') v.careerId = v.id || '';
-      } else if (keyPath === 'templateId') {
-        if (v.templateId === undefined || v.templateId === null || v.templateId === '') v.templateId = '';
-      } else {
-        // Generic fallback
-        v[keyPath] = v.id || uid();
-      }
-    }
-  }
-  return v;
-}
-
-async function putOne(storeName, value) {
-  return withStore(storeName, 'readwrite', (s) => {
-    const v = _normalizeForStorePut(storeName, s.keyPath, value);
-    // If we still can't satisfy the keyPath, skip instead of crashing the whole import.
-    if (!_keyPathOk(s.keyPath, v)) {
-      console.warn('Skipped put due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
-      return null;
-    }
-    return s.put(v);
-  });
-}
-
-async function addOne(storeName, value) {
-  return withStore(storeName, 'readwrite', (s) => {
-    const v = _normalizeForStorePut(storeName, s.keyPath, value);
-    if (!_keyPathOk(s.keyPath, v)) {
-      console.warn('Skipped add due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
-      return null;
-    }
-    return s.add(v);
-  });
-}
-
+async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
+async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
 async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
 
 async function getByIndex(storeName, indexName, query) {
@@ -2180,64 +2065,6 @@ async function renameUserFlow() {
   await logChange({ entityType: 'user', entityId: userId, action: 'update', after, before });
   await refreshAll();
 }
-
-async function duplicateUserFlow() {
-  const userId = state.currentUserId;
-  if (!userId) { alert('Select a user first.'); return; }
-  const u = await getOne('users', userId);
-  if (!u) { alert('User not found.'); return; }
-
-  const all = await getAll('users');
-  const used = new Set((all || []).map(x => normTitle(x.name)));
-  const base = (u.name || 'User').trim() || 'User';
-  let cand = `${base} (Copy)`;
-  let i = 2;
-  while (used.has(normTitle(cand))) {
-    cand = `${base} (Copy ${i})`;
-    i += 1;
-  }
-
-  const t = nowISO();
-  const newId = uid();
-  const newUser = { ...u, id: newId, name: cand, createdAt: t, updatedAt: t };
-  await addOne('users', newUser);
-  await logChange({ entityType: 'user', entityId: newId, action: 'create', after: newUser });
-
-  // Copy per-user content rows (v3)
-  try {
-    const pc = await getByIndex('personalContent', 'by_userId', userId);
-    for (const r of (pc || [])) {
-      const nr = { ...r, userId: newId, updatedAt: t };
-      await putOne('personalContent', nr);
-      await logChange({ entityType: 'personalContent', entityId: `${nr.userId}:${nr.templateId}`, action: 'create', after: nr });
-    }
-  } catch {}
-
-  // Copy legacy per-user items too (if any exist from older versions)
-  try {
-    const leg = await getByIndex('personalItems', 'by_userId', userId);
-    for (const p of (leg || [])) {
-      const nid = uid();
-      const np = { ...p, id: nid, userId: newId, createdAt: t, updatedAt: t };
-      await putOne('personalItems', np);
-      await logChange({ entityType: 'personalItem', entityId: nid, action: 'create', after: np });
-    }
-  } catch {}
-
-  // Copy selected career mapping for the user (if any)
-  try {
-    const uc = await getOne('userCareer', userId);
-    if (uc) {
-      const nuc = { ...uc, userId: newId, updatedAt: t };
-      await putOne('userCareer', nuc);
-      await logChange({ entityType: 'userCareer', entityId: newId, action: 'create', after: nuc });
-    }
-  } catch {}
-
-  state.currentUserId = newId;
-  try { localStorage.setItem('mivida_current_user_id', newId); } catch {}
-  await refreshAll();
-}
 async function deleteUserFlow() {
   const userId = state.currentUserId;
   if (!userId) { alert('Select a user first.'); return; }
@@ -2325,55 +2152,6 @@ async function renameCareerFlow() {
   await putOne('careers', after);
   await logChange({ entityType: 'career', entityId: careerId, action: 'update', after, before });
 
-  await refreshAll();
-}
-
-async function duplicateCareerFlow() {
-  const careerId = state.currentCareerId;
-  if (!careerId) { alert('Select a career first.'); return; }
-  const c = await getOne('careers', careerId);
-  if (!c) { alert('Career not found.'); return; }
-
-  const all = await getAll('careers');
-  const used = new Set((all || []).map(x => normTitle(x.title)));
-  const base = (c.title || 'Career').trim() || 'Career';
-  let cand = `${base} (Copy)`;
-  let i = 2;
-  while (used.has(normTitle(cand))) {
-    cand = `${base} (Copy ${i})`;
-    i += 1;
-  }
-
-  const t = nowISO();
-  const newId = uid();
-  const newCareer = { ...c, id: newId, title: cand, createdAt: t, updatedAt: t };
-  await addOne('careers', newCareer);
-  await logChange({ entityType: 'career', entityId: newId, action: 'create', after: newCareer });
-
-  // Copy career content rows (v3)
-  try {
-    const cc = await getByIndex('careerContent', 'by_careerId', careerId);
-    for (const r of (cc || [])) {
-      const nr = { ...r, careerId: newId, updatedAt: t };
-      await putOne('careerContent', nr);
-      await logChange({ entityType: 'careerContent', entityId: `${nr.careerId}:${nr.templateId}`, action: 'create', after: nr });
-    }
-  } catch {}
-
-  // Copy legacy career blocks too (if any)
-  try {
-    const blocks = await getByIndex('careerBlocks', 'by_careerId', careerId);
-    for (const b of (blocks || [])) {
-      const nid = uid();
-      const nb = { ...b, id: nid, careerId: newId, createdAt: t, updatedAt: t };
-      await putOne('careerBlocks', nb);
-      await logChange({ entityType: 'careerBlock', entityId: nid, action: 'create', after: nb });
-    }
-  } catch {}
-
-  await loadCareerFilterSelect();
-  await setCurrentCareer(newId);
-  await renderPersonalCareerPick();
   await refreshAll();
 }
 
@@ -2671,7 +2449,7 @@ async function renderPrompts() {
     items,
     'promptItems',
     (x) => x.id,
-    (a,b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+    (a,b) => ((b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))
   );
 
   $('#hintPrompts').style.display = items.length ? 'none' : 'block';
@@ -4265,10 +4043,8 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
-  const exportVersion = makeLocalVersionStamp();
-
   const snapshot = {
-    version: exportVersion,
+    version: DB_VERSION,
     exportedAt: nowISO(),
 
     // Sections (always present as arrays for predictable import)
@@ -4300,7 +4076,7 @@ async function exportSnapshotJson(options=null) {
     // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = exportVersion;
+      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
       const cfg = GitHubSync.getConfig();
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
@@ -4308,6 +4084,15 @@ async function exportSnapshotJson(options=null) {
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
+      try {
+        setCurrentSnapshotMetaAfterExport({
+          exportVersion,
+          uploadedBy: snapshot.uploadedBy || (cfg.uploader || ''),
+          toolVersion,
+          sourceName: up.filename,
+          sourcePath: up.path
+        });
+      } catch (e) { console.warn('Failed to update version badge after export', e); }
     } catch (err) {
       console.error(err);
       alert('Online export failed\n\n' + (err?.message || String(err)));
@@ -4319,7 +4104,7 @@ async function exportSnapshotJson(options=null) {
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -5851,7 +5636,8 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
     promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
-    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
+    careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t])),
+    connections: new Map((snap.connections || []).map(c => [c.id, c]))
   };
 
   // Old -> local/new IDs (merge-aware)
@@ -5980,35 +5766,41 @@ async function ensurePersonalTemplate(oldTplId) {
     return ex ? ex.id : null;
   }
 
-  // 1) Users (allow duplicates by renaming when needed)
+  // 1) Users (merge by name; avoid duplicates)
   for (const u of (snap.users || [])) {
     if (!sel.users || !sel.users.has(u.id)) continue;
-
+    const key = normTitle(u.name);
+    const existing = by.users.get(key);
+    if (existing) {
+      idMap.users.set(u.id, existing.id);
+      continue;
+    }
     const newId = uid();
     idMap.users.set(u.id, newId);
-
     const nameRaw = (u.name || '').trim() || 'Untitled';
     const finalName = titleSets.users.has(normTitle(nameRaw))
       ? makeImportedTitle(nameRaw, titleSets.users)
       : (titleSets.users.add(normTitle(nameRaw)), nameRaw);
-
     const row = { ...u, id: newId, name: finalName, createdAt: u.createdAt || now, updatedAt: u.updatedAt || u.createdAt || now };
     await putOne('users', row);
     by.users.set(normTitle(finalName), row);
   }
 
-  // 2) Careers (allow duplicates by renaming when needed)
+  // 2) Careers (merge by title; avoid duplicates)
   for (const c of (snap.careers || [])) {
     if (!sel.careers || !sel.careers.has(c.id)) continue;
-
+    const key = normTitle(c.title);
+    const existing = by.careers.get(key);
+    if (existing) {
+      idMap.careers.set(c.id, existing.id);
+      continue;
+    }
     const newId = uid();
     idMap.careers.set(c.id, newId);
-
     const titleRaw = (c.title || '').trim() || 'Untitled';
     const finalTitle = titleSets.careers.has(normTitle(titleRaw))
       ? makeImportedTitle(titleRaw, titleSets.careers)
       : (titleSets.careers.add(normTitle(titleRaw)), titleRaw);
-
     const row = { ...c, id: newId, title: finalTitle, createdAt: c.createdAt || now, updatedAt: c.updatedAt || c.createdAt || now };
     await putOne('careers', row);
     by.careers.set(normTitle(finalTitle), row);
@@ -6540,20 +6332,34 @@ async function importSnapshotSelectionReplace(snap, sel) {
 
 
 async function refreshAll() {
-  // 1) Top filters first (so downstream renders can rely on state + selects)
-  await loadUsersIntoSelect();
-  await loadCareerFilterSelect();
-  await renderPersonalCareerPick();
+  const steps = [
+    ['loadUsersIntoSelect', loadUsersIntoSelect],
+    ['loadCareerFilterSelect', loadCareerFilterSelect],
+    ['renderPersonalCareerPick', renderPersonalCareerPick],
+    ['renderPrompts', renderPrompts],
+    ['renderPersonal', renderPersonal],
+    ['renderCareer', renderCareer],
+    ['renderConnections', renderConnections],
+    ['renderPromptPickers', renderPromptPickers],
+    ['renderPromptPage', renderPromptPage],
+    ['renderChangeLog', renderChangeLog]
+  ];
 
-  // 2) Setup page sections
-  await renderPrompts();
-  await renderPersonal();
-  await renderCareerBlocks();
-  await renderConnections();
-
-  // 3) Prompt page
-  await renderPromptPickers();
-  await renderPromptPage();
+  const errs = [];
+  for (const [name, fn] of steps) {
+    try {
+      await fn();
+    } catch (e) {
+      console.error(e);
+      errs.push({ name, message: (e && e.message) ? e.message : String(e) });
+    }
+  }
+  if (errs.length) {
+    try {
+      window.__lastRefreshErrors = errs;
+    } catch {}
+    toast(`Refresh finished with ${errs.length} error(s). Open DevTools Console for details.`, 4500);
+  }
 }
 
 /** ========= Wire Events ========= */
@@ -6573,15 +6379,13 @@ function wireEvents() {
 
   $('#btnAddUser').addEventListener('click', addUserFlow);
   $('#btnRenameUser').addEventListener('click', renameUserFlow);
-    $('#btnDuplicateUser').addEventListener('click', duplicateUserFlow);
-$('#btnDeleteUser').addEventListener('click', deleteUserFlow);
+  $('#btnDeleteUser').addEventListener('click', deleteUserFlow);
 
 
   // Careers (top filter + management)
   $('#btnAddCareerTop').addEventListener('click', addCareerFlow);
   $('#btnRenameCareer').addEventListener('click', renameCareerFlow);
-    $('#btnDuplicateCareer').addEventListener('click', duplicateCareerFlow);
-$('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
+  $('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
 
   $('#btnAddPrompt').addEventListener('click', () => openEditItemModal({
     title: 'Edit · Prompt Item',
@@ -7304,6 +7108,23 @@ function setLastOnlineImportInfo(info){
   try { localStorage.setItem(SYNC_LAST_ONLINE_IMPORT_KEY, JSON.stringify(info || null)); } catch {}
   applySyncInfoUI();
 }
+
+function setCurrentSnapshotMetaAfterExport({ exportVersion, uploadedBy, toolVersion, sourceName, sourcePath }){
+  // After a successful export, treat the current local state as "synced" to this version.
+  // This updates the top version badge (Online mode) and resets the Edited indicator baseline.
+  const baselineIso = new Date().toISOString();
+  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
+  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
+  setLastOnlineImportInfo({
+    uploadedAtLocal: String(exportVersion || '').trim(),
+    uploadedBy: String(uploadedBy || '').trim(),
+    toolVersion: String(toolVersion || '').trim(),
+    sourceName: String(sourceName || '').trim(),
+    sourcePath: String(sourcePath || '').trim(),
+    localBaselineIso: baselineIso
+  });
+}
+
 function getLocalLastModifiedIso(){
   try { return localStorage.getItem(LOCAL_LAST_MOD_KEY) || ''; } catch { return ''; }
 }
