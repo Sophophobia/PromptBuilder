@@ -795,7 +795,8 @@
               <select id="userSelect"></select>
               <button class="btn mini" id="btnAddUser">Add</button>
               <button class="btn mini" id="btnRenameUser">Rename</button>
-              <button class="btn mini danger" id="btnDeleteUser">Delete</button>
+                            <button class="btn mini" id="btnDuplicateUser">Duplicate</button>
+<button class="btn mini danger" id="btnDeleteUser">Delete</button>
             </div>
           </div>
           <div class="fieldRow" id="personalCareerPickRow">
@@ -818,7 +819,8 @@
               <select id="careerFilter"></select>
               <button class="btn mini" id="btnAddCareerTop">Add</button>
               <button class="btn mini" id="btnRenameCareer">Rename</button>
-              <button class="btn mini danger" id="btnDeleteCareer">Delete</button>
+                            <button class="btn mini" id="btnDuplicateCareer">Duplicate</button>
+<button class="btn mini danger" id="btnDeleteCareer">Delete</button>
             </div>
           </div>
           <div class="divider"></div>
@@ -2178,6 +2180,64 @@ async function renameUserFlow() {
   await logChange({ entityType: 'user', entityId: userId, action: 'update', after, before });
   await refreshAll();
 }
+
+async function duplicateUserFlow() {
+  const userId = state.currentUserId;
+  if (!userId) { alert('Select a user first.'); return; }
+  const u = await getOne('users', userId);
+  if (!u) { alert('User not found.'); return; }
+
+  const all = await getAll('users');
+  const used = new Set((all || []).map(x => normTitle(x.name)));
+  const base = (u.name || 'User').trim() || 'User';
+  let cand = `${base} (Copy)`;
+  let i = 2;
+  while (used.has(normTitle(cand))) {
+    cand = `${base} (Copy ${i})`;
+    i += 1;
+  }
+
+  const t = nowISO();
+  const newId = uid();
+  const newUser = { ...u, id: newId, name: cand, createdAt: t, updatedAt: t };
+  await addOne('users', newUser);
+  await logChange({ entityType: 'user', entityId: newId, action: 'create', after: newUser });
+
+  // Copy per-user content rows (v3)
+  try {
+    const pc = await getByIndex('personalContent', 'by_userId', userId);
+    for (const r of (pc || [])) {
+      const nr = { ...r, userId: newId, updatedAt: t };
+      await putOne('personalContent', nr);
+      await logChange({ entityType: 'personalContent', entityId: `${nr.userId}:${nr.templateId}`, action: 'create', after: nr });
+    }
+  } catch {}
+
+  // Copy legacy per-user items too (if any exist from older versions)
+  try {
+    const leg = await getByIndex('personalItems', 'by_userId', userId);
+    for (const p of (leg || [])) {
+      const nid = uid();
+      const np = { ...p, id: nid, userId: newId, createdAt: t, updatedAt: t };
+      await putOne('personalItems', np);
+      await logChange({ entityType: 'personalItem', entityId: nid, action: 'create', after: np });
+    }
+  } catch {}
+
+  // Copy selected career mapping for the user (if any)
+  try {
+    const uc = await getOne('userCareer', userId);
+    if (uc) {
+      const nuc = { ...uc, userId: newId, updatedAt: t };
+      await putOne('userCareer', nuc);
+      await logChange({ entityType: 'userCareer', entityId: newId, action: 'create', after: nuc });
+    }
+  } catch {}
+
+  state.currentUserId = newId;
+  try { localStorage.setItem('mivida_current_user_id', newId); } catch {}
+  await refreshAll();
+}
 async function deleteUserFlow() {
   const userId = state.currentUserId;
   if (!userId) { alert('Select a user first.'); return; }
@@ -2265,6 +2325,55 @@ async function renameCareerFlow() {
   await putOne('careers', after);
   await logChange({ entityType: 'career', entityId: careerId, action: 'update', after, before });
 
+  await refreshAll();
+}
+
+async function duplicateCareerFlow() {
+  const careerId = state.currentCareerId;
+  if (!careerId) { alert('Select a career first.'); return; }
+  const c = await getOne('careers', careerId);
+  if (!c) { alert('Career not found.'); return; }
+
+  const all = await getAll('careers');
+  const used = new Set((all || []).map(x => normTitle(x.title)));
+  const base = (c.title || 'Career').trim() || 'Career';
+  let cand = `${base} (Copy)`;
+  let i = 2;
+  while (used.has(normTitle(cand))) {
+    cand = `${base} (Copy ${i})`;
+    i += 1;
+  }
+
+  const t = nowISO();
+  const newId = uid();
+  const newCareer = { ...c, id: newId, title: cand, createdAt: t, updatedAt: t };
+  await addOne('careers', newCareer);
+  await logChange({ entityType: 'career', entityId: newId, action: 'create', after: newCareer });
+
+  // Copy career content rows (v3)
+  try {
+    const cc = await getByIndex('careerContent', 'by_careerId', careerId);
+    for (const r of (cc || [])) {
+      const nr = { ...r, careerId: newId, updatedAt: t };
+      await putOne('careerContent', nr);
+      await logChange({ entityType: 'careerContent', entityId: `${nr.careerId}:${nr.templateId}`, action: 'create', after: nr });
+    }
+  } catch {}
+
+  // Copy legacy career blocks too (if any)
+  try {
+    const blocks = await getByIndex('careerBlocks', 'by_careerId', careerId);
+    for (const b of (blocks || [])) {
+      const nid = uid();
+      const nb = { ...b, id: nid, careerId: newId, createdAt: t, updatedAt: t };
+      await putOne('careerBlocks', nb);
+      await logChange({ entityType: 'careerBlock', entityId: nid, action: 'create', after: nb });
+    }
+  } catch {}
+
+  await loadCareerFilterSelect();
+  await setCurrentCareer(newId);
+  await renderPersonalCareerPick();
   await refreshAll();
 }
 
@@ -5871,41 +5980,35 @@ async function ensurePersonalTemplate(oldTplId) {
     return ex ? ex.id : null;
   }
 
-  // 1) Users (merge by name; avoid duplicates)
+  // 1) Users (allow duplicates by renaming when needed)
   for (const u of (snap.users || [])) {
     if (!sel.users || !sel.users.has(u.id)) continue;
-    const key = normTitle(u.name);
-    const existing = by.users.get(key);
-    if (existing) {
-      idMap.users.set(u.id, existing.id);
-      continue;
-    }
+
     const newId = uid();
     idMap.users.set(u.id, newId);
+
     const nameRaw = (u.name || '').trim() || 'Untitled';
     const finalName = titleSets.users.has(normTitle(nameRaw))
       ? makeImportedTitle(nameRaw, titleSets.users)
       : (titleSets.users.add(normTitle(nameRaw)), nameRaw);
+
     const row = { ...u, id: newId, name: finalName, createdAt: u.createdAt || now, updatedAt: u.updatedAt || u.createdAt || now };
     await putOne('users', row);
     by.users.set(normTitle(finalName), row);
   }
 
-  // 2) Careers (merge by title; avoid duplicates)
+  // 2) Careers (allow duplicates by renaming when needed)
   for (const c of (snap.careers || [])) {
     if (!sel.careers || !sel.careers.has(c.id)) continue;
-    const key = normTitle(c.title);
-    const existing = by.careers.get(key);
-    if (existing) {
-      idMap.careers.set(c.id, existing.id);
-      continue;
-    }
+
     const newId = uid();
     idMap.careers.set(c.id, newId);
+
     const titleRaw = (c.title || '').trim() || 'Untitled';
     const finalTitle = titleSets.careers.has(normTitle(titleRaw))
       ? makeImportedTitle(titleRaw, titleSets.careers)
       : (titleSets.careers.add(normTitle(titleRaw)), titleRaw);
+
     const row = { ...c, id: newId, title: finalTitle, createdAt: c.createdAt || now, updatedAt: c.updatedAt || c.createdAt || now };
     await putOne('careers', row);
     by.careers.set(normTitle(finalTitle), row);
@@ -6470,13 +6573,15 @@ function wireEvents() {
 
   $('#btnAddUser').addEventListener('click', addUserFlow);
   $('#btnRenameUser').addEventListener('click', renameUserFlow);
-  $('#btnDeleteUser').addEventListener('click', deleteUserFlow);
+    $('#btnDuplicateUser').addEventListener('click', duplicateUserFlow);
+$('#btnDeleteUser').addEventListener('click', deleteUserFlow);
 
 
   // Careers (top filter + management)
   $('#btnAddCareerTop').addEventListener('click', addCareerFlow);
   $('#btnRenameCareer').addEventListener('click', renameCareerFlow);
-  $('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
+    $('#btnDuplicateCareer').addEventListener('click', duplicateCareerFlow);
+$('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
 
   $('#btnAddPrompt').addEventListener('click', () => openEditItemModal({
     title: 'Edit · Prompt Item',
