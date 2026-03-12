@@ -890,8 +890,8 @@
       </div>
     </div>
 
-    <input type="file" id="fileImportSnapshot" accept="application/json" style="display:none;" />
-    <input type="file" id="fileImportSnapshotWipe" accept="application/json" style="display:none;" />
+    <input type="file" id="fileImportSnapshot" accept="application/json;charset=utf-8" style="display:none;" />
+    <input type="file" id="fileImportSnapshotWipe" accept="application/json;charset=utf-8" style="display:none;" />
     <div class="toast" id="toast" aria-live="polite"></div>
   </div>
 
@@ -899,6 +899,11 @@
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
+const nowLocalStampFull = () => {
+  const d = new Date();
+  const pad = (n,w=2)=>String(n).padStart(w,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
+};
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
@@ -916,67 +921,6 @@ const downloadText = (filename, text, mime='text/plain') => {
   a.remove();
   URL.revokeObjectURL(a.href);
 };
-
-// --- UTF-8 safe helpers (Import/Export) ---
-const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
-
-// Decode GitHub contents API (base64) into a proper UTF-8 string.
-const decodeBase64Utf8 = (b64) => {
-  const bin = atob(String(b64 || '').replace(/\s/g, ''));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return stripBom(new TextDecoder('utf-8').decode(bytes));
-};
-
-// Read local file as UTF-8 (handles BOM consistently).
-const readFileUtf8 = async (file) => {
-  const buf = await file.arrayBuffer();
-  return stripBom(new TextDecoder('utf-8').decode(new Uint8Array(buf)));
-};
-
-// Best-effort repair for common mojibake (e.g., "Ã¢ÂÂ" -> "—").
-// Applied during import/export to keep snapshots clean across versions.
-const repairMojibake = (s) => {
-  if (typeof s !== 'string' || s.length < 3) return s;
-  if (!/[ÃÂâ]/.test(s)) return s;
-
-  const score = (t) => ((t.match(/[ÃÂ]/g) || []).length + (t.match(/â\u0080/g) || []).length);
-
-  const decodeLatin1SegAsUtf8 = (seg) => {
-    const bytes = new Uint8Array(seg.length);
-    for (let i = 0; i < seg.length; i++) bytes[i] = seg.charCodeAt(i) & 0xFF;
-    return new TextDecoder('utf-8').decode(bytes);
-  };
-
-  // Only attempt repairs on Latin-1 byte segments so we don't harm Chinese/emoji, etc.
-  return s.replace(/[\x00-\xFF]+/g, (seg) => {
-    if (!/[ÃÂâ]/.test(seg)) return seg;
-    let cur = seg;
-    for (let i = 0; i < 2; i++) {
-      // Stop once the segment no longer looks like mojibake.
-      if (!/[ÃÂâ]/.test(cur)) break;
-      const next = decodeLatin1SegAsUtf8(cur);
-      if (!next || next === cur) break;
-      if (score(next) <= score(cur)) cur = next;
-      else break;
-    }
-    return cur;
-  });
-};
-
-const deepRepairStringsInPlace = (v) => {
-  if (typeof v === 'string') return repairMojibake(v);
-  if (Array.isArray(v)) {
-    for (let i = 0; i < v.length; i++) v[i] = deepRepairStringsInPlace(v[i]);
-    return v;
-  }
-  if (v && typeof v === 'object') {
-    for (const k of Object.keys(v)) v[k] = deepRepairStringsInPlace(v[k]);
-    return v;
-  }
-  return v;
-};
-
 const copyToClipboard = async (text) => {
   try {
     await navigator.clipboard.writeText(text);
@@ -1892,7 +1836,8 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 function closeModal() {
   const overlay = $('#modalOverlay');
   const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
-  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
+  // NOTE: do not clear pendingOnlineImportMeta here; it is finalized after a successful import.
+  // (Keeping it allows the version badge to update correctly.)
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
@@ -4100,8 +4045,9 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
+  const exportVersionLocal = nowLocalStampFull();
   const snapshot = {
-    version: DB_VERSION,
+    version: exportVersionLocal,
     exportedAt: nowISO(),
 
     // Sections (always present as arrays for predictable import)
@@ -4133,15 +4079,28 @@ async function exportSnapshotJson(options=null) {
     // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
+      const uploadedAtLocal = exportVersionLocal;
       const cfg = GitHubSync.getConfig();
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
       snapshot.toolVersion = toolVersion;
-      deepRepairStringsInPlace(snapshot);
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
+      // After a successful export, update the top version badge to this exported version.
+      try {
+        const baselineIso = new Date().toISOString();
+        localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
+        setLastOnlineImportInfo({
+          uploadedAtLocal: exportVersionLocal,
+          uploadedBy: (cfg.uploader || ''),
+          toolVersion: toolVersion,
+          sourceName: (up && up.filename) ? up.filename : '',
+          sourcePath: (up && up.path) ? up.path : '',
+          localBaselineIso: baselineIso
+        });
+      } catch {}
+
     } catch (err) {
       console.error(err);
       alert('Online export failed\n\n' + (err?.message || String(err)));
@@ -4152,9 +4111,22 @@ async function exportSnapshotJson(options=null) {
 
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
-  deepRepairStringsInPlace(snapshot);
   const jsonText = JSON.stringify(snapshot, null, 2);
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
+  // Keep the local UI version in sync with the exported snapshot version.
+  try {
+    const baselineIso = new Date().toISOString();
+    localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
+    setLastOnlineImportInfo({
+      uploadedAtLocal: exportVersionLocal,
+      uploadedBy: 'local',
+      toolVersion: '',
+      sourceName: `mivida_snapshot_${stamp}.json`,
+      sourcePath: '',
+      localBaselineIso: baselineIso
+    });
+  } catch {}
+
   toast('Snapshot exported');
   return snapshot;
 }
@@ -4630,7 +4602,7 @@ sync();
 async function openImportWizardFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(stripBom(rawText));
+    s = JSON.parse(rawText);
   } catch (e) {
     toast('Invalid JSON snapshot');
     return;
@@ -4661,7 +4633,7 @@ async function openImportWizardFromText(rawText) {
 async function wipeLocalAndImportAllFromText(rawText) {
   let s;
   try {
-    s = JSON.parse(stripBom(rawText));
+    s = JSON.parse(rawText);
   } catch {
     toast('Invalid JSON snapshot');
     return;
@@ -4735,9 +4707,6 @@ async function wipeLocalAndImportAllFromText(rawText) {
 function normalizeSnapshotForImport(s) {
   const tNow = nowISO();
   const mkId = () => uid();
-
-  // Repair any mojibake strings inside the snapshot (best-effort).
-  try { deepRepairStringsInPlace(s); } catch {}
 
   // Personal: prefer v3; fall back to legacy personalItems
   let personalTemplates = Array.isArray(s.personalTemplates) ? s.personalTemplates : [];
@@ -6469,6 +6438,20 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   if (!f) return;
   try {
     const text = await readFileUtf8(f);
+    // Capture snapshot metadata so the version badge can update after a successful import.
+    try {
+      let s = JSON.parse(text);
+      if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+      pendingOnlineImportMeta = {
+        uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
+        uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
+        toolVersion: String(s?.toolVersion || '').trim(),
+        sourceName: String(f.name || '').trim(),
+        sourcePath: ''
+      };
+    } catch {
+      pendingOnlineImportMeta = null;
+    }
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6497,7 +6480,18 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const text = await readFileUtf8(f);
-        pendingOnlineImportMeta = null;
+        // Capture snapshot metadata so the version badge can update after a successful import.
+        try {
+          let s = JSON.parse(text);
+          if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+          pendingOnlineImportMeta = {
+            uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
+            uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
+            toolVersion: String(s?.toolVersion || '').trim(),
+            sourceName: String(f.name || '').trim(),
+            sourcePath: ''
+          };
+        } catch { pendingOnlineImportMeta = null; }
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6807,25 +6801,84 @@ const GitHubSync = (() => {
     return files[0];
   };
 
-  const downloadFileText = async (path) => {
-    const c = getConfig();
-    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
-    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
-    const r = await ghFetch(url, c.token);
-    if (!r.ok) {
-      const t = await r.text().catch(()=> '');
-      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
-    }
-    const data = await r.json();
-    const content = data && data.content ? String(data.content) : '';
-    const enc = data && data.encoding ? String(data.encoding) : 'base64';
-    if (enc !== 'base64') {
-      throw new Error('Unsupported file encoding: ' + enc);
-    }
-    const raw = decodeBase64Utf8(content);
-    return raw;
+  const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
+
+// Decode GitHub contents API base64 into a proper UTF-8 string.
+const fromBase64Utf8 = (b64) => {
+  const bin = atob(String(b64 || '').replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return stripBom(new TextDecoder('utf-8').decode(bytes));
+};
+
+// Read a local file as UTF-8 (handles BOM consistently).
+const readFileUtf8 = async (file) => {
+  const buf = await file.arrayBuffer();
+  return stripBom(new TextDecoder('utf-8').decode(buf));
+};
+
+// Fetch GitHub content as raw bytes and decode as UTF-8. Works when contents API returns encoding 'none' or omits content.
+const fetchGitHubRawUtf8 = async (url, token) => {
+  const doFetch = async (useTokenPrefix) => {
+    const h = authHeaders(token, useTokenPrefix);
+    h['Accept'] = 'application/vnd.github.raw';
+    return fetch(url, { headers: h });
   };
-  const toBase64Utf8 = (str) => {
+  let r = await doFetch(false);
+  if (r.status === 401) r = await doFetch(true);
+  if (!r.ok) {
+    const t = await r.text().catch(()=> '');
+    throw new Error(`Raw download failed (${r.status}). ${t || ''}`.trim());
+  }
+  const buf = await r.arrayBuffer();
+  return stripBom(new TextDecoder('utf-8').decode(buf));
+};
+
+const downloadFileText = async (path) => {
+  const c = getConfig();
+  const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+  const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
+
+  // First try JSON metadata (default Accept header).
+  const r = await ghFetch(url, c.token);
+  if (!r.ok) {
+    const t = await r.text().catch(()=> '');
+    throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
+  }
+
+  const data = await r.json();
+
+  // If it's a directory listing, it won't have content.
+  if (Array.isArray(data)) {
+    try {
+      return await fetchGitHubRawUtf8(url, c.token);
+    } catch (e) {
+      throw new Error('Download failed: path is a directory (not a file): ' + path);
+    }
+  }
+
+  const enc = data && data.encoding ? String(data.encoding) : '';
+  const content = data && data.content ? String(data.content) : '';
+
+  if (enc === 'base64' && content) {
+    return fromBase64Utf8(content);
+  }
+
+  // Some GitHub responses (large files / raw mode) can return encoding 'none' and omit content.
+  // In that case, fetch the raw bytes and decode as UTF-8.
+  try {
+    return await fetchGitHubRawUtf8(url, c.token);
+  } catch (e) {
+    // As a last resort, if API provided a download_url, try it with auth (may still work for private repos).
+    if (data && data.download_url) {
+      return await fetchGitHubRawUtf8(String(data.download_url), c.token);
+    }
+    const shownEnc = enc || 'none';
+    throw new Error('Unsupported file encoding: ' + shownEnc);
+  }
+};
+
+const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
     const bytes = new TextEncoder().encode(String(str || ''));
     let bin = '';
@@ -6865,7 +6918,7 @@ const GitHubSync = (() => {
     // For PUT we need fetch with method and body.
     const doPut = async (useTokenPrefix=false) => fetch(url, {
       method: 'PUT',
-      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
+      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json;charset=utf-8' },
       body: JSON.stringify(payload)
     });
     let pr = await doPut(false);
@@ -6934,7 +6987,7 @@ async function githubImportFlow({ wipe }){
 
         if (looksLikeSnapshot) {
           pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedAtLocal: String(s.version || s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
             uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
             toolVersion: String(s.toolVersion || '').trim(),
             sourceName: String(file.name || '').trim(),
@@ -7119,11 +7172,19 @@ function isEditedSinceImport(localIso, importedAtIso){
 
 function parseLocalStampFromFilename(name){
   const n = String(name || '');
-  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
-  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
-  if (!m) return '';
-  const [,Y,Mo,D,HH,MM,SS,MS] = m;
-  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+  // Primary pattern: YYYYMMDD_HHMMSS_mmm
+  let m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (m){
+    const [,Y,Mo,D,HH,MM,SS,MS] = m;
+    return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+  }
+  // Fallback: accept other snapshot filename variants if available.
+  try {
+    const meta = (typeof GitHubSync !== 'undefined' && GitHubSync && typeof GitHubSync.parseFilenameMeta === 'function')
+      ? GitHubSync.parseFilenameMeta(n) : null;
+    if (meta && meta.datetime) return meta.datetime;
+  } catch {}
+  return '';
 }
 function parseUploaderFromFilename(name){
   const base = String(name || '').replace(/\.json$/i,'');
@@ -7183,7 +7244,7 @@ function applySyncInfoUI(){
     return;
   }
 
-  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
+  const dtRaw = (info.uploadedAtLocal || info.version || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
   // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
