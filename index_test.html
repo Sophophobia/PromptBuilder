@@ -229,6 +229,14 @@
       margin: 0 0 10px; font-size: 14px; letter-spacing:.2px;
       display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
+    .h2Actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+
+    /* Categories modal */
+    .catRow{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--divider); }
+    .catRow:last-child{ border-bottom:none; }
+    .catName{ flex:1; font-weight:600; }
+    .catHint{ font-size:12px; color:var(--muted); }
+
     .muted{ color: var(--muted); font-size: 12px; }
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 
@@ -775,8 +783,11 @@
       <div class="grid">
         <section class="card">
           <h2>
-            <span>Prompts <span class="pill">Global</span></span>
-            <button class="btn primary" id="btnAddPrompt">Add</button>
+            <span>Prompts</span>
+            <div class="h2Actions">
+              <button class="btn mini" id="btnManageCategoriesPrompts">Manage Categories</button>
+              <button class="btn primary" id="btnAddPrompt">Add</button>
+            </div>
           </h2>
           <div class="muted">Reusable prompt blocks (Markdown). Shared across all users.</div>
           <div class="divider"></div>
@@ -787,7 +798,10 @@
         <section class="card">
           <h2>
             <span>Personal Info</span>
-            <button class="btn primary" id="btnAddPersonal">Add Item</button>
+            <div class="h2Actions">
+              <button class="btn mini" id="btnManageCategoriesPersonal">Manage Categories</button>
+              <button class="btn primary" id="btnAddPersonal">Add Item</button>
+            </div>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -810,7 +824,10 @@
         <section class="card">
           <h2>
             <span>Career Info</span>
-            <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
+            <div class="h2Actions">
+              <button class="btn mini" id="btnManageCategoriesCareer">Manage Categories</button>
+              <button class="btn primary" id="btnAddCareerBlock">Add Item</button>
+            </div>
           </h2>
           <div class="tileSubHeader">
             <div class="actionGroup">
@@ -830,11 +847,14 @@
 
         <section class="card">
           <h2>
-            <span>Connection <span class="pill">Global</span></span>
-            <button class="btn primary" id="btnAddConnection">Add</button>
+            <span>Connection</span>
+            <div class="h2Actions">
+              <button class="btn mini" id="btnManageCategoriesConnections">Manage Categories</button>
+              <button class="btn primary" id="btnAddConnection">Add</button>
+            </div>
           </h2>
           <div class="muted">
-            Global connections. Each connection can select items from Prompt, Personal Info, and Career Info.
+            Connections that can select items from Prompt, Personal Info, and Career Info.
             When you view/copy in the Prompt tab, it compiles using the current user and that user’s selected career.
             If a selected Personal/Career item has no content for the current user/career, the title is kept and the content is empty (you’ll see an “Empty” warning).
           </div>
@@ -890,8 +910,8 @@
       </div>
     </div>
 
-    <input type="file" id="fileImportSnapshot" accept="application/json;charset=utf-8" style="display:none;" />
-    <input type="file" id="fileImportSnapshotWipe" accept="application/json;charset=utf-8" style="display:none;" />
+    <input type="file" id="fileImportSnapshot" accept="application/json" style="display:none;" />
+    <input type="file" id="fileImportSnapshotWipe" accept="application/json" style="display:none;" />
     <div class="toast" id="toast" aria-live="polite"></div>
   </div>
 
@@ -899,11 +919,6 @@
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
-const nowLocalStampFull = () => {
-  const d = new Date();
-  const pad = (n,w=2)=>String(n).padStart(w,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
-};
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
@@ -1307,10 +1322,7 @@ function renderMarkdown(md){
 
 /** ========= IndexedDB ========= */
 const DB_NAME = 'mivida_prompt_builder_offline';
-// IMPORTANT: DB_VERSION must be monotonically increasing.
-// Some users already have v4 in their browser; keeping this at 3 will cause:
-// "The requested version (3) is less than the existing version (4)".
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let dbPromise = null;
 
@@ -1561,6 +1573,14 @@ function openDB() {
         } catch (err) { /* best effort */ }
       }
 
+      // v5: Categories (per section)
+      if (!db.objectStoreNames.contains('categories')) {
+        const cat = db.createObjectStore('categories', { keyPath: 'id' });
+        cat.createIndex('by_sectionKey', 'sectionKey', { unique: false });
+        cat.createIndex('by_sectionKey_order', ['sectionKey', 'order'], { unique: false });
+      }
+
+
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -1618,6 +1638,188 @@ async function getByIndex(storeName, indexName, query) {
     req.onerror = () => reject(req.error);
   });
 }
+
+
+/** ========= Categories (per section) ========= */
+const CATEGORY_SECTION_KEYS = Object.freeze({
+  PROMPTS: 'promptItems',
+  PERSONAL: 'personalTemplates',
+  CAREER: 'careerTemplates',
+  CONNECTIONS: 'connections'
+});
+
+const CATEGORY_LABELS = Object.freeze({
+  [CATEGORY_SECTION_KEYS.PROMPTS]: 'Prompts',
+  [CATEGORY_SECTION_KEYS.PERSONAL]: 'Personal Info',
+  [CATEGORY_SECTION_KEYS.CAREER]: 'Career Info',
+  [CATEGORY_SECTION_KEYS.CONNECTIONS]: 'Connection'
+});
+
+const _normCatName = (s) => (s || '').trim();
+const _normCatKey = (s) => (s || '').trim().toLowerCase();
+const _isReservedCategoryName = (name) => _normCatKey(name) === 'uncategorized';
+
+async function getCategoriesBySectionKey(sectionKey) {
+  try {
+    const rows = await getByIndex('categories', 'by_sectionKey', sectionKey);
+    return (rows || []).slice().sort((a,b) => {
+      const ao = (a?.order ?? 999999);
+      const bo = (b?.order ?? 999999);
+      if (ao !== bo) return ao - bo;
+      const an = (a?.name || '').toLowerCase();
+      const bn = (b?.name || '').toLowerCase();
+      return an.localeCompare(bn);
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function getAllCategories() {
+  try { return await getAll('categories'); } catch { return []; }
+}
+
+async function _nextCategoryOrder(sectionKey) {
+  const cats = await getCategoriesBySectionKey(sectionKey);
+  const maxO = cats.reduce((m,c) => Math.max(m, Number(c.order || 0)), 0);
+  return maxO + 1;
+}
+
+async function addCategory(sectionKey, name) {
+  const nm = _normCatName(name);
+  if (!nm) throw new Error('Category name is required.');
+  if (_isReservedCategoryName(nm)) throw new Error('Category name is reserved.');
+
+  const existing = await getCategoriesBySectionKey(sectionKey);
+  const dup = existing.find(c => _normCatKey(c.name) === _normCatKey(nm));
+  if (dup) throw new Error('A category with the same name already exists.');
+
+  const cat = {
+    id: uid(),
+    sectionKey,
+    name: nm,
+    order: await _nextCategoryOrder(sectionKey),
+    isCollapsed: false,
+    createdAt: nowISO(),
+    updatedAt: nowISO()
+  };
+  await putOne('categories', cat);
+  return cat;
+}
+
+async function renameCategory(catId, newName) {
+  const nm = _normCatName(newName);
+  if (!nm) throw new Error('Category name is required.');
+  if (_isReservedCategoryName(nm)) throw new Error('Category name is reserved.');
+
+  const cat = await getOne('categories', catId);
+  if (!cat) return null;
+
+  const existing = await getCategoriesBySectionKey(cat.sectionKey);
+  const dup = existing.find(c => c.id !== catId && _normCatKey(c.name) === _normCatKey(nm));
+  if (dup) throw new Error('A category with the same name already exists.');
+
+  cat.name = nm;
+  cat.updatedAt = nowISO();
+  await putOne('categories', cat);
+  return cat;
+}
+
+async function _remapCategoryIdInStore(storeName, oldId, newId) {
+  const rows = await getAll(storeName);
+  const touched = (rows || []).filter(r => r && r.categoryId === oldId);
+  if (!touched.length) return;
+
+  const now = nowISO();
+  await withStore(storeName, 'readwrite', (s) => {
+    touched.forEach(r => {
+      const patched = { ...r, categoryId: newId || null };
+      if (patched.updatedAt) patched.updatedAt = now;
+      s.put(patched);
+    });
+  });
+}
+
+async function _unassignCategoryFromItems(sectionKey, categoryId, remapToId=null) {
+  // Categories apply to the 4 setup sections:
+  // - promptItems
+  // - personalTemplates
+  // - careerTemplates
+  // - connections
+  const store = sectionKey; // store names match sectionKey
+  try { await _remapCategoryIdInStore(store, categoryId, remapToId); } catch {}
+}
+
+async function deleteCategoryById(catId) {
+  const cat = await getOne('categories', catId);
+  if (!cat) return;
+
+  // Unassign items -> Uncategorized (null)
+  await _unassignCategoryFromItems(cat.sectionKey, catId, null);
+  await deleteOne('categories', catId);
+  await normalizeCategoryOrder(cat.sectionKey);
+}
+
+async function normalizeCategoryOrder(sectionKey) {
+  const cats = await getCategoriesBySectionKey(sectionKey);
+  if (!cats.length) return;
+  const now = nowISO();
+  await withStore('categories', 'readwrite', (s) => {
+    cats.forEach((c, i) => {
+      const desired = i + 1;
+      if (Number(c.order || 0) !== desired) {
+        s.put({ ...c, order: desired, updatedAt: now });
+      }
+    });
+  });
+}
+
+async function exportCategoriesForSnapshot() {
+  return await getAllCategories();
+}
+
+async function importCategoriesFromSnapshot(snap) {
+  const incoming = Array.isArray(snap?.categories) ? snap.categories : [];
+  if (!incoming.length) return;
+
+  // Build local maps by id and by (sectionKey + name)
+  const local = await getAllCategories();
+  const byId = new Map((local || []).map(c => [c.id, c]));
+  const byKeyName = new Map();
+  (local || []).forEach(c => {
+    if (!c || !c.sectionKey) return;
+    byKeyName.set(`${c.sectionKey}::${_normCatKey(c.name)}`, c);
+  });
+
+  for (const sc of incoming) {
+    if (!sc || !sc.id || !sc.sectionKey) continue;
+    const keyName = `${sc.sectionKey}::${_normCatKey(sc.name)}`;
+
+    // If id exists, upsert.
+    if (byId.has(sc.id)) {
+      await putOne('categories', { ...byId.get(sc.id), ...sc });
+      continue;
+    }
+
+    // If same name exists with different id, remap local items to snapshot id, then replace.
+    if (byKeyName.has(keyName)) {
+      const lc = byKeyName.get(keyName);
+      if (lc && lc.id !== sc.id) {
+        await _unassignCategoryFromItems(sc.sectionKey, lc.id, sc.id);
+        await deleteOne('categories', lc.id);
+      }
+    }
+
+    await putOne('categories', sc);
+  }
+
+  // Normalize order per section for clean UI
+  const sections = new Set(incoming.map(c => c?.sectionKey).filter(Boolean));
+  for (const sk of sections) {
+    try { await normalizeCategoryOrder(sk); } catch {}
+  }
+}
+
 
 /** ========= Change Log ========= */
 async function logChange({ entityType, entityId, action, after, before=null }) {
@@ -1836,8 +2038,7 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 function closeModal() {
   const overlay = $('#modalOverlay');
   const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
-  // NOTE: do not clear pendingOnlineImportMeta here; it is finalized after a successful import.
-  // (Keeping it allows the version badge to update correctly.)
+  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
@@ -1853,6 +2054,116 @@ function closeModal() {
 
   const footer = $('#modalFooter');
   if (footer) footer.style.display = 'flex';
+}
+
+
+function openManageCategoriesModal(sectionKey) {
+  const label = CATEGORY_LABELS[sectionKey] || sectionKey;
+  const body = document.createElement('div');
+
+  const top = document.createElement('div');
+  top.className = 'fieldRow';
+  top.style.alignItems = 'center';
+  top.innerHTML = `
+    <label style="min-width:140px;">New Category</label>
+    <input id="catNewName" placeholder="Type a category name" />
+  `;
+
+  const addBtn = btn('Add', { primary: true, mini: true });
+  top.appendChild(addBtn);
+
+  const hint = document.createElement('div');
+  hint.className = 'catHint';
+  hint.style.marginTop = '8px';
+  hint.textContent = 'Uncategorized is always available. Categories are shared across the team via snapshots.';
+
+  const divider = document.createElement('div');
+  divider.className = 'divider';
+  divider.style.marginTop = '12px';
+
+  const list = document.createElement('div');
+  list.id = 'catList';
+
+  const renderRow = (cat, locked=false) => {
+    const row = document.createElement('div');
+    row.className = 'catRow';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'catName';
+    nameEl.textContent = cat.name || '';
+    row.appendChild(nameEl);
+
+    if (locked) {
+      const badge = document.createElement('span');
+      badge.className = 'pill';
+      badge.textContent = 'Reserved';
+      row.appendChild(badge);
+      return row;
+    }
+
+    const renameBtn = btn('Rename', { mini: true });
+    renameBtn.addEventListener('click', async () => {
+      const next = prompt('Rename category:', cat.name || '');
+      if (next == null) return;
+      try {
+        await renameCategory(cat.id, next);
+        await refresh();
+      } catch (e) {
+        toast(String(e?.message || e), 'danger');
+      }
+    });
+
+    const delBtn = btn('Delete', { mini: true, danger: true });
+    delBtn.addEventListener('click', async () => {
+      const ok = confirm(`Delete category "${cat.name}"?\n\nAny items assigned to it will move to Uncategorized.`);
+      if (!ok) return;
+      try {
+        await deleteCategoryById(cat.id);
+        await refresh();
+      } catch (e) {
+        toast(String(e?.message || e), 'danger');
+      }
+    });
+
+    row.appendChild(renameBtn);
+    row.appendChild(delBtn);
+    return row;
+  };
+
+  const refresh = async () => {
+    const cats = await getCategoriesBySectionKey(sectionKey);
+    list.innerHTML = '';
+
+    list.appendChild(renderRow({ id:'__uncat__', name:'Uncategorized' }, true));
+
+    cats.forEach(c => list.appendChild(renderRow(c, false)));
+  };
+
+  addBtn.addEventListener('click', async () => {
+    const input = top.querySelector('#catNewName');
+    const name = input?.value || '';
+    try {
+      await addCategory(sectionKey, name);
+      if (input) input.value = '';
+      await refresh();
+    } catch (e) {
+      toast(String(e?.message || e), 'danger');
+    }
+  });
+
+  // Enter to add
+  top.querySelector('#catNewName')?.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') addBtn.click();
+  });
+
+  body.appendChild(top);
+  body.appendChild(hint);
+  body.appendChild(divider);
+  body.appendChild(list);
+
+  openModal(`Manage Categories · ${label}`, body, [btn('Close', { onClick: closeModal })]);
+
+  refresh();
 }
 function btn(text, opts={}) {
   const b = document.createElement('button');
@@ -2904,7 +3215,7 @@ async function deleteCareerTemplate(payload) {
 }
 
 
-/** ========= Connections (Global) ========= */
+/** ========= Connections ========= */
 async function compileForUserWithConnection(conn, ctx='setup') {
   const userId = state.currentUserId;
 
@@ -4045,10 +4356,14 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
-  const exportVersionLocal = nowLocalStampFull();
+  const categoriesOut = await exportCategoriesForSnapshot();
+
   const snapshot = {
-    version: exportVersionLocal,
+    version: DB_VERSION,
     exportedAt: nowISO(),
+
+    // Shared metadata
+    categories: categoriesOut || [],
 
     // Sections (always present as arrays for predictable import)
     users: usersOut || [],
@@ -4079,7 +4394,7 @@ async function exportSnapshotJson(options=null) {
     // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = exportVersionLocal;
+      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
       const cfg = GitHubSync.getConfig();
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
@@ -4087,20 +4402,6 @@ async function exportSnapshotJson(options=null) {
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
-      // After a successful export, update the top version badge to this exported version.
-      try {
-        const baselineIso = new Date().toISOString();
-        localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
-        setLastOnlineImportInfo({
-          uploadedAtLocal: exportVersionLocal,
-          uploadedBy: (cfg.uploader || ''),
-          toolVersion: toolVersion,
-          sourceName: (up && up.filename) ? up.filename : '',
-          sourcePath: (up && up.path) ? up.path : '',
-          localBaselineIso: baselineIso
-        });
-      } catch {}
-
     } catch (err) {
       console.error(err);
       alert('Online export failed\n\n' + (err?.message || String(err)));
@@ -4112,21 +4413,7 @@ async function exportSnapshotJson(options=null) {
   // Offline export: download locally
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
-  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
-  // Keep the local UI version in sync with the exported snapshot version.
-  try {
-    const baselineIso = new Date().toISOString();
-    localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
-    setLastOnlineImportInfo({
-      uploadedAtLocal: exportVersionLocal,
-      uploadedBy: 'local',
-      toolVersion: '',
-      sourceName: `mivida_snapshot_${stamp}.json`,
-      sourcePath: '',
-      localBaselineIso: baselineIso
-    });
-  } catch {}
-
+  downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json');
   toast('Snapshot exported');
   return snapshot;
 }
@@ -5612,6 +5899,9 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   sel.personalContentKeys = sel.personalContentKeys || new Set();
   sel.careerContentKeys = sel.careerContentKeys || new Set();
 
+  // Categories (team-shared metadata)
+  try { await importCategoriesFromSnapshot(snap); } catch {}
+
   // Ensure templates referenced by selected connections are included (so connections can be reconstructed)
   try {
     const needPT = new Set();
@@ -6393,6 +6683,11 @@ function wireEvents() {
   $('#btnRenameCareer').addEventListener('click', renameCareerFlow);
   $('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
 
+  $('#btnManageCategoriesPrompts')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.PROMPTS));
+  $('#btnManageCategoriesPersonal')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.PERSONAL));
+  $('#btnManageCategoriesCareer')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.CAREER));
+  $('#btnManageCategoriesConnections')?.addEventListener('click', () => openManageCategoriesModal(CATEGORY_SECTION_KEYS.CONNECTIONS));
+
   $('#btnAddPrompt').addEventListener('click', () => openEditItemModal({
     title: 'Edit · Prompt Item',
     initial: { title:'', content:'' },
@@ -6437,21 +6732,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await readFileUtf8(f);
-    // Capture snapshot metadata so the version badge can update after a successful import.
-    try {
-      let s = JSON.parse(text);
-      if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
-      pendingOnlineImportMeta = {
-        uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
-        uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
-        toolVersion: String(s?.toolVersion || '').trim(),
-        sourceName: String(f.name || '').trim(),
-        sourcePath: ''
-      };
-    } catch {
-      pendingOnlineImportMeta = null;
-    }
+    const text = await f.text();
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6479,19 +6760,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await readFileUtf8(f);
-        // Capture snapshot metadata so the version badge can update after a successful import.
-        try {
-          let s = JSON.parse(text);
-          if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
-          pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
-            uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
-            toolVersion: String(s?.toolVersion || '').trim(),
-            sourceName: String(f.name || '').trim(),
-            sourcePath: ''
-          };
-        } catch { pendingOnlineImportMeta = null; }
+        const text = await f.text();
+        pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6801,84 +7071,77 @@ const GitHubSync = (() => {
     return files[0];
   };
 
+  // --- UTF-8 helpers (Import/Export) ---
   const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
 
-// Decode GitHub contents API base64 into a proper UTF-8 string.
-const fromBase64Utf8 = (b64) => {
-  const bin = atob(String(b64 || '').replace(/\s/g, ''));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return stripBom(new TextDecoder('utf-8').decode(bytes));
-};
-
-// Read a local file as UTF-8 (handles BOM consistently).
-const readFileUtf8 = async (file) => {
-  const buf = await file.arrayBuffer();
-  return stripBom(new TextDecoder('utf-8').decode(buf));
-};
-
-// Fetch GitHub content as raw bytes and decode as UTF-8. Works when contents API returns encoding 'none' or omits content.
-const fetchGitHubRawUtf8 = async (url, token) => {
-  const doFetch = async (useTokenPrefix) => {
-    const h = authHeaders(token, useTokenPrefix);
-    h['Accept'] = 'application/vnd.github.raw';
-    return fetch(url, { headers: h });
+  // Decode GitHub Contents/Blob API base64 to a proper UTF-8 string.
+  const decodeBase64Utf8 = (b64) => {
+    const bin = atob(String(b64 || '').replace(/\s/g, ''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return stripBom(new TextDecoder('utf-8').decode(bytes));
   };
-  let r = await doFetch(false);
-  if (r.status === 401) r = await doFetch(true);
-  if (!r.ok) {
-    const t = await r.text().catch(()=> '');
-    throw new Error(`Raw download failed (${r.status}). ${t || ''}`.trim());
-  }
-  const buf = await r.arrayBuffer();
-  return stripBom(new TextDecoder('utf-8').decode(buf));
-};
 
-const downloadFileText = async (path) => {
-  const c = getConfig();
-  const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
-  const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
+  const decodeArrayBufferUtf8 = (buf) => stripBom(new TextDecoder('utf-8').decode(new Uint8Array(buf)));
+  const downloadFileText = async (path) => {
+    const c = getConfig();
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
 
-  // First try JSON metadata (default Accept header).
-  const r = await ghFetch(url, c.token);
-  if (!r.ok) {
-    const t = await r.text().catch(()=> '');
-    throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
-  }
-
-  const data = await r.json();
-
-  // If it's a directory listing, it won't have content.
-  if (Array.isArray(data)) {
-    try {
-      return await fetchGitHubRawUtf8(url, c.token);
-    } catch (e) {
-      throw new Error('Download failed: path is a directory (not a file): ' + path);
+    // 1) Try Contents API (works for <= ~1MB blobs).
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-  }
+    const data = await r.json();
 
-  const enc = data && data.encoding ? String(data.encoding) : '';
-  const content = data && data.content ? String(data.content) : '';
+    // If GitHub returns an API error object, bubble it up clearly.
+    if (data && typeof data === 'object' && !Array.isArray(data) && data.message && !data.content && !data.sha) {
+      throw new Error(String(data.message));
+    }
 
-  if (enc === 'base64' && content) {
-    return fromBase64Utf8(content);
-  }
+    // Directory listing -> not a file
+    if (Array.isArray(data)) {
+      throw new Error('Selected path is a folder, not a JSON file.');
+    }
 
-  // Some GitHub responses (large files / raw mode) can return encoding 'none' and omit content.
-  // In that case, fetch the raw bytes and decode as UTF-8.
-  try {
-    return await fetchGitHubRawUtf8(url, c.token);
-  } catch (e) {
-    // As a last resort, if API provided a download_url, try it with auth (may still work for private repos).
+    // File with embedded base64 content
+    if (data && data.content && String(data.encoding || '') === 'base64') {
+      return decodeBase64Utf8(data.content);
+    }
+
+    // 2) Large files: use Blob API via sha (supports larger blobs than Contents API)
+    if (data && data.sha) {
+      const blobUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/git/blobs/${encodeURIComponent(data.sha)}`;
+      const br = await ghFetch(blobUrl, c.token);
+      if (br.ok) {
+        const blob = await br.json();
+        if (blob && blob.content && String(blob.encoding || '') === 'base64') {
+          return decodeBase64Utf8(blob.content);
+        }
+      }
+    }
+
+    // 3) Fallback: raw download_url (if present)
     if (data && data.download_url) {
-      return await fetchGitHubRawUtf8(String(data.download_url), c.token);
+      const rr = await fetch(data.download_url, {
+        headers: {
+          'Authorization': `token ${c.token}`,
+          'Accept': 'application/vnd.github.raw'
+        }
+      });
+      if (!rr.ok) {
+        const t = await rr.text().catch(()=> '');
+        throw new Error(`Raw download failed (${rr.status}). ${t || ''}`.trim());
+      }
+      const buf = await rr.arrayBuffer();
+      return decodeArrayBufferUtf8(buf);
     }
-    const shownEnc = enc || 'none';
-    throw new Error('Unsupported file encoding: ' + shownEnc);
-  }
-};
 
-const toBase64Utf8 = (str) => {
+    throw new Error('Unsupported file encoding: ' + String((data && data.encoding) ? data.encoding : 'none'));
+  };
+  const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
     const bytes = new TextEncoder().encode(String(str || ''));
     let bin = '';
@@ -6918,7 +7181,7 @@ const toBase64Utf8 = (str) => {
     // For PUT we need fetch with method and body.
     const doPut = async (useTokenPrefix=false) => fetch(url, {
       method: 'PUT',
-      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json;charset=utf-8' },
+      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     let pr = await doPut(false);
@@ -6987,7 +7250,7 @@ async function githubImportFlow({ wipe }){
 
         if (looksLikeSnapshot) {
           pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s.version || s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
             uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
             toolVersion: String(s.toolVersion || '').trim(),
             sourceName: String(file.name || '').trim(),
@@ -7172,19 +7435,11 @@ function isEditedSinceImport(localIso, importedAtIso){
 
 function parseLocalStampFromFilename(name){
   const n = String(name || '');
-  // Primary pattern: YYYYMMDD_HHMMSS_mmm
-  let m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
-  if (m){
-    const [,Y,Mo,D,HH,MM,SS,MS] = m;
-    return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
-  }
-  // Fallback: accept other snapshot filename variants if available.
-  try {
-    const meta = (typeof GitHubSync !== 'undefined' && GitHubSync && typeof GitHubSync.parseFilenameMeta === 'function')
-      ? GitHubSync.parseFilenameMeta(n) : null;
-    if (meta && meta.datetime) return meta.datetime;
-  } catch {}
-  return '';
+  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
+  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (!m) return '';
+  const [,Y,Mo,D,HH,MM,SS,MS] = m;
+  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
 }
 function parseUploaderFromFilename(name){
   const base = String(name || '').replace(/\.json$/i,'');
@@ -7244,7 +7499,7 @@ function applySyncInfoUI(){
     return;
   }
 
-  const dtRaw = (info.uploadedAtLocal || info.version || info.uploadedAt || info.importedAtLocal || '') || '';
+  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
   // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
