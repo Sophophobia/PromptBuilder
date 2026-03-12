@@ -899,6 +899,11 @@
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
+const nowLocalStampFull = () => {
+  const d = new Date();
+  const pad = (n,w=2)=>String(n).padStart(w,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
+};
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
 const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : ('id_' + Math.random().toString(16).slice(2) + '_' + Date.now()));
 const escapeCsv = (v) => {
@@ -1831,7 +1836,8 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 function closeModal() {
   const overlay = $('#modalOverlay');
   const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
-  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
+  // NOTE: do not clear pendingOnlineImportMeta here; it is finalized after a successful import.
+  // (Keeping it allows the version badge to update correctly.)
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
@@ -4039,8 +4045,9 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
+  const exportVersionLocal = nowLocalStampFull();
   const snapshot = {
-    version: DB_VERSION,
+    version: exportVersionLocal,
     exportedAt: nowISO(),
 
     // Sections (always present as arrays for predictable import)
@@ -4072,7 +4079,7 @@ async function exportSnapshotJson(options=null) {
     // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = (()=>{ const d=new Date(); const pad=(n,w=2)=>String(n).padStart(w,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`; })();
+      const uploadedAtLocal = exportVersionLocal;
       const cfg = GitHubSync.getConfig();
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
@@ -4080,6 +4087,20 @@ async function exportSnapshotJson(options=null) {
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
+      // After a successful export, update the top version badge to this exported version.
+      try {
+        const baselineIso = new Date().toISOString();
+        localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
+        setLastOnlineImportInfo({
+          uploadedAtLocal: exportVersionLocal,
+          uploadedBy: (cfg.uploader || ''),
+          toolVersion: toolVersion,
+          sourceName: (up && up.filename) ? up.filename : '',
+          sourcePath: (up && up.path) ? up.path : '',
+          localBaselineIso: baselineIso
+        });
+      } catch {}
+
     } catch (err) {
       console.error(err);
       alert('Online export failed\n\n' + (err?.message || String(err)));
@@ -4092,6 +4113,20 @@ async function exportSnapshotJson(options=null) {
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
+  // Keep the local UI version in sync with the exported snapshot version.
+  try {
+    const baselineIso = new Date().toISOString();
+    localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
+    setLastOnlineImportInfo({
+      uploadedAtLocal: exportVersionLocal,
+      uploadedBy: 'local',
+      toolVersion: '',
+      sourceName: `mivida_snapshot_${stamp}.json`,
+      sourcePath: '',
+      localBaselineIso: baselineIso
+    });
+  } catch {}
+
   toast('Snapshot exported');
   return snapshot;
 }
@@ -6403,6 +6438,20 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   if (!f) return;
   try {
     const text = await readFileUtf8(f);
+    // Capture snapshot metadata so the version badge can update after a successful import.
+    try {
+      let s = JSON.parse(text);
+      if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+      pendingOnlineImportMeta = {
+        uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
+        uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
+        toolVersion: String(s?.toolVersion || '').trim(),
+        sourceName: String(f.name || '').trim(),
+        sourcePath: ''
+      };
+    } catch {
+      pendingOnlineImportMeta = null;
+    }
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6431,7 +6480,18 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (!ok) { wipeInput.value = ''; return; }
       try {
         const text = await readFileUtf8(f);
-        pendingOnlineImportMeta = null;
+        // Capture snapshot metadata so the version badge can update after a successful import.
+        try {
+          let s = JSON.parse(text);
+          if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
+          pendingOnlineImportMeta = {
+            uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
+            uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
+            toolVersion: String(s?.toolVersion || '').trim(),
+            sourceName: String(f.name || '').trim(),
+            sourcePath: ''
+          };
+        } catch { pendingOnlineImportMeta = null; }
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6927,7 +6987,7 @@ async function githubImportFlow({ wipe }){
 
         if (looksLikeSnapshot) {
           pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedAtLocal: String(s.version || s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
             uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
             toolVersion: String(s.toolVersion || '').trim(),
             sourceName: String(file.name || '').trim(),
@@ -7112,11 +7172,19 @@ function isEditedSinceImport(localIso, importedAtIso){
 
 function parseLocalStampFromFilename(name){
   const n = String(name || '');
-  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
-  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
-  if (!m) return '';
-  const [,Y,Mo,D,HH,MM,SS,MS] = m;
-  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+  // Primary pattern: YYYYMMDD_HHMMSS_mmm
+  let m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (m){
+    const [,Y,Mo,D,HH,MM,SS,MS] = m;
+    return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
+  }
+  // Fallback: accept other snapshot filename variants if available.
+  try {
+    const meta = (typeof GitHubSync !== 'undefined' && GitHubSync && typeof GitHubSync.parseFilenameMeta === 'function')
+      ? GitHubSync.parseFilenameMeta(n) : null;
+    if (meta && meta.datetime) return meta.datetime;
+  } catch {}
+  return '';
 }
 function parseUploaderFromFilename(name){
   const base = String(name || '').replace(/\.json$/i,'');
@@ -7176,7 +7244,7 @@ function applySyncInfoUI(){
     return;
   }
 
-  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
+  const dtRaw = (info.uploadedAtLocal || info.version || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
   // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
