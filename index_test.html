@@ -1347,7 +1347,7 @@ const DB_NAME = 'mivida_prompt_builder_offline';
 // IMPORTANT: DB_VERSION must be monotonically increasing.
 // Some users already have v4 in their browser; keeping this at 3 will cause:
 // "The requested version (3) is less than the existing version (4)".
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 let dbPromise = null;
 
@@ -1479,20 +1479,6 @@ function openDB() {
           cc.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
         }
 
-        // v9: specialization data structure (base career + overrides)
-        if (!db.objectStoreNames.contains('specializations')) {
-          const sp = db.createObjectStore('specializations', { keyPath: 'id' });
-          sp.createIndex('by_baseCareerId', 'baseCareerId', { unique: false });
-          sp.createIndex('by_title', 'title', { unique: false });
-          sp.createIndex('by_baseCareerId_updatedAt', ['baseCareerId', 'updatedAt'], { unique: false });
-        }
-        if (!db.objectStoreNames.contains('specializationContent')) {
-          const sc2 = db.createObjectStore('specializationContent', { keyPath: ['specializationId', 'templateId'] });
-          sc2.createIndex('by_specializationId', 'specializationId', { unique: false });
-          sc2.createIndex('by_templateId', 'templateId', { unique: false });
-          sc2.createIndex('by_specializationId_updatedAt', ['specializationId', 'updatedAt'], { unique: false });
-        }
-
         // Migration: personalItems (per-user) -> personalTemplates (global) + personalContent (per-user)
         try {
           if (db.objectStoreNames.contains('personalItems')) {
@@ -1612,6 +1598,21 @@ function openDB() {
         } catch (err) { /* best effort */ }
       }
 
+      // v10: ensure specialization stores exist for databases that were already on v3-v9
+      // before specialization support was added.
+      if (!db.objectStoreNames.contains('specializations')) {
+        const sp = db.createObjectStore('specializations', { keyPath: 'id' });
+        sp.createIndex('by_baseCareerId', 'baseCareerId', { unique: false });
+        sp.createIndex('by_title', 'title', { unique: false });
+        sp.createIndex('by_baseCareerId_updatedAt', ['baseCareerId', 'updatedAt'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains('specializationContent')) {
+        const sc2 = db.createObjectStore('specializationContent', { keyPath: ['specializationId', 'templateId'] });
+        sc2.createIndex('by_specializationId', 'specializationId', { unique: false });
+        sc2.createIndex('by_templateId', 'templateId', { unique: false });
+        sc2.createIndex('by_specializationId_updatedAt', ['specializationId', 'updatedAt'], { unique: false });
+      }
+
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -1634,8 +1635,16 @@ async function withStore(storeName, mode, fn) {
     tx.onabort = () => reject(tx.error);
   });
 }
+function inferFieldFromIndexName(indexName) {
+  if (!indexName || typeof indexName !== 'string') return '';
+  if (!indexName.startsWith('by_')) return '';
+  const raw = indexName.slice(3);
+  return raw.replace(/_updatedAt$/, '');
+}
+
 async function getAll(storeName) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1646,6 +1655,7 @@ async function getAll(storeName) {
 }
 async function getOne(storeName, key) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return null;
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1771,9 +1781,23 @@ async function deleteOne(storeName, key) { return withStore(storeName, 'readwrit
 
 async function getByIndex(storeName, indexName, query) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
+    if (!store.indexNames.contains(indexName)) {
+      const fallbackField = inferFieldFromIndexName(indexName);
+      const reqAll = store.getAll();
+      reqAll.onsuccess = () => {
+        let rows = reqAll.result || [];
+        if (fallbackField && !fallbackField.includes('_')) {
+          rows = rows.filter(r => (r && r[fallbackField]) === query);
+        }
+        resolve(rows);
+      };
+      reqAll.onerror = () => reject(reqAll.error);
+      return;
+    }
     const idx = store.index(indexName);
     const req = idx.getAll(query);
     req.onsuccess = () => resolve(req.result || []);
