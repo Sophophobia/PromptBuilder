@@ -2649,8 +2649,47 @@ async function getEffectiveCareerContentMap(careerId, specializationId='') {
   const overrides = await getByIndex('specializationContent', 'by_specializationId', specializationId);
   const oMap = new Map((overrides || []).map(r => [r.templateId, r]));
   const eff = new Map(baseMap);
-  for (const [tplId, orow] of oMap.entries()) eff.set(tplId, orow);
+  for (const [tplId, orow] of oMap.entries()) {
+    const baseRow = baseMap.get(tplId) || null;
+    eff.set(tplId, {
+      ...(baseRow || {}),
+      ...(orow || {}),
+      specializationId: orow?.specializationId || specializationId,
+      templateId: tplId,
+      content: (orow && Object.prototype.hasOwnProperty.call(orow, 'content'))
+        ? (orow.content || '')
+        : (baseRow?.content || '')
+    });
+  }
   return eff;
+}
+
+function resolveEffectiveCareerTemplate(tpl, overrideRow) {
+  const hasOutputFlag = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'isOutput'));
+  const hasOutputConn = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'outputConnectionId'));
+  const hasOutputMode = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'outputMode'));
+  return {
+    ...(tpl || {}),
+    isOutput: hasOutputFlag ? (overrideRow.isOutput !== false) : (tpl?.isOutput !== false),
+    outputConnectionId: hasOutputConn ? (overrideRow.outputConnectionId || '') : (tpl?.outputConnectionId || ''),
+    outputMode: hasOutputMode ? (overrideRow.outputMode || tpl?.outputMode || 'section') : (tpl?.outputMode || 'section')
+  };
+}
+
+async function getEffectiveCareerOutputAssignments(careerId, specializationId='') {
+  const templates = await getAll('careerTemplates');
+  const overrides = specializationId ? await getByIndex('specializationContent', 'by_specializationId', specializationId) : [];
+  const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
+  const out = Object.create(null);
+  (templates || []).forEach(tpl => {
+    if (!tpl) return;
+    const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+    const cid = (effTpl.outputConnectionId || '');
+    if (cid && (effTpl.isOutput !== false) && !out[cid]) {
+      out[cid] = { key: tpl.id, store: specializationId ? 'specializationContent' : 'careerTemplates', title: tpl.title || '(Career Item)' };
+    }
+  });
+  return out;
 }
 
 
@@ -2678,7 +2717,7 @@ async function getOutputAssignments() {
 }
 
 async function enforceSingleOutputPerConnection({ currentKey, connId }) {
-  // Returns: { ok: boolean, conflict?: { store, row, title }, connTitle?: string }
+  // Legacy global check for non-career contexts
   if (!connId) return { ok: true };
 
   const [pTemps, cTemps, connRow] = await Promise.all([
@@ -2688,8 +2727,6 @@ async function enforceSingleOutputPerConnection({ currentKey, connId }) {
   ]);
 
   const connTitle = connRow?.title || 'this connection';
-
-  // Find any other output item already bound to this connection
   const pHit = (pTemps || []).find(t => (t.isOutput !== false) && (t.outputConnectionId || '') === connId && t.id !== currentKey);
   if (pHit) return { ok: false, conflict: { store: 'personalTemplates', row: pHit, title: pHit.title || '(Personal Item)' }, connTitle };
 
@@ -2699,12 +2736,56 @@ async function enforceSingleOutputPerConnection({ currentKey, connId }) {
   return { ok: true };
 }
 
+async function enforceCareerOutputPerConnectionInContext({ currentKey, connId, specializationId='' }) {
+  if (!connId) return { ok: true };
+  const [templates, connRow, overrides] = await Promise.all([
+    getAll('careerTemplates'),
+    getOne('connections', connId),
+    specializationId ? getByIndex('specializationContent', 'by_specializationId', specializationId) : Promise.resolve([])
+  ]);
+  const connTitle = connRow?.title || 'this connection';
+  const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
+  const hit = (templates || []).find(tpl => {
+    if (!tpl || tpl.id === currentKey) return false;
+    const effTpl = resolveEffectiveCareerTemplate(tpl, specializationId ? overrideMap.get(tpl.id) : null);
+    return (effTpl.isOutput !== false) && ((effTpl.outputConnectionId || '') === connId);
+  });
+  if (hit) return { ok:false, conflict:{ store: specializationId ? 'specializationContent' : 'careerTemplates', row: hit, title: hit.title || '(Career Item)' }, connTitle };
+  return { ok:true };
+}
+
 async function clearOutputLink(conflictRow, storeName) {
   const t = nowISO();
   const before = await getOne(storeName, conflictRow.id);
   const after = { ...before, isOutput: false, outputConnectionId: '', updatedAt: t };
   await putOne(storeName, after);
   await logChange({ entityType: storeName === 'personalTemplates' ? 'personalTemplate' : 'careerTemplate', entityId: after.id, action: 'update', after, before });
+  return after;
+}
+
+async function clearCareerOutputLinkInContext({ conflictRow, specializationId='' }) {
+  const t = nowISO();
+  if (!specializationId) {
+    const before = await getOne('careerTemplates', conflictRow.id);
+    const after = { ...before, isOutput: false, outputConnectionId: '', updatedAt: t };
+    await putOne('careerTemplates', after);
+    await logChange({ entityType: 'careerTemplate', entityId: after.id, action: 'update', after, before });
+    return after;
+  }
+
+  const before = await getOne('specializationContent', [specializationId, conflictRow.id]);
+  const after = {
+    ...(before || {}),
+    specializationId,
+    templateId: conflictRow.id,
+    mode: before?.mode || 'override',
+    isOutput: false,
+    outputConnectionId: '',
+    createdAt: before?.createdAt || t,
+    updatedAt: t
+  };
+  await putOne('specializationContent', after);
+  await logChange({ entityType: 'specializationContent', entityId: `${specializationId}:${conflictRow.id}`, action: before ? 'update' : 'create', after, before: before || null });
   return after;
 }
 
@@ -2963,7 +3044,7 @@ async function renderPersonal() {
 
   templates = applyUiOrder(templates, 'personalTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  const assignments = await getOutputAssignments();
+  const assignments = specId ? await getEffectiveCareerOutputAssignments(careerId, specId) : await getOutputAssignments();
   const contentMap = new Map((contents || []).map(c => [c.templateId, c]));
   $('#hintPersonal').style.display = templates.length ? 'none' : 'block';
 
@@ -3648,11 +3729,13 @@ async function renderCareerBlocks() {
 
         const baseRow = baseMap.get(tpl.id);
         const overrideRow = overrideMap.get(tpl.id);
-        const initialContent = overrideRow ? (overrideRow.content || '') : (baseRow?.content || '');
+        const effTpl = resolveEffectiveCareerTemplate(tpl, overrideRow);
+        const initialContent = (overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'content')) ? (overrideRow.content || '') : (baseRow?.content || '');
         return openEditItemModal({
           title: 'Edit · Specialization Override',
-          initial: { templateId: tpl.id, title: tpl.title, content: initialContent },
+          initial: { templateId: tpl.id, title: tpl.title, content: initialContent, isOutput: (effTpl.isOutput !== false), outputConnectionId: (effTpl.outputConnectionId || '') },
           contentOnly: true,
+          outputMeta: { connections: conns, assignments },
           previewLabel: 'Preview (final effective value)',
           onSave: saveSpecializationOverrideByFilter,
           onDelete: overrideRow ? deleteSpecializationOverride : null
@@ -3753,21 +3836,42 @@ async function saveSpecializationOverrideByFilter(payload) {
   const templateId = payload.templateId || payload.id;
   if (!templateId) { alert('Missing template'); return; }
 
-  const before = await getOne('specializationContent', [specId, templateId]);
-  const baseRow = await getOne('careerContent', [careerId, templateId]);
+  if (payload.isOutput && (payload.outputConnectionId || '')) {
+    const connId = (payload.outputConnectionId || '');
+    const check = await enforceCareerOutputPerConnectionInContext({ currentKey: templateId, connId, specializationId: specId });
+    if (!check.ok && check.conflict) {
+      const msg =
+        `This connection is already used as the output for “${check.conflict.title}” in this specialization.
+
+` +
+        `If you continue, the previous item’s output link will be cleared for this specialization only, and this item will become the output for “${check.connTitle}”.
+
+` +
+        `Do you want to continue?`;
+      const ok = confirm(msg);
+      if (!ok) return false;
+      await clearCareerOutputLinkInContext({ conflictRow: check.conflict.row, specializationId: specId });
+    }
+  }
+
+  const [before, baseRow, baseTpl] = await Promise.all([
+    getOne('specializationContent', [specId, templateId]),
+    getOne('careerContent', [careerId, templateId]),
+    getOne('careerTemplates', templateId)
+  ]);
+
   const nextContent = String(payload.content || '');
   const baseContent = String(baseRow?.content || '');
+  const nextIsOutput = (payload.isOutput !== false);
+  const baseIsOutput = (baseTpl?.isOutput !== false);
+  const nextConn = String(payload.outputConnectionId || '');
+  const baseConn = String(baseTpl?.outputConnectionId || '');
 
-  if (nextContent === baseContent) {
+  const sameAsBase = (nextContent === baseContent) && (nextIsOutput === baseIsOutput) && (nextConn === baseConn);
+  if (sameAsBase) {
     if (before) {
       await deleteOne('specializationContent', [specId, templateId]);
-      await logChange({
-        entityType: 'specializationContent',
-        entityId: `${specId}:${templateId}`,
-        action: 'delete',
-        after: null,
-        before
-      });
+      await logChange({ entityType: 'specializationContent', entityId: `${specId}:${templateId}`, action: 'delete', after: null, before });
     }
     await renderCareerBlocks();
     await renderPromptPage();
@@ -3779,6 +3883,8 @@ async function saveSpecializationOverrideByFilter(payload) {
     templateId,
     mode: before?.mode || 'override',
     content: nextContent,
+    isOutput: nextIsOutput,
+    outputConnectionId: nextConn,
     createdAt: before?.createdAt || t,
     updatedAt: t
   };
@@ -3981,13 +4087,18 @@ async function compileExplicitOutputForUserWithConnection(conn, ctx='setup') {
       if (careerId) cMap = await getEffectiveCareerContentMap(careerId, userSpecId);
     }
 
+    const specIdForOutput = (source === 'current') ? (state.currentSpecializationId || '') : ((await getOne('userCareer', userId))?.specializationId || '');
+    const overrides = specIdForOutput ? await getByIndex('specializationContent', 'by_specializationId', specIdForOutput) : [];
+    const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
+
     (templates || []).forEach(tpl => {
       if (!tpl) return;
-      if (tpl.isOutput === false) return;
-      const oc = (tpl.outputConnectionId || '');
+      const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+      if (effTpl.isOutput === false) return;
+      const oc = (effTpl.outputConnectionId || '');
       if (oc !== connId) return;
 
-      const mode = (tpl.outputMode || 'section');
+      const mode = (effTpl.outputMode || 'section');
       const content = careerId ? (cMap.get(tpl.id)?.content || '') : '';
       const hasBody = String(content).trim().length > 0;
 
@@ -4061,10 +4172,20 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
       if (tpl.isOutput === false) return;
       if ((tpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
     });
+    let specIdForOutput = '';
+    const sourceForOutput = (conn?.careerSource || 'user');
+    if (sourceForOutput === 'current') specIdForOutput = state.currentSpecializationId || '';
+    else if (userId) {
+      const ucOut = await getOne('userCareer', userId);
+      specIdForOutput = ucOut?.specializationId || '';
+    }
+    const overrideRows = specIdForOutput ? await getByIndex('specializationContent', 'by_specializationId', specIdForOutput) : [];
+    const overrideMap = new Map((overrideRows || []).map(r => [r.templateId, r]));
     (cTemps || []).forEach(tpl => {
       if (!tpl) return;
-      if (tpl.isOutput === false) return;
-      if ((tpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
+      const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+      if (effTpl.isOutput === false) return;
+      if ((effTpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
     });
   } catch(e) { /* ignore */ }
 
@@ -4642,25 +4763,9 @@ async function renderPromptPage() {
 
   $('#promptEmpty').style.display = (conns.length === 0) ? 'block' : 'none';
 
-// Precompute explicit output counts across all items (connection output depends on item -> connection linkage, not on connection pick-lists)
-let explicitOutCount = new Map();
-try {
-  const [pTemplates, cTemplates] = await Promise.all([
-    getAll('personalTemplates'),
-    getAll('careerTemplates')
-  ]);
-  ([...(pTemplates || []), ...(cTemplates || [])] || []).forEach(t => {
-    if (!t) return;
-    if (t.isOutput === false) return;
-    const oc = (t.outputConnectionId || '');
-    if (!oc) return;
-    explicitOutCount.set(oc, (explicitOutCount.get(oc) || 0) + 1);
-  });
-} catch(e) { /* ignore */ }
-
   for (const c of conns) {
     const info = await analyzeConnectionForCurrentUser(c, 'prompt');
-    const hasExplicitOutput = (explicitOutCount.get(c.id) || 0) > 0;
+    const hasExplicitOutput = !!info.hasExplicitOutput;
 
     const card = document.createElement('div');
     card.className = 'card';
@@ -4789,7 +4894,17 @@ const btnCopy = btn('Copy', { mini:true, onClick: async () => {
           let outTpl = (pTemps || []).find(t => t && t.isOutput !== false && (t.outputConnectionId || '') === connId) || null;
           let outType = 'personal';
           if (!outTpl) {
-            outTpl = (cTemps || []).find(t => t && t.isOutput !== false && (t.outputConnectionId || '') === connId) || null;
+            const source = (c?.careerSource || 'user');
+            const effectiveSpecId = (source === 'current')
+              ? (state.currentSpecializationId || '')
+              : ((await getOne('userCareer', state.currentUserId))?.specializationId || '');
+            const overrideRows = effectiveSpecId ? await getByIndex('specializationContent', 'by_specializationId', effectiveSpecId) : [];
+            const overrideMap = new Map((overrideRows || []).map(r => [r.templateId, r]));
+            outTpl = (cTemps || []).find(t => {
+              if (!t) return false;
+              const effTpl = resolveEffectiveCareerTemplate(t, overrideMap.get(t.id));
+              return effTpl.isOutput !== false && (effTpl.outputConnectionId || '') === connId;
+            }) || null;
             if (outTpl) outType = 'career';
           }
 
