@@ -675,8 +675,9 @@
     .actionLabel{ font-size:12px; color: var(--muted); margin-right:2px; }
     .headerActions select{ min-width: 220px; max-width: 320px; }
     .actionGroup select{ min-width: 190px; max-width: 280px; }
-    .fieldRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background: var(--panelB); }
-    .fieldRow label{ font-size:12px; color: var(--muted); }
+    .fieldRow{ display:flex; align-items:center; gap:12px; margin-top:10px; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background: var(--panelB); }
+    .fieldRow label{ flex:0 0 92px; width:92px; font-size:12px; color: var(--muted); }
+    .fieldRow select{ flex:1 1 auto; min-width:0 !important; width:100%; }
 
 
     /* v7.7.4: keep User/Career controls on a single row */
@@ -687,6 +688,19 @@
     :root[data-theme="light"] .tileSubHeader::-webkit-scrollbar-thumb,
     :root[data-theme="light"] .actionGroup::-webkit-scrollbar-thumb{ background: rgba(40,60,100,.18); }
     .actionGroup .btn{ white-space:nowrap; }
+    .specSubHeader{ overflow:visible; }
+    .specActionGroup{ width:100%; overflow:visible; display:grid; grid-template-columns:auto minmax(180px,1fr) auto auto auto; align-items:center; }
+    .specActionGroup select{ min-width:0 !important; width:100%; max-width:none !important; }
+    .specActionGroup .actionLabel{ white-space:nowrap; }
+    @media (max-width: 900px){
+      .specActionGroup{ grid-template-columns:auto minmax(140px,1fr) auto auto auto; gap:6px; }
+      .specActionGroup .btn{ padding:8px 9px; }
+    }
+    @media (max-width: 760px){
+      .specActionGroup{ grid-template-columns:1fr 1fr; }
+      .specActionGroup .actionLabel, .specActionGroup select{ grid-column:1 / -1; }
+      .specActionGroup .btn{ width:100%; }
+    }
     
 
 
@@ -795,12 +809,17 @@
               <select id="userSelect"></select>
               <button class="btn mini" id="btnAddUser">Add</button>
               <button class="btn mini" id="btnRenameUser">Rename</button>
-              <button class="btn mini danger" id="btnDeleteUser">Delete</button>
+                            <button class="btn mini" id="btnDuplicateUser">Duplicate</button>
+<button class="btn mini danger" id="btnDeleteUser">Delete</button>
             </div>
           </div>
           <div class="fieldRow" id="personalCareerPickRow">
             <label for="personalCareerPick">User Career</label>
             <select id="personalCareerPick" style="min-width:260px;"></select>
+          </div>
+          <div class="fieldRow" id="personalSpecializationPickRow" style="display:none;">
+            <label for="personalSpecializationPick">Specialization</label>
+            <select id="personalSpecializationPick" style="min-width:260px;"></select>
           </div>
           <div class="divider"></div>
           <div class="list" id="listPersonal"></div>
@@ -818,7 +837,18 @@
               <select id="careerFilter"></select>
               <button class="btn mini" id="btnAddCareerTop">Add</button>
               <button class="btn mini" id="btnRenameCareer">Rename</button>
-              <button class="btn mini danger" id="btnDeleteCareer">Delete</button>
+                            <button class="btn mini" id="btnDuplicateCareer">Duplicate</button>
+<button class="btn mini danger" id="btnDeleteCareer">Delete</button>
+                          </div>
+          </div>
+
+          <div class="tileSubHeader specSubHeader">
+            <div class="actionGroup specActionGroup">
+              <span class="actionLabel">Specialization</span>
+              <select id="specializationFilter" style="min-width:260px;"></select>
+              <button class="btn mini" id="btnAddSpecialization">Add</button>
+              <button class="btn mini" id="btnRenameSpecialization">Rename</button>
+              <button class="btn mini danger" id="btnDeleteSpecialization">Delete</button>
             </div>
           </div>
           <div class="divider"></div>
@@ -860,11 +890,17 @@
             </div>
             <div class="chip" style="padding:8px 10px; box-shadow:none;">
               <label>User Career</label>
-              <select id="promptUserCareerSelect" style="min-width:260px;"></select>
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="promptUserCareerSelect" style="min-width:260px;"></select>
+                <select id="promptUserSpecializationSelect" style="min-width:240px;"></select>
+              </div>
             </div>
             <div class="chip" style="padding:8px 10px; box-shadow:none;">
               <label>Current Career</label>
-              <select id="promptCurrentCareerSelect" style="min-width:260px;"></select>
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="promptCurrentCareerSelect" style="min-width:260px;"></select>
+                <select id="promptCurrentSpecializationSelect" style="min-width:240px;"></select>
+              </div>
             </div>
           </div>
 </div>
@@ -890,8 +926,8 @@
       </div>
     </div>
 
-    <input type="file" id="fileImportSnapshot" accept="application/json;charset=utf-8" style="display:none;" />
-    <input type="file" id="fileImportSnapshotWipe" accept="application/json;charset=utf-8" style="display:none;" />
+    <input type="file" id="fileImportSnapshot" accept="application/json" style="display:none;" />
+    <input type="file" id="fileImportSnapshotWipe" accept="application/json" style="display:none;" />
     <div class="toast" id="toast" aria-live="polite"></div>
   </div>
 
@@ -899,9 +935,10 @@
 /** ========= Utilities ========= */
 const $ = (sel) => document.querySelector(sel);
 const nowISO = () => new Date().toISOString();
-const nowLocalStampFull = () => {
+const makeLocalVersionStamp = () => {
   const d = new Date();
-  const pad = (n,w=2)=>String(n).padStart(w,'0');
+  const pad = (n, w=2) => String(n).padStart(w,'0');
+  // Format: YYYY-MM-DD HH:mm:ss.mmm (local time)
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
 };
 const formatLocal = (iso) => { try { return new Date(iso).toLocaleString(); } catch { return iso; } };
@@ -1310,7 +1347,7 @@ const DB_NAME = 'mivida_prompt_builder_offline';
 // IMPORTANT: DB_VERSION must be monotonically increasing.
 // Some users already have v4 in their browser; keeping this at 3 will cause:
 // "The requested version (3) is less than the existing version (4)".
-const DB_VERSION = 4;
+const DB_VERSION = 10;
 
 let dbPromise = null;
 
@@ -1561,6 +1598,21 @@ function openDB() {
         } catch (err) { /* best effort */ }
       }
 
+      // v10: ensure specialization stores exist for databases that were already on v3-v9
+      // before specialization support was added.
+      if (!db.objectStoreNames.contains('specializations')) {
+        const sp = db.createObjectStore('specializations', { keyPath: 'id' });
+        sp.createIndex('by_baseCareerId', 'baseCareerId', { unique: false });
+        sp.createIndex('by_title', 'title', { unique: false });
+        sp.createIndex('by_baseCareerId_updatedAt', ['baseCareerId', 'updatedAt'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains('specializationContent')) {
+        const sc2 = db.createObjectStore('specializationContent', { keyPath: ['specializationId', 'templateId'] });
+        sc2.createIndex('by_specializationId', 'specializationId', { unique: false });
+        sc2.createIndex('by_templateId', 'templateId', { unique: false });
+        sc2.createIndex('by_specializationId_updatedAt', ['specializationId', 'updatedAt'], { unique: false });
+      }
+
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -1583,8 +1635,16 @@ async function withStore(storeName, mode, fn) {
     tx.onabort = () => reject(tx.error);
   });
 }
+function inferFieldFromIndexName(indexName) {
+  if (!indexName || typeof indexName !== 'string') return '';
+  if (!indexName.startsWith('by_')) return '';
+  const raw = indexName.slice(3);
+  return raw.replace(/_updatedAt$/, '');
+}
+
 async function getAll(storeName) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1595,6 +1655,7 @@ async function getAll(storeName) {
 }
 async function getOne(storeName, key) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return null;
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1603,15 +1664,140 @@ async function getOne(storeName, key) {
     req.onerror = () => reject(req.error);
   });
 }
-async function putOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.put(value)); }
-async function addOne(storeName, value) { return withStore(storeName, 'readwrite', (s) => s.add(value)); }
+function _keyPathOk(keyPath, obj) {
+  if (!keyPath) return true;
+  if (Array.isArray(keyPath)) {
+    return keyPath.every(k => obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '');
+  }
+  return obj && obj[keyPath] !== undefined && obj[keyPath] !== null && obj[keyPath] !== '';
+}
+
+function _ensureIdLike(obj, candidate) {
+  if (obj.id === undefined || obj.id === null || obj.id === '') obj.id = candidate;
+}
+
+function _ensureKeyLike(obj, candidate) {
+  if (obj.key === undefined || obj.key === null || obj.key === '') obj.key = candidate;
+}
+
+// Make the object compatible with whatever keyPath the *existing* IndexedDB store was created with.
+// This prevents "Evaluating the object store's key path did not yield a value" when the DB schema
+// differs across page versions.
+function _normalizeForStorePut(storeName, keyPath, value) {
+  const v = (value && typeof value === 'object') ? { ...value } : value;
+  if (!v || typeof v !== 'object') return v;
+
+  const makePair = (a, b) => (a && b) ? `${a}::${b}` : '';
+
+  // Common aliases (older snapshots / older schema)
+  if (v.id && !v.key) v.key = v.id;
+  if (v.key && !v.id) v.id = v.key;
+
+  // Store-specific stabilizers
+  if (storeName === 'personalContent') {
+    if (!v.id) v.id = makePair(v.userId, v.templateId) || v.id;
+  }
+  if (storeName === 'careerContent') {
+    if (!v.id) v.id = makePair(v.careerId, v.templateId) || v.id;
+  }
+  if (storeName === 'userCareer') {
+    if (!v.id) v.id = makePair(v.userId, v.careerId) || v.id;
+  }
+
+  // KeyPath-specific fills
+  if (Array.isArray(keyPath)) {
+    for (const k of keyPath) {
+      if (v[k] === undefined || v[k] === null || v[k] === '') {
+        // Try derive from id patterns like "userId::templateId"
+        if (typeof v.id === 'string' && v.id.includes('::')) {
+          const [a, b] = v.id.split('::');
+          if (k === 'userId') v.userId = a;
+          if (k === 'careerId') v.careerId = a;
+          if (k === 'templateId') v.templateId = b;
+        }
+        // Try derive from key patterns
+        if (typeof v.key === 'string' && v.key.includes('::')) {
+          const [a, b] = v.key.split('::');
+          if (k === 'userId') v.userId = a;
+          if (k === 'careerId') v.careerId = a;
+          if (k === 'templateId') v.templateId = b;
+        }
+        // Fallback: if the schema expects userId/careerId, use id as a last resort
+        if ((k === 'userId' || k === 'careerId') && v.id) v[k] = v.id;
+      }
+    }
+    return v;
+  }
+
+  if (typeof keyPath === 'string' && keyPath) {
+    if (v[keyPath] === undefined || v[keyPath] === null || v[keyPath] === '') {
+      if (keyPath === 'id') {
+        // Provide stable IDs for known composite rows
+        if (storeName === 'personalContent') _ensureIdLike(v, makePair(v.userId, v.templateId) || uid());
+        else if (storeName === 'careerContent') _ensureIdLike(v, makePair(v.careerId, v.templateId) || uid());
+        else if (storeName === 'userCareer') _ensureIdLike(v, makePair(v.userId, v.careerId) || uid());
+        else _ensureIdLike(v, uid());
+      } else if (keyPath === 'key') {
+        _ensureKeyLike(v, v.id || uid());
+      } else if (keyPath === 'userId') {
+        if (v.userId === undefined || v.userId === null || v.userId === '') v.userId = v.id || '';
+      } else if (keyPath === 'careerId') {
+        if (v.careerId === undefined || v.careerId === null || v.careerId === '') v.careerId = v.id || '';
+      } else if (keyPath === 'templateId') {
+        if (v.templateId === undefined || v.templateId === null || v.templateId === '') v.templateId = '';
+      } else {
+        // Generic fallback
+        v[keyPath] = v.id || uid();
+      }
+    }
+  }
+  return v;
+}
+
+async function putOne(storeName, value) {
+  return withStore(storeName, 'readwrite', (s) => {
+    const v = _normalizeForStorePut(storeName, s.keyPath, value);
+    // If we still can't satisfy the keyPath, skip instead of crashing the whole import.
+    if (!_keyPathOk(s.keyPath, v)) {
+      console.warn('Skipped put due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
+      return null;
+    }
+    return s.put(v);
+  });
+}
+
+async function addOne(storeName, value) {
+  return withStore(storeName, 'readwrite', (s) => {
+    const v = _normalizeForStorePut(storeName, s.keyPath, value);
+    if (!_keyPathOk(s.keyPath, v)) {
+      console.warn('Skipped add due to missing keyPath', { storeName, keyPath: s.keyPath, value: v });
+      return null;
+    }
+    return s.add(v);
+  });
+}
+
 async function deleteOne(storeName, key) { return withStore(storeName, 'readwrite', (s) => s.delete(key)); }
 
 async function getByIndex(storeName, indexName, query) {
   const db = await openDB();
+  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
+    if (!store.indexNames.contains(indexName)) {
+      const fallbackField = inferFieldFromIndexName(indexName);
+      const reqAll = store.getAll();
+      reqAll.onsuccess = () => {
+        let rows = reqAll.result || [];
+        if (fallbackField && !fallbackField.includes('_')) {
+          rows = rows.filter(r => (r && r[fallbackField]) === query);
+        }
+        resolve(rows);
+      };
+      reqAll.onerror = () => reject(reqAll.error);
+      return;
+    }
     const idx = store.index(indexName);
     const req = idx.getAll(query);
     req.onsuccess = () => resolve(req.result || []);
@@ -1626,7 +1812,7 @@ async function logChange({ entityType, entityId, action, after, before=null }) {
 }
 
 /** ========= State ========= */
-const state = { currentUserId: null, currentCareerId: null, promptCareerId: '', activeTab: 'setup' };
+const state = { currentUserId: null, currentCareerId: null, currentSpecializationId: '', promptCareerId: '', activeTab: 'setup' };
 // NOTE: promptCareerId is kept for backward compatibility, but is always synced to currentCareerId.
 
 /** ========= UI Sort (local-only, affects Setup lists only) ========= */
@@ -1836,8 +2022,7 @@ function openModal(title, bodyEl, footerButtons=[], headerButtons=[], opts={}) {
 function closeModal() {
   const overlay = $('#modalOverlay');
   const _kind = (() => { try { return overlay && overlay.dataset ? overlay.dataset.kind : ''; } catch { return ''; } })();
-  // NOTE: do not clear pendingOnlineImportMeta here; it is finalized after a successful import.
-  // (Keeping it allows the version badge to update correctly.)
+  if (_kind === 'import') { try { pendingOnlineImportMeta = null; } catch {} }
   if (overlay) { try { overlay.dataset.kind = ''; } catch {} }
   const modalBox = overlay ? overlay.querySelector('.modal') : null;
 
@@ -2067,6 +2252,64 @@ async function renameUserFlow() {
   await logChange({ entityType: 'user', entityId: userId, action: 'update', after, before });
   await refreshAll();
 }
+
+async function duplicateUserFlow() {
+  const userId = state.currentUserId;
+  if (!userId) { alert('Select a user first.'); return; }
+  const u = await getOne('users', userId);
+  if (!u) { alert('User not found.'); return; }
+
+  const all = await getAll('users');
+  const used = new Set((all || []).map(x => normTitle(x.name)));
+  const base = (u.name || 'User').trim() || 'User';
+  let cand = `${base} (Copy)`;
+  let i = 2;
+  while (used.has(normTitle(cand))) {
+    cand = `${base} (Copy ${i})`;
+    i += 1;
+  }
+
+  const t = nowISO();
+  const newId = uid();
+  const newUser = { ...u, id: newId, name: cand, createdAt: t, updatedAt: t };
+  await addOne('users', newUser);
+  await logChange({ entityType: 'user', entityId: newId, action: 'create', after: newUser });
+
+  // Copy per-user content rows (v3)
+  try {
+    const pc = await getByIndex('personalContent', 'by_userId', userId);
+    for (const r of (pc || [])) {
+      const nr = { ...r, userId: newId, updatedAt: t };
+      await putOne('personalContent', nr);
+      await logChange({ entityType: 'personalContent', entityId: `${nr.userId}:${nr.templateId}`, action: 'create', after: nr });
+    }
+  } catch {}
+
+  // Copy legacy per-user items too (if any exist from older versions)
+  try {
+    const leg = await getByIndex('personalItems', 'by_userId', userId);
+    for (const p of (leg || [])) {
+      const nid = uid();
+      const np = { ...p, id: nid, userId: newId, createdAt: t, updatedAt: t };
+      await putOne('personalItems', np);
+      await logChange({ entityType: 'personalItem', entityId: nid, action: 'create', after: np });
+    }
+  } catch {}
+
+  // Copy selected career mapping for the user (if any)
+  try {
+    const uc = await getOne('userCareer', userId);
+    if (uc) {
+      const nuc = { ...uc, userId: newId, updatedAt: t };
+      await putOne('userCareer', nuc);
+      await logChange({ entityType: 'userCareer', entityId: newId, action: 'create', after: nuc });
+    }
+  } catch {}
+
+  state.currentUserId = newId;
+  try { localStorage.setItem('mivida_current_user_id', newId); } catch {}
+  await refreshAll();
+}
 async function deleteUserFlow() {
   const userId = state.currentUserId;
   if (!userId) { alert('Select a user first.'); return; }
@@ -2107,6 +2350,8 @@ async function setCurrentCareer(careerId) {
   state.currentCareerId = careerId || '';
   // Keep Prompt tab career in lockstep with Setup's current career
   state.promptCareerId = state.currentCareerId || '';
+  // Reset specialization to Main career when switching base career
+  state.currentSpecializationId = '';
 
   try { localStorage.setItem('mivida_current_career_id', state.currentCareerId); } catch {}
   // Clear any legacy prompt-only override so it never diverges
@@ -2118,6 +2363,8 @@ async function setCurrentCareer(careerId) {
   const pSel = $('#promptCurrentCareerSelect');
   if (pSel) pSel.value = state.currentCareerId;
 
+  await loadSpecializationFilterSelect();
+  await loadPromptCurrentSpecializationSelect();
   await renderCareerBlocks();
 
   // Keep Prompt tab in sync (safe even if the tab is currently hidden)
@@ -2154,6 +2401,55 @@ async function renameCareerFlow() {
   await putOne('careers', after);
   await logChange({ entityType: 'career', entityId: careerId, action: 'update', after, before });
 
+  await refreshAll();
+}
+
+async function duplicateCareerFlow() {
+  const careerId = state.currentCareerId;
+  if (!careerId) { alert('Select a career first.'); return; }
+  const c = await getOne('careers', careerId);
+  if (!c) { alert('Career not found.'); return; }
+
+  const all = await getAll('careers');
+  const used = new Set((all || []).map(x => normTitle(x.title)));
+  const base = (c.title || 'Career').trim() || 'Career';
+  let cand = `${base} (Copy)`;
+  let i = 2;
+  while (used.has(normTitle(cand))) {
+    cand = `${base} (Copy ${i})`;
+    i += 1;
+  }
+
+  const t = nowISO();
+  const newId = uid();
+  const newCareer = { ...c, id: newId, title: cand, createdAt: t, updatedAt: t };
+  await addOne('careers', newCareer);
+  await logChange({ entityType: 'career', entityId: newId, action: 'create', after: newCareer });
+
+  // Copy career content rows (v3)
+  try {
+    const cc = await getByIndex('careerContent', 'by_careerId', careerId);
+    for (const r of (cc || [])) {
+      const nr = { ...r, careerId: newId, updatedAt: t };
+      await putOne('careerContent', nr);
+      await logChange({ entityType: 'careerContent', entityId: `${nr.careerId}:${nr.templateId}`, action: 'create', after: nr });
+    }
+  } catch {}
+
+  // Copy legacy career blocks too (if any)
+  try {
+    const blocks = await getByIndex('careerBlocks', 'by_careerId', careerId);
+    for (const b of (blocks || [])) {
+      const nid = uid();
+      const nb = { ...b, id: nid, careerId: newId, createdAt: t, updatedAt: t };
+      await putOne('careerBlocks', nb);
+      await logChange({ entityType: 'careerBlock', entityId: nid, action: 'create', after: nb });
+    }
+  } catch {}
+
+  await loadCareerFilterSelect();
+  await setCurrentCareer(newId);
+  await renderPersonalCareerPick();
   await refreshAll();
 }
 
@@ -2205,6 +2501,222 @@ async function loadCareerFilterSelect() {
 }
 
 
+
+/** ========= Specializations (Phase 2 UI) ========= */
+async function loadSpecializationFilterSelect() {
+  const sel = $('#specializationFilter');
+  if (!sel) return;
+
+  const careerId = state.currentCareerId || '';
+  sel.innerHTML = '';
+
+  const baseOpt = document.createElement('option');
+  baseOpt.value = '';
+  baseOpt.textContent = '(Main career)';
+  sel.appendChild(baseOpt);
+
+  if (!careerId) {
+    sel.value = '';
+    sel.disabled = true;
+    const b1 = $('#btnAddSpecialization'); if (b1) b1.disabled = true;
+    const b2 = $('#btnRenameSpecialization'); if (b2) b2.disabled = true;
+    const b3 = $('#btnDeleteSpecialization'); if (b3) b3.disabled = true;
+    return;
+  }
+
+  sel.disabled = false;
+  const specs = await getByIndex('specializations', 'by_baseCareerId', careerId);
+  (specs || []).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+
+  (specs || []).forEach(sp => {
+    const opt = document.createElement('option');
+    opt.value = sp.id;
+    opt.textContent = sp.title || '(Specialization)';
+    sel.appendChild(opt);
+  });
+
+  // keep current selection if still valid
+  const keep = state.currentSpecializationId || '';
+  const valid = keep && (specs || []).some(s => s.id === keep);
+  state.currentSpecializationId = valid ? keep : '';
+  sel.value = state.currentSpecializationId;
+
+  // buttons
+  const b1 = $('#btnAddSpecialization'); if (b1) b1.disabled = false;
+  const b2 = $('#btnRenameSpecialization'); if (b2) b2.disabled = (sel.value === '');
+  const b3 = $('#btnDeleteSpecialization'); if (b3) b3.disabled = (sel.value === '');
+}
+
+async function setCurrentSpecialization(specId) {
+  state.currentSpecializationId = specId || '';
+  const sel = $('#specializationFilter');
+  if (sel) sel.value = state.currentSpecializationId;
+
+  const pSel = $('#promptCurrentSpecializationSelect');
+  if (pSel) pSel.value = state.currentSpecializationId;
+
+  const b2 = $('#btnRenameSpecialization'); if (b2) b2.disabled = (state.currentSpecializationId === '');
+  const b3 = $('#btnDeleteSpecialization'); if (b3) b3.disabled = (state.currentSpecializationId === '');
+
+  // Re-render Career Info list (effective values) + Prompt compile
+  await renderCareerBlocks();
+  try { await renderPromptPage(); } catch {}
+}
+
+async function addSpecializationFlow() {
+  const careerId = state.currentCareerId;
+  if (!careerId) return alert('Select a career first.');
+  const title = prompt('Specialization name?');
+  if (title == null) return;
+  const clean = String(title || '').trim();
+  if (!clean) return alert('Name is required.');
+  const t = nowISO();
+  const row = { id: uid(), baseCareerId: careerId, title: clean, createdAt: t, updatedAt: t };
+  await addOne('specializations', row);
+  await logChange({ entityType:'specialization', entityId: row.id, action:'create', after: row });
+  await loadSpecializationFilterSelect();
+  await loadPromptCurrentSpecializationSelect();
+  await setCurrentSpecialization(row.id);
+}
+
+async function renameSpecializationFlow() {
+  const careerId = state.currentCareerId;
+  if (!careerId) return alert('Select a career first.');
+  const spId = state.currentSpecializationId || '';
+  if (!spId) return alert('Select a specialization (not Main career).');
+  const sp = await getOne('specializations', spId);
+  if (!sp) return;
+  const next = prompt('New specialization name?', sp.title || '');
+  if (next == null) return;
+  const title = String(next || '').trim();
+  if (!title) return alert('Name is required.');
+  const before = { ...sp };
+  const after = { ...sp, title, updatedAt: nowISO() };
+  await putOne('specializations', after);
+  await logChange({ entityType:'specialization', entityId: spId, action:'update', after, before });
+  await loadSpecializationFilterSelect();
+  await loadPromptCurrentSpecializationSelect();
+  await setCurrentSpecialization(spId);
+}
+
+async function deleteSpecializationFlow() {
+  const careerId = state.currentCareerId;
+  if (!careerId) return alert('Select a career first.');
+  const spId = state.currentSpecializationId || '';
+  if (!spId) return alert('Main career cannot be deleted.');
+  const sp = await getOne('specializations', spId);
+  if (!sp) return;
+  const ok = confirm(`Delete specialization “${sp.title || '(Specialization)'}”?\nThis will also delete all specialization override content rows.`);
+  if (!ok) return;
+
+  const overrideRows = await getByIndex('specializationContent', 'by_specializationId', spId);
+  for (const r of (overrideRows || [])) {
+    await deleteOne('specializationContent', [r.specializationId, r.templateId]);
+    await logChange({ entityType:'specializationContent', entityId:`${r.specializationId}:${r.templateId}`, action:'delete', after:null, before:r });
+  }
+  await deleteOne('specializations', spId);
+  await logChange({ entityType:'specialization', entityId: spId, action:'delete', after:null, before:sp });
+
+  try {
+    const allUc = await getAll('userCareer');
+    for (const uc of (allUc || [])) {
+      if ((uc?.specializationId || '') !== spId) continue;
+      const next = { ...uc, specializationId: null, updatedAt: nowISO() };
+      await putOne('userCareer', next);
+      await logChange({ entityType:'userCareer', entityId: next.userId, action:'update', after: next, before: uc });
+    }
+  } catch {}
+
+  await renderPersonalSpecializationPick();
+  await loadSpecializationFilterSelect();
+  await loadPromptCurrentSpecializationSelect();
+  await setCurrentSpecialization('');
+}
+
+async function loadPromptCurrentSpecializationSelect() {
+  const sel = $('#promptCurrentSpecializationSelect');
+  if (!sel) return;
+
+  sel.innerHTML = '';
+  const baseOpt = document.createElement('option');
+  baseOpt.value = '';
+  baseOpt.textContent = '(Main career)';
+  sel.appendChild(baseOpt);
+
+  const careerId = state.currentCareerId || '';
+  if (!careerId) { sel.value=''; sel.disabled=true; return; }
+  sel.disabled = false;
+
+  const specs = await getByIndex('specializations', 'by_baseCareerId', careerId);
+  (specs || []).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+  (specs || []).forEach(sp => {
+    const opt = document.createElement('option');
+    opt.value = sp.id;
+    opt.textContent = sp.title || '(Specialization)';
+    sel.appendChild(opt);
+  });
+
+  const keep = state.currentSpecializationId || '';
+  const valid = keep && (specs || []).some(s => s.id === keep);
+  state.currentSpecializationId = valid ? keep : '';
+  sel.value = state.currentSpecializationId;
+}
+
+async function getEffectiveCareerContentMap(careerId, specializationId='') {
+  let baseMap = new Map();
+  if (careerId) {
+    const baseRows = await getByIndex('careerContent', 'by_careerId', careerId);
+    baseMap = new Map((baseRows || []).map(r => [r.templateId, r]));
+  }
+  if (!specializationId) return baseMap;
+
+  const overrides = await getByIndex('specializationContent', 'by_specializationId', specializationId);
+  const oMap = new Map((overrides || []).map(r => [r.templateId, r]));
+  const eff = new Map(baseMap);
+  for (const [tplId, orow] of oMap.entries()) {
+    const baseRow = baseMap.get(tplId) || null;
+    eff.set(tplId, {
+      ...(baseRow || {}),
+      ...(orow || {}),
+      specializationId: orow?.specializationId || specializationId,
+      templateId: tplId,
+      content: (orow && Object.prototype.hasOwnProperty.call(orow, 'content'))
+        ? (orow.content || '')
+        : (baseRow?.content || '')
+    });
+  }
+  return eff;
+}
+
+function resolveEffectiveCareerTemplate(tpl, overrideRow) {
+  const hasOutputFlag = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'isOutput'));
+  const hasOutputConn = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'outputConnectionId'));
+  const hasOutputMode = !!(overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'outputMode'));
+  return {
+    ...(tpl || {}),
+    isOutput: hasOutputFlag ? (overrideRow.isOutput !== false) : (tpl?.isOutput !== false),
+    outputConnectionId: hasOutputConn ? (overrideRow.outputConnectionId || '') : (tpl?.outputConnectionId || ''),
+    outputMode: hasOutputMode ? (overrideRow.outputMode || tpl?.outputMode || 'section') : (tpl?.outputMode || 'section')
+  };
+}
+
+async function getEffectiveCareerOutputAssignments(careerId, specializationId='') {
+  const templates = await getAll('careerTemplates');
+  const overrides = specializationId ? await getByIndex('specializationContent', 'by_specializationId', specializationId) : [];
+  const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
+  const out = Object.create(null);
+  (templates || []).forEach(tpl => {
+    if (!tpl) return;
+    const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+    const cid = (effTpl.outputConnectionId || '');
+    if (cid && (effTpl.isOutput !== false) && !out[cid]) {
+      out[cid] = { key: tpl.id, store: specializationId ? 'specializationContent' : 'careerTemplates', title: tpl.title || '(Career Item)' };
+    }
+  });
+  return out;
+}
+
+
 /** ========= Output assignment helpers ========= */
 async function getOutputAssignments() {
   // Map: connectionId -> { key: templateId, store: 'personalTemplates'|'careerTemplates', title }
@@ -2229,7 +2741,7 @@ async function getOutputAssignments() {
 }
 
 async function enforceSingleOutputPerConnection({ currentKey, connId }) {
-  // Returns: { ok: boolean, conflict?: { store, row, title }, connTitle?: string }
+  // Legacy global check for non-career contexts
   if (!connId) return { ok: true };
 
   const [pTemps, cTemps, connRow] = await Promise.all([
@@ -2239,8 +2751,6 @@ async function enforceSingleOutputPerConnection({ currentKey, connId }) {
   ]);
 
   const connTitle = connRow?.title || 'this connection';
-
-  // Find any other output item already bound to this connection
   const pHit = (pTemps || []).find(t => (t.isOutput !== false) && (t.outputConnectionId || '') === connId && t.id !== currentKey);
   if (pHit) return { ok: false, conflict: { store: 'personalTemplates', row: pHit, title: pHit.title || '(Personal Item)' }, connTitle };
 
@@ -2250,12 +2760,56 @@ async function enforceSingleOutputPerConnection({ currentKey, connId }) {
   return { ok: true };
 }
 
+async function enforceCareerOutputPerConnectionInContext({ currentKey, connId, specializationId='' }) {
+  if (!connId) return { ok: true };
+  const [templates, connRow, overrides] = await Promise.all([
+    getAll('careerTemplates'),
+    getOne('connections', connId),
+    specializationId ? getByIndex('specializationContent', 'by_specializationId', specializationId) : Promise.resolve([])
+  ]);
+  const connTitle = connRow?.title || 'this connection';
+  const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
+  const hit = (templates || []).find(tpl => {
+    if (!tpl || tpl.id === currentKey) return false;
+    const effTpl = resolveEffectiveCareerTemplate(tpl, specializationId ? overrideMap.get(tpl.id) : null);
+    return (effTpl.isOutput !== false) && ((effTpl.outputConnectionId || '') === connId);
+  });
+  if (hit) return { ok:false, conflict:{ store: specializationId ? 'specializationContent' : 'careerTemplates', row: hit, title: hit.title || '(Career Item)' }, connTitle };
+  return { ok:true };
+}
+
 async function clearOutputLink(conflictRow, storeName) {
   const t = nowISO();
   const before = await getOne(storeName, conflictRow.id);
   const after = { ...before, isOutput: false, outputConnectionId: '', updatedAt: t };
   await putOne(storeName, after);
   await logChange({ entityType: storeName === 'personalTemplates' ? 'personalTemplate' : 'careerTemplate', entityId: after.id, action: 'update', after, before });
+  return after;
+}
+
+async function clearCareerOutputLinkInContext({ conflictRow, specializationId='' }) {
+  const t = nowISO();
+  if (!specializationId) {
+    const before = await getOne('careerTemplates', conflictRow.id);
+    const after = { ...before, isOutput: false, outputConnectionId: '', updatedAt: t };
+    await putOne('careerTemplates', after);
+    await logChange({ entityType: 'careerTemplate', entityId: after.id, action: 'update', after, before });
+    return after;
+  }
+
+  const before = await getOne('specializationContent', [specializationId, conflictRow.id]);
+  const after = {
+    ...(before || {}),
+    specializationId,
+    templateId: conflictRow.id,
+    mode: before?.mode || 'override',
+    isOutput: false,
+    outputConnectionId: '',
+    createdAt: before?.createdAt || t,
+    updatedAt: t
+  };
+  await putOne('specializationContent', after);
+  await logChange({ entityType: 'specializationContent', entityId: `${specializationId}:${conflictRow.id}`, action: before ? 'update' : 'create', after, before: before || null });
   return after;
 }
 
@@ -2424,7 +2978,7 @@ function openEditItemModal({ title, initial, onSave, onDelete, previewLabel='Pre
 
   const headerButtons = [];
   // Delete sits next to the modal title (header actions) to reduce mis-click risk.
-  if (!contentOnly && (initial?.id || initial?.templateId)) {
+  if (onDelete && (initial?.id || initial?.templateId)) {
     headerButtons.push(btn('Delete', {
       mini: true,
       danger: true,
@@ -2515,11 +3069,11 @@ async function renderPersonal() {
   templates = applyUiOrder(templates, 'personalTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   const assignments = await getOutputAssignments();
-  const cMap = new Map((contents || []).map(c => [c.templateId, c]));
+  const contentMap = new Map((contents || []).map(c => [c.templateId, c]));
   $('#hintPersonal').style.display = templates.length ? 'none' : 'block';
 
   templates.forEach(tpl => {
-    const c = cMap.get(tpl.id);
+    const c = contentMap.get(tpl.id);
     const content = c?.content || '';
     const isEmpty = !String(content).trim();
     const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
@@ -2639,12 +3193,97 @@ async function deletePersonalTemplate(payload) {
   await renderPromptPage();
 }
 
+async function getSpecializationsForCareer(careerId) {
+  if (!careerId) return [];
+  const specs = await getByIndex('specializations', 'by_baseCareerId', careerId);
+  return (specs || []).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+}
+
+function specMemoryKey(userId, careerId) {
+  return `mivida_user_career_spec_memory::${userId || ''}::${careerId || ''}`;
+}
+function rememberUserCareerSpecialization(userId, careerId, specializationId) {
+  try {
+    if (!userId || !careerId) return;
+    if (specializationId) localStorage.setItem(specMemoryKey(userId, careerId), specializationId);
+    else localStorage.removeItem(specMemoryKey(userId, careerId));
+  } catch {}
+}
+function getRememberedUserCareerSpecialization(userId, careerId) {
+  try {
+    if (!userId || !careerId) return '';
+    return localStorage.getItem(specMemoryKey(userId, careerId)) || '';
+  } catch { return ''; }
+}
+
+async function renderPersonalSpecializationPick() {
+  const userId = state.currentUserId;
+  const row = $('#personalSpecializationPickRow');
+  const sel = $('#personalSpecializationPick');
+  if (!row || !sel) return;
+
+  row.style.display = userId ? 'flex' : 'none';
+  if (!userId) {
+    sel.innerHTML = '';
+    sel.disabled = true;
+    return;
+  }
+
+  const uc = await getOne('userCareer', userId);
+  const careerId = uc?.careerId || '';
+
+  sel.innerHTML = '';
+  const baseOpt = document.createElement('option');
+  baseOpt.value = '';
+  baseOpt.textContent = '(Main career)';
+  sel.appendChild(baseOpt);
+
+  if (!careerId) {
+    sel.value = '';
+    sel.disabled = true;
+    return;
+  }
+
+  sel.disabled = false;
+  const specs = await getSpecializationsForCareer(careerId);
+  specs.forEach(sp => {
+    const opt = document.createElement('option');
+    opt.value = sp.id;
+    opt.textContent = sp.title || '(Specialization)';
+    sel.appendChild(opt);
+  });
+
+  const keep = uc?.specializationId || '';
+  const valid = keep && specs.some(sp => sp.id === keep);
+  sel.value = valid ? keep : '';
+
+  sel.onchange = async () => {
+    const before = await getOne('userCareer', userId);
+    const t = nowISO();
+    const after = {
+      userId,
+      careerId: careerId || null,
+      specializationId: sel.value || null,
+      updatedAt: t,
+      createdAt: before?.createdAt || t
+    };
+    await putOne('userCareer', after);
+    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPromptPickers();
+    await renderPromptPage();
+  };
+}
+
 async function renderPersonalCareerPick() {
   const userId = state.currentUserId;
   const row = $('#personalCareerPickRow');
   const sel = $('#personalCareerPick');
   row.style.display = userId ? 'flex' : 'none';
-  if (!userId) return;
+  if (!userId) {
+    await renderPersonalSpecializationPick();
+    return;
+  }
 
   const careers = await getAll('careers');
   careers.sort((a,b) => (a.title || '').localeCompare(b.title || ''));
@@ -2669,11 +3308,25 @@ async function renderPersonalCareerPick() {
     const v = sel.value || '';
     const t = nowISO();
     const before = await getOne('userCareer', userId);
-    const after = { userId, careerId: v || null, updatedAt: t, createdAt: before?.createdAt || t };
+    let nextSpecId = before?.specializationId || null;
+    if (before?.careerId) rememberUserCareerSpecialization(userId, before.careerId, before?.specializationId || '');
+    if (v) {
+      const specs = await getSpecializationsForCareer(v);
+      const rememberedSpecId = getRememberedUserCareerSpecialization(userId, v);
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = rememberedSpecId || null;
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = null;
+    } else {
+      nextSpecId = null;
+    }
+    const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
     await putOne('userCareer', after);
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-    await renderPromptPage(); // Prompt compile uses user's career
+    await renderPersonalSpecializationPick();
+    await renderPromptPickers();
+    await renderPromptPage();
   };
+
+  await renderPersonalSpecializationPick();
 }
 
 
@@ -2739,9 +3392,21 @@ async function deleteCareer(career) {
     await logChange({ entityType: 'careerBlock', entityId: b.id, action: 'delete', after: null, before: b });
   }
 
+  // delete specialization rows + specialization overrides tied to this base career
+  const specs = await getByIndex('specializations', 'by_baseCareerId', career.id);
+  for (const sp of (specs || [])) {
+    const overrideRows = await getByIndex('specializationContent', 'by_specializationId', sp.id);
+    for (const r of (overrideRows || [])) {
+      await deleteOne('specializationContent', [r.specializationId, r.templateId]);
+      await logChange({ entityType: 'specializationContent', entityId: `${r.specializationId}:${r.templateId}`, action: 'delete', after: null, before: r });
+    }
+    await deleteOne('specializations', sp.id);
+    await logChange({ entityType: 'specialization', entityId: sp.id, action: 'delete', after: null, before: sp });
+  }
+
   // remove selections
   const allUserCareer = await getAll('userCareer');
-  const impacted = allUserCareer.filter(x => x.careerId === career.id);
+  const impacted = allUserCareer.filter(x => x.careerId === career.id || x.baseCareerId === career.id);
   for (const uc of impacted) {
     await deleteOne('userCareer', uc.userId);
     await logChange({ entityType: 'userCareer', entityId: uc.userId, action: 'delete', after: null, before: uc });
@@ -2750,6 +3415,288 @@ async function deleteCareer(career) {
   await deleteOne('careers', career.id);
   await logChange({ entityType: 'career', entityId: career.id, action: 'delete', after: null, before });
   await refreshAll();
+}
+
+async function buildSpecializationPreviewPanel(baseCareerId, specializationId) {
+  const wrap = document.createElement('div');
+  wrap.style.display = 'flex';
+  wrap.style.flexDirection = 'column';
+  wrap.style.gap = '10px';
+  wrap.style.minHeight = '420px';
+
+  if (!specializationId) {
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Select a specialization on the left to preview base values, specialization overrides, and final effective values.';
+    wrap.appendChild(hint);
+    return wrap;
+  }
+
+  const [baseCareer, sp, templates, baseRows, overrideRows] = await Promise.all([
+    getOne('careers', baseCareerId),
+    getOne('specializations', specializationId),
+    getAll('careerTemplates'),
+    getByIndex('careerContent', 'by_careerId', baseCareerId),
+    getByIndex('specializationContent', 'by_specializationId', specializationId)
+  ]);
+
+  const baseMap = new Map((baseRows || []).map(r => [r.templateId, r]));
+  const overrideMap = new Map((overrideRows || []).map(r => [r.templateId, r]));
+  let orderedTemplates = applyUiOrder((templates || []), 'careerTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
+
+  const header = document.createElement('div');
+  header.innerHTML = `
+    <div style="font-weight:700; font-size:15px;">${escapeHtml(sp?.title || '(Specialization)')}</div>
+    <div class="muted" style="margin-top:4px;">Base career: ${escapeHtml(baseCareer?.title || '(Career)')}</div>
+    <div class="muted" style="margin-top:4px;">Final effective value = override when present, otherwise base career value.</div>
+  `;
+  wrap.appendChild(header);
+
+  const summary = document.createElement('div');
+  summary.className = 'hint';
+  const overrideCount = (overrideRows || []).length;
+  const baseCount = (baseRows || []).filter(r => String(r?.content || '').trim()).length;
+  summary.textContent = `${overrideCount} specialization override row(s) · ${baseCount} base career content row(s)`;
+  wrap.appendChild(summary);
+
+  const list = document.createElement('div');
+  list.style.display = 'flex';
+  list.style.flexDirection = 'column';
+  list.style.gap = '12px';
+  list.style.maxHeight = '520px';
+  list.style.overflow = 'auto';
+  wrap.appendChild(list);
+
+  const visibleTemplates = orderedTemplates.filter(t => {
+    const b = baseMap.get(t.id);
+    const o = overrideMap.get(t.id);
+    return !!b || !!o;
+  });
+  const finalTemplates = visibleTemplates.length ? visibleTemplates : orderedTemplates.slice(0, 12);
+
+  if (!finalTemplates.length) {
+    const none = document.createElement('div');
+    none.className = 'hint';
+    none.textContent = 'No career templates found yet.';
+    list.appendChild(none);
+    return wrap;
+  }
+
+  const makeValueBox = (label, value, tone) => {
+    const box = document.createElement('div');
+    box.style.border = '1px solid var(--line)';
+    box.style.borderRadius = '10px';
+    box.style.padding = '8px';
+    box.style.background = tone || 'var(--panel2)';
+
+    const title = document.createElement('div');
+    title.className = 'muted';
+    title.style.fontSize = '11px';
+    title.style.textTransform = 'uppercase';
+    title.style.letterSpacing = '.04em';
+    title.style.marginBottom = '6px';
+    title.textContent = label;
+    box.appendChild(title);
+
+    const body = document.createElement('div');
+    body.style.whiteSpace = 'pre-wrap';
+    body.style.lineHeight = '1.4';
+    body.style.minHeight = '42px';
+    const safe = String(value || '').trim();
+    body.innerHTML = safe ? renderMarkdown(safe) : '<span class="muted">(empty)</span>';
+    box.appendChild(body);
+    return box;
+  };
+
+  finalTemplates.forEach(tpl => {
+    const baseRow = baseMap.get(tpl.id);
+    const overrideRow = overrideMap.get(tpl.id);
+    const hasOverride = !!overrideRow;
+    const baseValue = baseRow?.content || '';
+    const overrideValue = hasOverride ? (overrideRow?.content || '') : '';
+    const finalValue = hasOverride ? overrideValue : baseValue;
+
+    const card = document.createElement('div');
+    card.style.border = '1px solid var(--line)';
+    card.style.borderRadius = '12px';
+    card.style.padding = '10px';
+    card.style.background = 'var(--panel)';
+
+    const top = document.createElement('div');
+    top.style.display = 'flex';
+    top.style.justifyContent = 'space-between';
+    top.style.alignItems = 'center';
+    top.style.gap = '8px';
+    top.style.marginBottom = '8px';
+    top.innerHTML = `
+      <div style="font-weight:600;">${escapeHtml(tpl.title || '(Career Item)')}</div>
+      <div class="pills">${hasOverride ? '<span class="pill accent">Override</span>' : '<span class="pill">Inherited</span>'}</div>
+    `;
+    card.appendChild(top);
+
+    const grid = document.createElement('div');
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = '1fr';
+    grid.style.gap = '8px';
+    grid.appendChild(makeValueBox('Base value', baseValue, 'var(--panel2)'));
+    grid.appendChild(makeValueBox('Specialization override', hasOverride ? overrideValue : '', 'rgba(99,102,241,.06)'));
+    grid.appendChild(makeValueBox('Final effective value', finalValue, 'rgba(16,185,129,.08)'));
+    card.appendChild(grid);
+    list.appendChild(card);
+  });
+
+  return wrap;
+}
+
+async function openManageSpecializationsModal(selectedSpecializationId = '') {
+  const baseCareerId = state.currentCareerId || '';
+  if (!baseCareerId) {
+    alert('Select a base career first.');
+    return;
+  }
+
+  const baseCareer = await getOne('careers', baseCareerId);
+  const specs = await getByIndex('specializations', 'by_baseCareerId', baseCareerId);
+  const rows = [...(specs || [])].sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+
+  const body = document.createElement('div');
+  const intro = document.createElement('div');
+  intro.className = 'muted';
+  intro.style.marginBottom = '10px';
+  intro.textContent = `Base career: ${baseCareer?.title || '(Career)'} · Phase 2 preview shows base value, specialization override, and final effective value.`;
+  body.appendChild(intro);
+
+  const shell = document.createElement('div');
+  shell.style.display = 'flex';
+  shell.style.flexDirection = 'column';
+  shell.style.gap = '12px';
+  body.appendChild(shell);
+
+  const listSection = document.createElement('div');
+  listSection.style.border = '1px solid var(--line)';
+  listSection.style.borderRadius = '12px';
+  listSection.style.padding = '12px';
+  listSection.style.background = 'var(--panel)';
+  shell.appendChild(listSection);
+
+  const listHeader = document.createElement('div');
+  listHeader.style.display = 'flex';
+  listHeader.style.justifyContent = 'space-between';
+  listHeader.style.alignItems = 'center';
+  listHeader.style.gap = '8px';
+  listHeader.style.marginBottom = '10px';
+  listHeader.innerHTML = `
+    <div>
+      <div style="font-weight:700;">Specializations</div>
+      <div class="muted" style="margin-top:4px;">Edit the specialization first, then review the effective preview below.</div>
+    </div>
+  `;
+  listSection.appendChild(listHeader);
+
+  const left = document.createElement('div');
+  left.className = 'list';
+  left.style.maxHeight = '280px';
+  left.style.overflow = 'auto';
+  listSection.appendChild(left);
+
+  const previewSection = document.createElement('div');
+  previewSection.style.border = '1px solid var(--line)';
+  previewSection.style.borderRadius = '12px';
+  previewSection.style.padding = '12px';
+  previewSection.style.background = 'var(--panel2)';
+  shell.appendChild(previewSection);
+
+  const previewHeader = document.createElement('div');
+  previewHeader.style.fontWeight = '700';
+  previewHeader.style.marginBottom = '10px';
+  previewHeader.textContent = 'Effective Preview';
+  previewSection.appendChild(previewHeader);
+
+  const right = document.createElement('div');
+  previewSection.appendChild(right);
+
+  const renderRight = async (specId) => {
+    right.innerHTML = '';
+    right.appendChild(await buildSpecializationPreviewPanel(baseCareerId, specId));
+  };
+
+  if (!rows.length) {
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'No specializations yet. Click Add to create one for this career.';
+    left.appendChild(hint);
+    await renderRight('');
+  }
+
+  for (const sp of rows) {
+    const overrides = await getByIndex('specializationContent', 'by_specializationId', sp.id);
+    const overrideCount = (overrides || []).length;
+    const row = makeItemRow({
+      title: sp.title || '(Specialization)',
+      subtitle: overrideCount ? `${overrideCount} override row(s)` : 'No overrides yet',
+      pills: [{ text: 'Specialization' }]
+    }, [
+      btn('Rename', { mini:true, onClick: async () => {
+        const nextTitle = prompt('Rename specialization', sp.title || '');
+        if (nextTitle == null) return;
+        const title = String(nextTitle || '').trim();
+        if (!title) { alert('Title is required.'); return; }
+        const before = await getOne('specializations', sp.id);
+        const after = { ...before, title, updatedAt: nowISO() };
+        await putOne('specializations', after);
+        await logChange({ entityType:'specialization', entityId: after.id, action:'update', after, before });
+        closeModal();
+        await openManageSpecializationsModal(sp.id);
+      }}),
+      btn('Preview', { mini:true, onClick: async () => { await renderRight(sp.id); } }),
+      btn('Delete', { mini:true, danger:true, onClick: async () => {
+        const ok = confirm(`Delete specialization “${sp.title || '(Specialization)'}”?
+Any specialization-only override rows will also be deleted.`);
+        if (!ok) return;
+        const overrideRows = await getByIndex('specializationContent', 'by_specializationId', sp.id);
+        for (const r of (overrideRows || [])) {
+          await deleteOne('specializationContent', [r.specializationId, r.templateId]);
+          await logChange({ entityType:'specializationContent', entityId:`${r.specializationId}:${r.templateId}`, action:'delete', after:null, before:r });
+        }
+        await deleteOne('specializations', sp.id);
+        await logChange({ entityType:'specialization', entityId: sp.id, action:'delete', after:null, before:sp });
+        closeModal();
+        await openManageSpecializationsModal('');
+      }})
+    ]);
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', async (e) => {
+      if (e.target.closest('button')) return;
+      await renderRight(sp.id);
+    });
+    left.appendChild(row);
+  }
+
+  await renderRight(selectedSpecializationId || (rows[0]?.id || ''));
+
+  const footer = [
+    btn('Add', { primary:true, onClick: async () => {
+      const title = prompt('New specialization title');
+      if (title == null) return;
+      const clean = String(title || '').trim();
+      if (!clean) { alert('Title is required.'); return; }
+      const t = nowISO();
+      const row = {
+        id: uid(),
+        baseCareerId,
+        title: clean,
+        createdAt: t,
+        updatedAt: t
+      };
+      await addOne('specializations', row);
+      await logChange({ entityType:'specialization', entityId: row.id, action:'create', after: row });
+      closeModal();
+      await openManageSpecializationsModal(row.id);
+    }}),
+    btn('Close', { onClick: closeModal })
+  ];
+
+  openModal('Manage Specializations', body, footer);
 }
 
 async function renderCareerBlocks() {
@@ -2766,44 +3713,68 @@ async function renderCareerBlocks() {
   }
 
   $('#btnAddCareerBlock').disabled = false;
+  await loadSpecializationFilterSelect();
 
-  let [templates, contents, conns] = await Promise.all([
+  const specId = state.currentSpecializationId || '';
+  let [templates, baseContents, specContents, conns] = await Promise.all([
     getAll('careerTemplates'),
     getByIndex('careerContent', 'by_careerId', careerId),
+    specId ? getByIndex('specializationContent', 'by_specializationId', specId) : Promise.resolve([]),
     getAll('connections')
   ]);
 
   templates = applyUiOrder(templates, 'careerTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   const assignments = await getOutputAssignments();
-  const cMap = new Map((contents || []).map(c => [c.templateId, c]));
+  const baseMap = new Map((baseContents || []).map(c => [c.templateId, c]));
+  const overrideMap = new Map((specContents || []).map(c => [c.templateId, c]));
+  const getEffectiveRow = (tplId) => (overrideMap.has(tplId) ? overrideMap.get(tplId) : baseMap.get(tplId));
 
   $('#hintCareerBlocks').style.display = templates.length ? 'none' : 'block';
   $('#hintCareerBlocks').textContent = templates.length ? '' : 'No career items yet. Click Add to create.';
 
   templates.forEach(tpl => {
-    const c = cMap.get(tpl.id);
+    const c = getEffectiveRow(tpl.id);
     const content = c?.content || '';
     const isEmpty = !String(content).trim();
     const updated = c?.updatedAt || tpl.updatedAt || tpl.createdAt || '';
 
     const actions = [
-      btn('Edit', { mini:true, onClick: () => openEditItemModal({
-        title: 'Edit · Career Item',
-        initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
-        outputMeta: { connections: conns, assignments },
-        onSave: saveCareerTemplateAndContentByFilter,
-        onDelete: deleteCareerTemplate
-      })})
+      btn('Edit', { mini:true, onClick: () => {
+        if (!specId) {
+          return openEditItemModal({
+            title: 'Edit · Career Item',
+            initial: { templateId: tpl.id, title: tpl.title, content, isOutput: (tpl.isOutput !== false), outputConnectionId: (tpl.outputConnectionId || '') },
+            outputMeta: { connections: conns, assignments },
+            onSave: saveCareerTemplateAndContentByFilter,
+            onDelete: deleteCareerTemplate
+          });
+        }
+
+        const baseRow = baseMap.get(tpl.id);
+        const overrideRow = overrideMap.get(tpl.id);
+        const effTpl = resolveEffectiveCareerTemplate(tpl, overrideRow);
+        const initialContent = (overrideRow && Object.prototype.hasOwnProperty.call(overrideRow, 'content')) ? (overrideRow.content || '') : (baseRow?.content || '');
+        return openEditItemModal({
+          title: 'Edit · Specialization Override',
+          initial: { templateId: tpl.id, title: tpl.title, content: initialContent, isOutput: (effTpl.isOutput !== false), outputConnectionId: (effTpl.outputConnectionId || '') },
+          contentOnly: true,
+          outputMeta: { connections: conns, assignments },
+          previewLabel: 'Preview (final effective value)',
+          onSave: saveSpecializationOverrideByFilter,
+          onDelete: overrideRow ? deleteSpecializationOverride : null
+        });
+      }})
     ];
 
     const pills = [
-      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : [])
+      ...(isEmpty ? [{ text:'Empty', className:'warn' }] : []),
+      ...((specId && overrideMap.has(tpl.id)) ? [{ text:'Override', className:'accent' }] : (specId ? [{ text:'Effective' }] : []))
     ];
 
     const row = makeItemRow({
       title: tpl.title,
-      subtitle: isEmpty ? 'Content: (empty for this career)' : `Updated: ${formatLocal(updated)}`,
+      subtitle: (specId ? (overrideMap.has(tpl.id) ? `Override updated: ${formatLocal(updated)}` : (isEmpty ? 'Inherited: (empty in base career)' : `Inherited updated: ${formatLocal(updated)}`)) : (isEmpty ? 'Content: (empty for this career)' : `Updated: ${formatLocal(updated)}`)),
       pills
     }, actions);
     makeRowSortable(row, { sortKey:'careerTemplates', id: tpl.id });
@@ -2878,6 +3849,98 @@ async function saveCareerTemplateAndContentByFilter(payload) {
   await renderCareerBlocks();
   await renderPromptPage();
 }
+
+async function saveSpecializationOverrideByFilter(payload) {
+  const careerId = state.currentCareerId || null;
+  const specId = state.currentSpecializationId || null;
+  if (!careerId) { alert('Select a career first.'); return; }
+  if (!specId) { alert('Select a specialization first.'); return; }
+
+  const t = nowISO();
+  const templateId = payload.templateId || payload.id;
+  if (!templateId) { alert('Missing template'); return; }
+
+  if (payload.isOutput && (payload.outputConnectionId || '')) {
+    const connId = (payload.outputConnectionId || '');
+    const check = await enforceCareerOutputPerConnectionInContext({ currentKey: templateId, connId, specializationId: specId });
+    if (!check.ok && check.conflict) {
+      const msg =
+        `This connection is already used as the output for “${check.conflict.title}” in this specialization.
+
+` +
+        `If you continue, the previous item’s output link will be cleared for this specialization only, and this item will become the output for “${check.connTitle}”.
+
+` +
+        `Do you want to continue?`;
+      const ok = confirm(msg);
+      if (!ok) return false;
+      await clearCareerOutputLinkInContext({ conflictRow: check.conflict.row, specializationId: specId });
+    }
+  }
+
+  const [before, baseRow, baseTpl] = await Promise.all([
+    getOne('specializationContent', [specId, templateId]),
+    getOne('careerContent', [careerId, templateId]),
+    getOne('careerTemplates', templateId)
+  ]);
+
+  const nextContent = String(payload.content || '');
+  const baseContent = String(baseRow?.content || '');
+  const nextIsOutput = (payload.isOutput !== false);
+  const baseIsOutput = (baseTpl?.isOutput !== false);
+  const nextConn = String(payload.outputConnectionId || '');
+  const baseConn = String(baseTpl?.outputConnectionId || '');
+
+  const sameAsBase = (nextContent === baseContent) && (nextIsOutput === baseIsOutput) && (nextConn === baseConn);
+  if (sameAsBase) {
+    if (before) {
+      await deleteOne('specializationContent', [specId, templateId]);
+      await logChange({ entityType: 'specializationContent', entityId: `${specId}:${templateId}`, action: 'delete', after: null, before });
+    }
+    await renderCareerBlocks();
+    await renderPromptPage();
+    return;
+  }
+
+  const row = {
+    specializationId: specId,
+    templateId,
+    mode: before?.mode || 'override',
+    content: nextContent,
+    isOutput: nextIsOutput,
+    outputConnectionId: nextConn,
+    createdAt: before?.createdAt || t,
+    updatedAt: t
+  };
+  await putOne('specializationContent', row);
+
+  await logChange({
+    entityType: 'specializationContent',
+    entityId: `${specId}:${templateId}`,
+    action: before ? 'update' : 'create',
+    after: row,
+    before: before || null
+  });
+
+  await renderCareerBlocks();
+  await renderPromptPage();
+}
+
+async function deleteSpecializationOverride(payload) {
+  const specId = state.currentSpecializationId || null;
+  const templateId = payload.templateId || payload.id;
+  if (!specId || !templateId) return;
+
+  const before = await getOne('specializationContent', [specId, templateId]);
+  if (!before) return;
+
+  await deleteOne('specializationContent', [specId, templateId]);
+  await logChange({ entityType:'specializationContent', entityId:`${specId}:${templateId}`, action:'delete', after:null, before });
+
+  await renderCareerBlocks();
+  await renderPromptPage();
+}
+
 
 async function deleteCareerTemplate(payload) {
   const templateId = payload.templateId || payload.id;
@@ -2964,11 +4027,13 @@ ${content}` : '';
     } else if (userId) {
       const uc = await getOne('userCareer', userId);
       careerId = uc?.careerId || null;
+      const userSpecId = uc?.specializationId || '';
+      if (careerId) cMap = await getEffectiveCareerContentMap(careerId, userSpecId);
     }
 
-    if (careerId) {
-      const contents = await getByIndex('careerContent', 'by_careerId', careerId);
-      cMap = new Map((contents || []).map(c => [c.templateId, c]));
+    if (careerId && source === 'current') {
+      const specId = state.currentSpecializationId || '';
+      cMap = await getEffectiveCareerContentMap(careerId, specId);
     }
 
     careerIds.forEach(tid => {
@@ -3030,28 +4095,34 @@ async function compileExplicitOutputForUserWithConnection(conn, ctx='setup') {
     templates = applyUiOrder(templates || [], 'careerTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
 
     let careerId = null;
+    let cMap = new Map();
 
     const source = (conn?.careerSource || 'user');
     if (source === 'current') {
       careerId = state.currentCareerId || null;
+      if (careerId) {
+        const specId = state.currentSpecializationId || '';
+        cMap = await getEffectiveCareerContentMap(careerId, specId);
+      }
     } else if (userId) {
       const uc = await getOne('userCareer', userId);
       careerId = uc?.careerId || null;
+      const userSpecId = uc?.specializationId || '';
+      if (careerId) cMap = await getEffectiveCareerContentMap(careerId, userSpecId);
     }
 
-    let cMap = new Map();
-    if (careerId) {
-      const contents = await getByIndex('careerContent', 'by_careerId', careerId);
-      cMap = new Map((contents || []).map(c => [c.templateId, c]));
-    }
+    const specIdForOutput = (source === 'current') ? (state.currentSpecializationId || '') : ((await getOne('userCareer', userId))?.specializationId || '');
+    const overrides = specIdForOutput ? await getByIndex('specializationContent', 'by_specializationId', specIdForOutput) : [];
+    const overrideMap = new Map((overrides || []).map(r => [r.templateId, r]));
 
     (templates || []).forEach(tpl => {
       if (!tpl) return;
-      if (tpl.isOutput === false) return;
-      const oc = (tpl.outputConnectionId || '');
+      const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+      if (effTpl.isOutput === false) return;
+      const oc = (effTpl.outputConnectionId || '');
       if (oc !== connId) return;
 
-      const mode = (tpl.outputMode || 'section');
+      const mode = (effTpl.outputMode || 'section');
       const content = careerId ? (cMap.get(tpl.id)?.content || '') : '';
       const hasBody = String(content).trim().length > 0;
 
@@ -3125,10 +4196,20 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
       if (tpl.isOutput === false) return;
       if ((tpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
     });
+    let specIdForOutput = '';
+    const sourceForOutput = (conn?.careerSource || 'user');
+    if (sourceForOutput === 'current') specIdForOutput = state.currentSpecializationId || '';
+    else if (userId) {
+      const ucOut = await getOne('userCareer', userId);
+      specIdForOutput = ucOut?.specializationId || '';
+    }
+    const overrideRows = specIdForOutput ? await getByIndex('specializationContent', 'by_specializationId', specIdForOutput) : [];
+    const overrideMap = new Map((overrideRows || []).map(r => [r.templateId, r]));
     (cTemps || []).forEach(tpl => {
       if (!tpl) return;
-      if (tpl.isOutput === false) return;
-      if ((tpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
+      const effTpl = resolveEffectiveCareerTemplate(tpl, overrideMap.get(tpl.id));
+      if (effTpl.isOutput === false) return;
+      if ((effTpl.outputConnectionId || '') === (conn?.id || '')) explicitOutputCount += 1;
     });
   } catch(e) { /* ignore */ }
 
@@ -3151,13 +4232,20 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
 
   // Resolve career for this compile context (used for missingCareer + emptyCareer)
   let careerId = null;
+  const source = (conn?.careerSource || 'user');
+  let cMap = new Map();
   if (careerIds.length) {
-    const source = (conn?.careerSource || 'user');
     if (source === 'current') {
       careerId = state.currentCareerId || null;
+      if (careerId) {
+        const specId = state.currentSpecializationId || '';
+        cMap = await getEffectiveCareerContentMap(careerId, specId);
+      }
     } else if (userId) {
       const uc = await getOne('userCareer', userId);
       careerId = uc?.careerId || null;
+      const userSpecId = uc?.specializationId || '';
+      if (careerId) cMap = await getEffectiveCareerContentMap(careerId, userSpecId);
     }
     if (!careerId) missingCareer = true;
   }
@@ -3165,12 +4253,6 @@ async function analyzeConnectionForCurrentUser(conn, ctx='setup') {
   if (careerIds.length) {
     const templates = await getAll('careerTemplates');
     const tMap = new Map((templates || []).map(t => [t.id, t]));
-
-    let cMap = new Map();
-    if (careerId) {
-      const contents = await getByIndex('careerContent', 'by_careerId', careerId);
-      cMap = new Map((contents || []).map(c => [c.templateId, c]));
-    }
 
     careerIds.forEach(tid => {
       const tpl = tMap.get(tid);
@@ -3245,8 +4327,12 @@ async function openConnectionModal({ mode, initial }) {
     const uc = await getOne('userCareer', userId);
     userCareerId = uc?.careerId || null;
   }
-  const careerContent_user = userCareerId ? await getByIndex('careerContent', 'by_careerId', userCareerId) : [];
-  const careerContentMap_user = new Map((careerContent_user || []).map(r => [r.templateId, r]));
+  let userSpecializationId = '';
+  if (userId) {
+    const uc = await getOne('userCareer', userId);
+    userSpecializationId = uc?.specializationId || '';
+  }
+  const careerContentMap_user = userCareerId ? await getEffectiveCareerContentMap(userCareerId, userSpecializationId) : new Map();
 
   // Current career (from Career Info dropdown)
   const currentCareerId = state.currentCareerId || null;
@@ -3490,11 +4576,52 @@ async function openConnectionModal({ mode, initial }) {
 
 
 /** ========= Prompt Page ========= */
+async function loadPromptUserSpecializationSelect() {
+  const sel = $('#promptUserSpecializationSelect');
+  const userId = state.currentUserId || '';
+  if (!sel) return;
+
+  sel.innerHTML = '';
+  const baseOpt = document.createElement('option');
+  baseOpt.value = '';
+  baseOpt.textContent = '(Main career)';
+  sel.appendChild(baseOpt);
+
+  if (!userId) {
+    sel.disabled = true;
+    sel.value = '';
+    return;
+  }
+
+  const uc = await getOne('userCareer', userId);
+  const careerId = uc?.careerId || '';
+  if (!careerId) {
+    sel.disabled = true;
+    sel.value = '';
+    return;
+  }
+
+  const specs = await getSpecializationsForCareer(careerId);
+  specs.forEach(sp => {
+    const opt = document.createElement('option');
+    opt.value = sp.id;
+    opt.textContent = sp.title || '(Specialization)';
+    sel.appendChild(opt);
+  });
+
+  const keep = uc?.specializationId || '';
+  const valid = keep && specs.some(sp => sp.id === keep);
+  sel.value = valid ? keep : '';
+  sel.disabled = false;
+}
+
 async function renderPromptPickers() {
   const uSel = $('#promptUserSelect');
   const ucSel = $('#promptUserCareerSelect');
+  const usSel = $('#promptUserSpecializationSelect');
   const ccSel = $('#promptCurrentCareerSelect');
-  if (!uSel || !ucSel || !ccSel) return;
+  const csSel = $('#promptCurrentSpecializationSelect');
+  if (!uSel || !ucSel || !usSel || !ccSel || !csSel) return;
 
   // Users
   let users = await getAll('users');
@@ -3538,6 +4665,7 @@ async function renderPromptPickers() {
     ucSel.appendChild(opt);
     ucSel.value = '';
     ucSel.disabled = true;
+    await loadPromptUserSpecializationSelect();
   } else {
     ucSel.disabled = false;
     const opt0 = document.createElement('option');
@@ -3554,6 +4682,7 @@ async function renderPromptPickers() {
 
     const uc = await getOne('userCareer', state.currentUserId);
     ucSel.value = uc?.careerId || '';
+    await loadPromptUserSpecializationSelect();
   }
 
   // Current Career picker (global, shared with Setup Career dropdown)
@@ -3581,6 +4710,59 @@ async function renderPromptPickers() {
   state.currentCareerId = pickCareer || '';
   state.promptCareerId = state.currentCareerId || '';
   ccSel.value = state.currentCareerId || '';
+
+  await loadPromptCurrentSpecializationSelect();
+
+  // Handlers
+  uSel.onchange = async () => {
+    state.currentUserId = uSel.value || '';
+    try { localStorage.setItem('mivida_current_user_id', state.currentUserId || ''); } catch {}
+    await renderPromptPickers();
+    await renderPromptPage();
+  };
+  ucSel.onchange = async () => {
+    const userId = state.currentUserId || '';
+    if (!userId) return;
+    const before = await getOne('userCareer', userId);
+    const v = ucSel.value || '';
+    let nextSpecId = before?.specializationId || null;
+    if (before?.careerId) rememberUserCareerSpecialization(userId, before.careerId, before?.specializationId || '');
+    if (v) {
+      const specs = await getSpecializationsForCareer(v);
+      const rememberedSpecId = getRememberedUserCareerSpecialization(userId, v);
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = rememberedSpecId || null;
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = null;
+    } else {
+      nextSpecId = null;
+    }
+    const t = nowISO();
+    const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
+    await putOne('userCareer', after);
+    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPromptPickers();
+    await renderPromptPage();
+  };
+  usSel.onchange = async () => {
+    const userId = state.currentUserId || '';
+    if (!userId) return;
+    const before = await getOne('userCareer', userId);
+    const t = nowISO();
+    const after = {
+      userId,
+      careerId: (before?.careerId || ucSel.value || null),
+      specializationId: usSel.value || null,
+      updatedAt: t,
+      createdAt: before?.createdAt || t
+    };
+    await putOne('userCareer', after);
+    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPromptPickers();
+    await renderPromptPage();
+  };
+  ccSel.onchange = async () => { await setCurrentCareer(ccSel.value || ''); };
+  csSel.onchange = async () => { await setCurrentSpecialization(csSel.value || ''); };
 }
 
 async function renderPromptPage() {
@@ -3589,9 +4771,12 @@ async function renderPromptPage() {
   const userName = (user?.name || user?.title || (userId ? ('user ' + userId) : '(No user)'));
   const careersAll = await getAll('careers');
   const careerMap = new Map((careersAll || []).map(x => [x.id, x]));
+  const allSpecializations = await getAll('specializations');
+  const specializationMap = new Map((allSpecializations || []).map(x => [x.id, x]));
   let userCareerId = null;
+  let userSpecializationId = '';
   if (userId) {
-    try { const uc = await getOne('userCareer', userId); userCareerId = uc?.careerId || null; } catch {}
+    try { const uc = await getOne('userCareer', userId); userCareerId = uc?.careerId || null; userSpecializationId = uc?.specializationId || ''; } catch {}
   }
 
   let conns = await getAll('connections');
@@ -3602,25 +4787,9 @@ async function renderPromptPage() {
 
   $('#promptEmpty').style.display = (conns.length === 0) ? 'block' : 'none';
 
-// Precompute explicit output counts across all items (connection output depends on item -> connection linkage, not on connection pick-lists)
-let explicitOutCount = new Map();
-try {
-  const [pTemplates, cTemplates] = await Promise.all([
-    getAll('personalTemplates'),
-    getAll('careerTemplates')
-  ]);
-  ([...(pTemplates || []), ...(cTemplates || [])] || []).forEach(t => {
-    if (!t) return;
-    if (t.isOutput === false) return;
-    const oc = (t.outputConnectionId || '');
-    if (!oc) return;
-    explicitOutCount.set(oc, (explicitOutCount.get(oc) || 0) + 1);
-  });
-} catch(e) { /* ignore */ }
-
   for (const c of conns) {
     const info = await analyzeConnectionForCurrentUser(c, 'prompt');
-    const hasExplicitOutput = (explicitOutCount.get(c.id) || 0) > 0;
+    const hasExplicitOutput = !!info.hasExplicitOutput;
 
     const card = document.createElement('div');
     card.className = 'card';
@@ -3655,9 +4824,12 @@ try {
     if (needsCareer) {
       const src = (c.careerSource || 'user');
       const cid = (src === 'current') ? (state.currentCareerId || null) : (userCareerId || null);
+      const sid = (src === 'current') ? (state.currentSpecializationId || '') : (userSpecializationId || '');
       const cObj = cid ? careerMap.get(cid) : null;
+      const sObj = sid ? specializationMap.get(sid) : null;
       const cTitle = cid ? (cObj?.title || cObj?.name || cid) : '(not selected)';
-      tags.push(`career: ${cTitle}`);
+      const sTitle = sid ? (sObj?.title || sObj?.name || sid) : '';
+      tags.push(sTitle ? `career: ${cTitle} / ${sTitle}` : `career: ${cTitle}`);
     }
     if (tags.length) {
       const tagRow = document.createElement('div');
@@ -3746,7 +4918,17 @@ const btnCopy = btn('Copy', { mini:true, onClick: async () => {
           let outTpl = (pTemps || []).find(t => t && t.isOutput !== false && (t.outputConnectionId || '') === connId) || null;
           let outType = 'personal';
           if (!outTpl) {
-            outTpl = (cTemps || []).find(t => t && t.isOutput !== false && (t.outputConnectionId || '') === connId) || null;
+            const source = (c?.careerSource || 'user');
+            const effectiveSpecId = (source === 'current')
+              ? (state.currentSpecializationId || '')
+              : ((await getOne('userCareer', state.currentUserId))?.specializationId || '');
+            const overrideRows = effectiveSpecId ? await getByIndex('specializationContent', 'by_specializationId', effectiveSpecId) : [];
+            const overrideMap = new Map((overrideRows || []).map(r => [r.templateId, r]));
+            outTpl = (cTemps || []).find(t => {
+              if (!t) return false;
+              const effTpl = resolveEffectiveCareerTemplate(t, overrideMap.get(t.id));
+              return effTpl.isOutput !== false && (effTpl.outputConnectionId || '') === connId;
+            }) || null;
             if (outTpl) outType = 'career';
           }
 
@@ -3894,8 +5076,10 @@ async function exportSnapshotJson(options=null) {
   const personalContent = exportProfiles ? await safeGetAll('personalContent') : [];
 
   const careers = exportCareers ? await safeGetAll('careers') : [];
+  const specializations = exportCareers ? await safeGetAll('specializations') : [];
   const careerTemplates = (exportCareers || exportConnections) ? await safeGetAll('careerTemplates') : [];
   const careerContent = exportCareers ? await safeGetAll('careerContent') : [];
+  const specializationContent = exportCareers ? await safeGetAll('specializationContent') : [];
 
   const userCareer = exportUserCareer ? await safeGetAll('userCareer') : [];
   const connections = exportConnections ? await safeGetAll('connections') : [];
@@ -3908,9 +5092,13 @@ async function exportSnapshotJson(options=null) {
   // Apply filters (profiles/careers only)
   const usersOut = userFilter ? (users || []).filter(u => userFilter.has(u.id)) : users;
   const careersOut = careerFilter ? (careers || []).filter(c => careerFilter.has(c.id)) : careers;
+  const exportedCareerIds = new Set((careersOut || []).map(c => c.id));
+  const specializationsOut = exportCareers ? (specializations || []).filter(sp => exportedCareerIds.has(sp.baseCareerId)) : [];
+  const exportedSpecIds = new Set((specializationsOut || []).map(sp => sp.id));
 
   const personalContentOut = userFilter ? (personalContent || []).filter(r => userFilter.has(r.userId)) : personalContent;
   const careerContentOut = careerFilter ? (careerContent || []).filter(r => careerFilter.has(r.careerId)) : careerContent;
+  const specializationContentOut = exportCareers ? (specializationContent || []).filter(r => exportedSpecIds.has(r.specializationId)) : [];
 
   let userCareerOut = userCareer || [];
   if (userFilter) userCareerOut = userCareerOut.filter(r => userFilter.has(r.userId));
@@ -4045,9 +5233,10 @@ async function exportSnapshotJson(options=null) {
     uiSortOut = out;
   }
 
-  const exportVersionLocal = nowLocalStampFull();
+  const exportVersion = makeLocalVersionStamp();
+
   const snapshot = {
-    version: exportVersionLocal,
+    version: exportVersion,
     exportedAt: nowISO(),
 
     // Sections (always present as arrays for predictable import)
@@ -4056,8 +5245,10 @@ async function exportSnapshotJson(options=null) {
     personalContent: exportProfiles ? (personalContentOut || []) : [],
 
     careers: careersOut || [],
+    specializations: exportCareers ? (specializationsOut || []) : [],
     careerTemplates: careerTemplatesOutFinal || [],
     careerContent: exportCareers ? (careerContentOut || []) : [],
+    specializationContent: exportCareers ? (specializationContentOut || []) : [],
 
     promptItems: promptItemsOut || [],
     connections: exportConnections ? (connections || []) : [],
@@ -4079,7 +5270,7 @@ async function exportSnapshotJson(options=null) {
     // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
-      const uploadedAtLocal = exportVersionLocal;
+      const uploadedAtLocal = exportVersion;
       const cfg = GitHubSync.getConfig();
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
@@ -4087,20 +5278,6 @@ async function exportSnapshotJson(options=null) {
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
       toast(`Uploaded: ${up.filename}`);
-      // After a successful export, update the top version badge to this exported version.
-      try {
-        const baselineIso = new Date().toISOString();
-        localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
-        setLastOnlineImportInfo({
-          uploadedAtLocal: exportVersionLocal,
-          uploadedBy: (cfg.uploader || ''),
-          toolVersion: toolVersion,
-          sourceName: (up && up.filename) ? up.filename : '',
-          sourcePath: (up && up.path) ? up.path : '',
-          localBaselineIso: baselineIso
-        });
-      } catch {}
-
     } catch (err) {
       console.error(err);
       alert('Online export failed\n\n' + (err?.message || String(err)));
@@ -4113,20 +5290,6 @@ async function exportSnapshotJson(options=null) {
   const stamp = new Date().toISOString().replace(/[:.]/g,'-');
   const jsonText = JSON.stringify(snapshot, null, 2);
   downloadText(`mivida_snapshot_${stamp}.json`, jsonText, 'application/json;charset=utf-8');
-  // Keep the local UI version in sync with the exported snapshot version.
-  try {
-    const baselineIso = new Date().toISOString();
-    localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso);
-    setLastOnlineImportInfo({
-      uploadedAtLocal: exportVersionLocal,
-      uploadedBy: 'local',
-      toolVersion: '',
-      sourceName: `mivida_snapshot_${stamp}.json`,
-      sourcePath: '',
-      localBaselineIso: baselineIso
-    });
-  } catch {}
-
   toast('Snapshot exported');
   return snapshot;
 }
@@ -4616,8 +5779,8 @@ async function openImportWizardFromText(rawText) {
   const looksLikeSnapshot =
     s && typeof s === 'object' &&
     (Array.isArray(s.users) || Array.isArray(s.promptItems) || Array.isArray(s.connections) ||
-     Array.isArray(s.careers) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
-     Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks));
+     Array.isArray(s.careers) || Array.isArray(s.specializations) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
+     Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks) || Array.isArray(s.specializationContent));
 
   if (!looksLikeSnapshot) {
     toast('This JSON does not look like a MiVida snapshot. Import cancelled.');
@@ -4647,8 +5810,8 @@ async function wipeLocalAndImportAllFromText(rawText) {
   const looksLikeSnapshot =
     s && typeof s === 'object' &&
     (Array.isArray(s.users) || Array.isArray(s.promptItems) || Array.isArray(s.connections) ||
-     Array.isArray(s.careers) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
-     Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks));
+     Array.isArray(s.careers) || Array.isArray(s.specializations) || Array.isArray(s.personalTemplates) || Array.isArray(s.careerTemplates) ||
+     Array.isArray(s.personalItems) || Array.isArray(s.careerBlocks) || Array.isArray(s.specializationContent));
 
   if (!looksLikeSnapshot) {
     toast('This JSON does not look like a MiVida snapshot. Import cancelled.');
@@ -4661,6 +5824,7 @@ async function wipeLocalAndImportAllFromText(rawText) {
   const sel = {
     users: new Set((snap.users || []).map(x => x.id)),
     careers: new Set((snap.careers || []).map(x => x.id)),
+    specializations: new Set((snap.specializations || []).map(x => x.id)),
     promptItems: new Set((snap.promptItems || []).map(x => x.id)),
     connections: new Set((snap.connections || []).map(x => x.id)),
 
@@ -4761,12 +5925,14 @@ function normalizeSnapshotForImport(s) {
     exportedAt: s.exportedAt || null,
     users: Array.isArray(s.users) ? s.users : [],
     careers: Array.isArray(s.careers) ? s.careers : [],
+    specializations: Array.isArray(s.specializations) ? s.specializations : [],
     userCareer: Array.isArray(s.userCareer) ? s.userCareer : [],
     promptItems: Array.isArray(s.promptItems) ? s.promptItems : [],
     personalTemplates,
     personalContent,
     careerTemplates,
     careerContent,
+    specializationContent: Array.isArray(s.specializationContent) ? s.specializationContent : [],
     connections: Array.isArray(s.connections) ? s.connections : [],
     uiSort: (s.uiSort && typeof s.uiSort === 'object') ? s.uiSort : null,
   };
@@ -4781,6 +5947,7 @@ async function openImportWizard(snap) {
   const existing = {
     users: await getAll('users'),
     careers: await getAll('careers'),
+    specializations: await getAll('specializations'),
     promptItems: await getAll('promptItems'),
     personalTemplates: await getAll('personalTemplates'),
     careerTemplates: await getAll('careerTemplates'),
@@ -4790,6 +5957,7 @@ async function openImportWizard(snap) {
   const existTitles = {
     users: new Set(existing.users.map(u => normTitle(u.name))),
     careers: new Set(existing.careers.map(c => normTitle(c.title))),
+    specializations: new Set(existing.specializations.map(sp => `${sp.baseCareerId}::${normTitle(sp.title)}`)),
     promptItems: new Set(existing.promptItems.map(p => normTitle(p.title))),
     personalTemplates: new Map(existing.personalTemplates.map(t => [normTitle(t.title), t.id])),
     careerTemplates: new Map(existing.careerTemplates.map(t => [normTitle(t.title), t.id])),
@@ -4810,6 +5978,7 @@ async function openImportWizard(snap) {
   const sel = {
     users: new Set(),
     careers: new Set(),
+    specializations: new Set(),
     promptItems: new Set(),
     connections: new Set(),
 
@@ -5605,12 +6774,20 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   sel = sel || {};
   sel.users = sel.users || new Set();
   sel.careers = sel.careers || new Set();
+  sel.specializations = sel.specializations || new Set();
   sel.promptItems = sel.promptItems || new Set();
   sel.connections = sel.connections || new Set();
   sel.personalTemplates = sel.personalTemplates || new Set();
   sel.careerTemplates = sel.careerTemplates || new Set();
   sel.personalContentKeys = sel.personalContentKeys || new Set();
   sel.careerContentKeys = sel.careerContentKeys || new Set();
+
+  // Phase 1 specialization rule: when a base career is selected, include all of its specializations.
+  try {
+    for (const sp of (snap.specializations || [])) {
+      if (sel.careers && sel.careers.has(sp.baseCareerId)) sel.specializations.add(sp.id);
+    }
+  } catch {}
 
   // Ensure templates referenced by selected connections are included (so connections can be reconstructed)
   try {
@@ -5629,6 +6806,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const localUsers = await getAll('users');
   const localCareers = await getAll('careers');
   const localPrompts = await getAll('promptItems');
+  const localSpecializations = await getAll('specializations');
   const localPT = await getAll('personalTemplates');
   const localCT = await getAll('careerTemplates');
   const localConns = await getAll('connections');
@@ -5637,6 +6815,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
     users: new Map(localUsers.map(u => [normTitle(u.name), u])),
     careers: new Map(localCareers.map(c => [normTitle(c.title), c])),
     promptItems: new Map(localPrompts.map(p => [normTitle(p.title), p])),
+    specializations: new Map(localSpecializations.map(sp => [`${sp.baseCareerId}::${normTitle(sp.title)}`, sp])),
     personalTemplates: new Map(localPT.map(t => [normTitle(t.title), t])),
     careerTemplates: new Map(localCT.map(t => [normTitle(t.title), t])),
     connections: new Map(localConns.map(c => [normTitle(c.title), c]))
@@ -5647,6 +6826,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
     users: new Set(localUsers.map(u => normTitle(u.name))),
     careers: new Set(localCareers.map(c => normTitle(c.title))),
     promptItems: new Set(localPrompts.map(p => normTitle(p.title))),
+    specializations: new Set(localSpecializations.map(sp => `${sp.baseCareerId}::${normTitle(sp.title)}`)),
     personalTemplates: new Set(localPT.map(t => normTitle(t.title))),
     careerTemplates: new Set(localCT.map(t => normTitle(t.title))),
     connections: new Set(localConns.map(c => normTitle(c.title)))
@@ -5656,6 +6836,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const snapBy = {
     users: new Map((snap.users || []).map(u => [u.id, u])),
     careers: new Map((snap.careers || []).map(c => [c.id, c])),
+    promptItems: new Map((snap.promptItems || []).map(p => [p.id, p])),
     personalTemplates: new Map((snap.personalTemplates || []).map(t => [t.id, t])),
     careerTemplates: new Map((snap.careerTemplates || []).map(t => [t.id, t]))
   };
@@ -5664,6 +6845,7 @@ async function importSnapshotSelectionAddToLocal(snap, sel) {
   const idMap = {
     users: new Map(),
     careers: new Map(),
+    specializations: new Map(),
     promptItems: new Map(),
     personalTemplates: new Map(),
     careerTemplates: new Map(),
@@ -5786,44 +6968,83 @@ async function ensurePersonalTemplate(oldTplId) {
     return ex ? ex.id : null;
   }
 
-  // 1) Users (merge by name; avoid duplicates)
+  // 1) Users (allow duplicates by renaming when needed)
   for (const u of (snap.users || [])) {
     if (!sel.users || !sel.users.has(u.id)) continue;
-    const key = normTitle(u.name);
-    const existing = by.users.get(key);
-    if (existing) {
-      idMap.users.set(u.id, existing.id);
-      continue;
-    }
+
     const newId = uid();
     idMap.users.set(u.id, newId);
+
     const nameRaw = (u.name || '').trim() || 'Untitled';
     const finalName = titleSets.users.has(normTitle(nameRaw))
       ? makeImportedTitle(nameRaw, titleSets.users)
       : (titleSets.users.add(normTitle(nameRaw)), nameRaw);
+
     const row = { ...u, id: newId, name: finalName, createdAt: u.createdAt || now, updatedAt: u.updatedAt || u.createdAt || now };
     await putOne('users', row);
     by.users.set(normTitle(finalName), row);
   }
 
-  // 2) Careers (merge by title; avoid duplicates)
+  // 2) Careers (allow duplicates by renaming when needed)
   for (const c of (snap.careers || [])) {
     if (!sel.careers || !sel.careers.has(c.id)) continue;
-    const key = normTitle(c.title);
-    const existing = by.careers.get(key);
-    if (existing) {
-      idMap.careers.set(c.id, existing.id);
-      continue;
-    }
+
     const newId = uid();
     idMap.careers.set(c.id, newId);
+
     const titleRaw = (c.title || '').trim() || 'Untitled';
     const finalTitle = titleSets.careers.has(normTitle(titleRaw))
       ? makeImportedTitle(titleRaw, titleSets.careers)
       : (titleSets.careers.add(normTitle(titleRaw)), titleRaw);
+
     const row = { ...c, id: newId, title: finalTitle, createdAt: c.createdAt || now, updatedAt: c.updatedAt || c.createdAt || now };
     await putOne('careers', row);
     by.careers.set(normTitle(finalTitle), row);
+  }
+
+  // 2b) Specializations (scoped to imported careers; allow duplicates per base career by renaming)
+  for (const sp of (snap.specializations || [])) {
+    if (!sel.specializations || !sel.specializations.has(sp.id)) continue;
+    const mappedBaseCareerId = idMap.careers.get(sp.baseCareerId);
+    if (!mappedBaseCareerId) continue;
+    const key = `${mappedBaseCareerId}::${normTitle(sp.title)}`;
+    const existing = by.specializations.get(key);
+    if (existing) {
+      idMap.specializations.set(sp.id, existing.id);
+      continue;
+    }
+    const newId = uid();
+    idMap.specializations.set(sp.id, newId);
+    const titleRaw = (sp.title || '').trim() || 'Untitled';
+    let finalTitle = titleRaw;
+    if (titleSets.specializations.has(`${mappedBaseCareerId}::${normTitle(finalTitle)}`)) {
+      let i = 1;
+      finalTitle = `${titleRaw} (Imported)`;
+      while (titleSets.specializations.has(`${mappedBaseCareerId}::${normTitle(finalTitle)}`)) {
+        i += 1;
+        finalTitle = `${titleRaw} (Imported ${i})`;
+      }
+    }
+    titleSets.specializations.add(`${mappedBaseCareerId}::${normTitle(finalTitle)}`);
+    const row = { ...sp, id: newId, baseCareerId: mappedBaseCareerId, title: finalTitle, createdAt: sp.createdAt || now, updatedAt: sp.updatedAt || sp.createdAt || now };
+    await putOne('specializations', row);
+    by.specializations.set(`${mappedBaseCareerId}::${normTitle(finalTitle)}`, row);
+  }
+
+  // 2c) Specialization content overrides (only for imported specializations + mapped career templates)
+  for (const r of (snap.specializationContent || [])) {
+    const specNew = idMap.specializations.get(r.specializationId);
+    if (!specNew) continue;
+    const tplNew = await ensureCareerTemplate(r.templateId);
+    if (!tplNew) continue;
+    await putOne('specializationContent', {
+      ...r,
+      specializationId: specNew,
+      templateId: tplNew,
+      mode: r.mode || 'override',
+      createdAt: r.createdAt || now,
+      updatedAt: r.updatedAt || now
+    });
   }
 
   // 3) Prompt items (allow duplicates by renaming)
@@ -5901,7 +7122,8 @@ async function ensurePersonalTemplate(oldTplId) {
       const userNew = mapUserId(r.userId);
       const careerNew = mapCareerId(r.careerId);
       if (!userNew || !careerNew) continue;
-      await putOne('userCareer', { ...r, userId: userNew, careerId: careerNew });
+      const specNew = r.specializationId ? (idMap.specializations.get(r.specializationId) || null) : null;
+      await putOne('userCareer', { ...r, userId: userNew, careerId: careerNew, specializationId: specNew });
     }
   }
 
@@ -5989,16 +7211,26 @@ async function importSnapshotSelectionReplaceOverwrite(snap, sel) {
   const idMap = {
     users: new Map(),
     careers: new Map(),
+    specializations: new Map(),
     promptItems: new Map(),
     personalTemplates: new Map(),
     careerTemplates: new Map(),
     connections: new Map()
   };
 
+  // Phase 1 specialization rule: when a base career is selected, include all of its specializations.
+  sel.specializations = sel.specializations || new Set();
+  try {
+    for (const sp of (snap.specializations || [])) {
+      if (sel.careers && sel.careers.has(sp.baseCareerId)) sel.specializations.add(sp.id);
+    }
+  } catch {}
+
   // Local lookups by title/name (normalized)
   const localUsers = await getAll('users');
   const localCareers = await getAll('careers');
   const localPrompts = await getAll('promptItems');
+  const localSpecializations = await getAll('specializations');
   const localPT = await getAll('personalTemplates');
   const localCT = await getAll('careerTemplates');
   const localConns = await getAll('connections');
@@ -6007,6 +7239,7 @@ async function importSnapshotSelectionReplaceOverwrite(snap, sel) {
     users: new Map(localUsers.map(u => [normTitle(u.name), u])),
     careers: new Map(localCareers.map(c => [normTitle(c.title), c])),
     promptItems: new Map(localPrompts.map(p => [normTitle(p.title), p])),
+    specializations: new Map(localSpecializations.map(sp => [`${sp.baseCareerId}::${normTitle(sp.title)}`, sp])),
     personalTemplates: new Map(localPT.map(t => [normTitle(t.title), t])),
     careerTemplates: new Map(localCT.map(t => [normTitle(t.title), t])),
     connections: new Map(localConns.map(c => [normTitle(c.title), c])),
@@ -6054,6 +7287,35 @@ async function importSnapshotSelectionReplaceOverwrite(snap, sel) {
       await putOne('careers', { ...c, id, createdAt: c.createdAt || now, updatedAt: c.updatedAt || now });
       by.careers.set(key, { ...c, id });
     }
+  }
+
+  // 2b) Specializations (match by base career + title)
+  for (const sp of (snap.specializations || [])) {
+    if (sel.specializations && !sel.specializations.has(sp.id)) continue;
+    const mappedBaseCareerId = idMap.careers.get(sp.baseCareerId);
+    if (!mappedBaseCareerId) continue;
+    const key = `${mappedBaseCareerId}::${normTitle(sp.title)}`;
+    const local = by.specializations.get(key);
+    if (local) {
+      const id = local.id;
+      idMap.specializations.set(sp.id, id);
+      await putOne('specializations', { ...local, ...sp, id, baseCareerId: mappedBaseCareerId, title: sp.title, createdAt: keepCreated(local, sp), updatedAt: sp.updatedAt || now });
+    } else {
+      const id = await ensureUniqueId('specializations', sp.id);
+      idMap.specializations.set(sp.id, id);
+      const row = { ...sp, id, baseCareerId: mappedBaseCareerId, createdAt: sp.createdAt || now, updatedAt: sp.updatedAt || now };
+      await putOne('specializations', row);
+      by.specializations.set(key, row);
+    }
+  }
+
+  // 2c) Specialization content overrides
+  for (const r of (snap.specializationContent || [])) {
+    const specNew = idMap.specializations.get(r.specializationId);
+    if (!specNew) continue;
+    const tplNew = idMap.careerTemplates.get(r.templateId);
+    if (!tplNew) continue;
+    await putOne('specializationContent', { ...r, specializationId: specNew, templateId: tplNew, mode: r.mode || 'override', createdAt: r.createdAt || now, updatedAt: r.updatedAt || now });
   }
 
   // 3) Prompt items (match by title)
@@ -6139,7 +7401,8 @@ async function importSnapshotSelectionReplaceOverwrite(snap, sel) {
       const userNew = idMap.users.get(r.userId);
       const careerNew = idMap.careers.get(r.careerId);
       if (!userNew || !careerNew) continue;
-      await putOne('userCareer', { ...r, userId: userNew, careerId: careerNew, updatedAt: r.updatedAt || now });
+      const specNew = r.specializationId ? (idMap.specializations.get(r.specializationId) || null) : null;
+      await putOne('userCareer', { ...r, userId: userNew, careerId: careerNew, specializationId: specNew, updatedAt: r.updatedAt || now });
     }
   }
 
@@ -6317,7 +7580,7 @@ async function clearAllLocalData() {
   // NOTE: This app no longer uses a global `db` handle.
   // Always open the DB via openDB() so import flows never fail with "db is not defined".
   const db = await openDB();
-  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','userCareer','connections','changeLogs'];
+  const allStores = ['users','promptItems','personalItems','personalTemplates','personalContent','careers','careerBlocks','careerTemplates','careerContent','specializations','specializationContent','userCareer','connections','changeLogs'];
   const stores = allStores.filter(n => db.objectStoreNames.contains(n));
   if (!stores.length) return;
   const tx = db.transaction(stores, 'readwrite');
@@ -6356,6 +7619,7 @@ async function refreshAll() {
   await loadUsersIntoSelect();
   await loadCareerFilterSelect();
   await renderPersonalCareerPick();
+  await renderPersonalSpecializationPick();
 
   // 2) Setup page sections
   await renderPrompts();
@@ -6385,13 +7649,23 @@ function wireEvents() {
 
   $('#btnAddUser').addEventListener('click', addUserFlow);
   $('#btnRenameUser').addEventListener('click', renameUserFlow);
-  $('#btnDeleteUser').addEventListener('click', deleteUserFlow);
+    $('#btnDuplicateUser').addEventListener('click', duplicateUserFlow);
+$('#btnDeleteUser').addEventListener('click', deleteUserFlow);
 
 
   // Careers (top filter + management)
   $('#btnAddCareerTop').addEventListener('click', addCareerFlow);
   $('#btnRenameCareer').addEventListener('click', renameCareerFlow);
-  $('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
+    $('#btnDuplicateCareer').addEventListener('click', duplicateCareerFlow);
+$('#btnDeleteCareer').addEventListener('click', deleteCareerFlow);
+  const btnManageSpecs = $('#btnManageSpecializations');
+  if (btnManageSpecs) btnManageSpecs.addEventListener('click', openManageSpecializationsModal);
+  const spSel = $('#specializationFilter');
+  if (spSel) spSel.addEventListener('change', async () => { await setCurrentSpecialization(spSel.value || ''); });
+  const bAddSp = $('#btnAddSpecialization'); if (bAddSp) bAddSp.addEventListener('click', addSpecializationFlow);
+  const bRenSp = $('#btnRenameSpecialization'); if (bRenSp) bRenSp.addEventListener('click', renameSpecializationFlow);
+  const bDelSp = $('#btnDeleteSpecialization'); if (bDelSp) bDelSp.addEventListener('click', deleteSpecializationFlow);
+
 
   $('#btnAddPrompt').addEventListener('click', () => openEditItemModal({
     title: 'Edit · Prompt Item',
@@ -6437,21 +7711,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
   const f = fileInput.files && fileInput.files[0];
   if (!f) return;
   try {
-    const text = await readFileUtf8(f);
-    // Capture snapshot metadata so the version badge can update after a successful import.
-    try {
-      let s = JSON.parse(text);
-      if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
-      pendingOnlineImportMeta = {
-        uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
-        uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
-        toolVersion: String(s?.toolVersion || '').trim(),
-        sourceName: String(f.name || '').trim(),
-        sourcePath: ''
-      };
-    } catch {
-      pendingOnlineImportMeta = null;
-    }
+    const text = await f.text();
     await openImportWizardFromText(text);
   } catch (err) {
     console.error(err);
@@ -6479,19 +7739,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       const ok = confirm('This will delete all local data and replace it with the selected JSON snapshot. Continue?');
       if (!ok) { wipeInput.value = ''; return; }
       try {
-        const text = await readFileUtf8(f);
-        // Capture snapshot metadata so the version badge can update after a successful import.
-        try {
-          let s = JSON.parse(text);
-          if (s && typeof s === 'object' && (s.snapshot || s.data)) s = s.snapshot || s.data;
-          pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s?.version || s?.uploadedAtLocal || parseLocalStampFromFilename(f.name) || '').trim(),
-            uploadedBy: String(s?.uploadedBy || parseUploaderFromFilename(f.name) || 'local').trim(),
-            toolVersion: String(s?.toolVersion || '').trim(),
-            sourceName: String(f.name || '').trim(),
-            sourcePath: ''
-          };
-        } catch { pendingOnlineImportMeta = null; }
+        const text = await f.text();
+        pendingOnlineImportMeta = null;
         await wipeLocalAndImportAllFromText(text);
       } catch (err) {
         console.error(err);
@@ -6531,6 +7780,7 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     if (setupUserSel) setupUserSel.value = state.currentUserId || '';
 
     await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
     await renderPersonal();
     await renderPromptPickers();
     await renderPromptPage();
@@ -6543,15 +7793,46 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
     const v = promptUserCareerSel.value || '';
     const t = nowISO();
     const before = await getOne('userCareer', userId);
-    const after = { userId, careerId: v || null, updatedAt: t, createdAt: before?.createdAt || t };
+    let nextSpecId = before?.specializationId || null;
+    if (before?.careerId) rememberUserCareerSpecialization(userId, before.careerId, before?.specializationId || '');
+    if (v) {
+      const specs = await getSpecializationsForCareer(v);
+      const rememberedSpecId = getRememberedUserCareerSpecialization(userId, v);
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = rememberedSpecId || null;
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = null;
+    } else {
+      nextSpecId = null;
+    }
+    const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
     await putOne('userCareer', after);
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
 
-    // Sync Setup tab User Career selector
     const setupUcSel = $('#personalCareerPick');
     if (setupUcSel) setupUcSel.value = v || '';
 
     await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
+    await renderPromptPickers();
+    await renderPromptPage();
+  });
+
+  const promptUserSpecSel = $('#promptUserSpecializationSelect');
+  if (promptUserSpecSel) promptUserSpecSel.addEventListener('change', async () => {
+    const userId = state.currentUserId || '';
+    if (!userId) return;
+    const before = await getOne('userCareer', userId);
+    const t = nowISO();
+    const after = {
+      userId,
+      careerId: (before?.careerId || $('#promptUserCareerSelect')?.value || null),
+      specializationId: promptUserSpecSel.value || null,
+      updatedAt: t,
+      createdAt: before?.createdAt || t
+    };
+    await putOne('userCareer', after);
+    rememberUserCareerSpecialization(userId, after.careerId || '', after.specializationId || '');
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPersonalSpecializationPick();
     await renderPromptPickers();
     await renderPromptPage();
   });
@@ -6801,84 +8082,31 @@ const GitHubSync = (() => {
     return files[0];
   };
 
-  const stripBom = (s) => (typeof s === 'string' && s.length && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
-
-// Decode GitHub contents API base64 into a proper UTF-8 string.
-const fromBase64Utf8 = (b64) => {
-  const bin = atob(String(b64 || '').replace(/\s/g, ''));
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return stripBom(new TextDecoder('utf-8').decode(bytes));
-};
-
-// Read a local file as UTF-8 (handles BOM consistently).
-const readFileUtf8 = async (file) => {
-  const buf = await file.arrayBuffer();
-  return stripBom(new TextDecoder('utf-8').decode(buf));
-};
-
-// Fetch GitHub content as raw bytes and decode as UTF-8. Works when contents API returns encoding 'none' or omits content.
-const fetchGitHubRawUtf8 = async (url, token) => {
-  const doFetch = async (useTokenPrefix) => {
-    const h = authHeaders(token, useTokenPrefix);
-    h['Accept'] = 'application/vnd.github.raw';
-    return fetch(url, { headers: h });
+  const stripBom = (s) => (s && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
+  const decodeBase64Utf8 = (b64) => {
+    const bin = atob(String(b64 || '').replace(/\s/g,''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return stripBom(new TextDecoder('utf-8').decode(bytes));
   };
-  let r = await doFetch(false);
-  if (r.status === 401) r = await doFetch(true);
-  if (!r.ok) {
-    const t = await r.text().catch(()=> '');
-    throw new Error(`Raw download failed (${r.status}). ${t || ''}`.trim());
-  }
-  const buf = await r.arrayBuffer();
-  return stripBom(new TextDecoder('utf-8').decode(buf));
-};
-
-const downloadFileText = async (path) => {
-  const c = getConfig();
-  const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
-  const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
-
-  // First try JSON metadata (default Accept header).
-  const r = await ghFetch(url, c.token);
-  if (!r.ok) {
-    const t = await r.text().catch(()=> '');
-    throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
-  }
-
-  const data = await r.json();
-
-  // If it's a directory listing, it won't have content.
-  if (Array.isArray(data)) {
-    try {
-      return await fetchGitHubRawUtf8(url, c.token);
-    } catch (e) {
-      throw new Error('Download failed: path is a directory (not a file): ' + path);
+  const downloadFileText = async (path) => {
+    const c = getConfig();
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-  }
-
-  const enc = data && data.encoding ? String(data.encoding) : '';
-  const content = data && data.content ? String(data.content) : '';
-
-  if (enc === 'base64' && content) {
-    return fromBase64Utf8(content);
-  }
-
-  // Some GitHub responses (large files / raw mode) can return encoding 'none' and omit content.
-  // In that case, fetch the raw bytes and decode as UTF-8.
-  try {
-    return await fetchGitHubRawUtf8(url, c.token);
-  } catch (e) {
-    // As a last resort, if API provided a download_url, try it with auth (may still work for private repos).
-    if (data && data.download_url) {
-      return await fetchGitHubRawUtf8(String(data.download_url), c.token);
+    const data = await r.json();
+    const content = data && data.content ? String(data.content) : '';
+    const enc = data && data.encoding ? String(data.encoding) : 'base64';
+    if (enc !== 'base64') {
+      throw new Error('Unsupported file encoding: ' + enc);
     }
-    const shownEnc = enc || 'none';
-    throw new Error('Unsupported file encoding: ' + shownEnc);
-  }
-};
-
-const toBase64Utf8 = (str) => {
+    return decodeBase64Utf8(content);
+  };
+  const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
     const bytes = new TextEncoder().encode(String(str || ''));
     let bin = '';
@@ -6918,7 +8146,7 @@ const toBase64Utf8 = (str) => {
     // For PUT we need fetch with method and body.
     const doPut = async (useTokenPrefix=false) => fetch(url, {
       method: 'PUT',
-      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json;charset=utf-8' },
+      headers: { ...authHeaders(c.token, useTokenPrefix), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     let pr = await doPut(false);
@@ -6987,7 +8215,7 @@ async function githubImportFlow({ wipe }){
 
         if (looksLikeSnapshot) {
           pendingOnlineImportMeta = {
-            uploadedAtLocal: String(s.version || s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
+            uploadedAtLocal: String(s.uploadedAtLocal || parseLocalStampFromFilename(file.name) || '').trim(),
             uploadedBy: String(s.uploadedBy || parseUploaderFromFilename(file.name) || '').trim(),
             toolVersion: String(s.toolVersion || '').trim(),
             sourceName: String(file.name || '').trim(),
@@ -7172,19 +8400,11 @@ function isEditedSinceImport(localIso, importedAtIso){
 
 function parseLocalStampFromFilename(name){
   const n = String(name || '');
-  // Primary pattern: YYYYMMDD_HHMMSS_mmm
-  let m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
-  if (m){
-    const [,Y,Mo,D,HH,MM,SS,MS] = m;
-    return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
-  }
-  // Fallback: accept other snapshot filename variants if available.
-  try {
-    const meta = (typeof GitHubSync !== 'undefined' && GitHubSync && typeof GitHubSync.parseFilenameMeta === 'function')
-      ? GitHubSync.parseFilenameMeta(n) : null;
-    if (meta && meta.datetime) return meta.datetime;
-  } catch {}
-  return '';
+  // Expected local stamp: YYYYMMDD_HHMMSS_mmm
+  const m = n.match(/(20\d{2})([01]\d)([0-3]\d)_([0-2]\d)([0-5]\d)([0-5]\d)_([0-9]{3})/);
+  if (!m) return '';
+  const [,Y,Mo,D,HH,MM,SS,MS] = m;
+  return `${Y}-${Mo}-${D} ${HH}:${MM}:${SS}.${MS}`;
 }
 function parseUploaderFromFilename(name){
   const base = String(name || '').replace(/\.json$/i,'');
@@ -7244,7 +8464,7 @@ function applySyncInfoUI(){
     return;
   }
 
-  const dtRaw = (info.uploadedAtLocal || info.version || info.uploadedAt || info.importedAtLocal || '') || '';
+  const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
   // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
