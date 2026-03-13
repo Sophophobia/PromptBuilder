@@ -7943,6 +7943,13 @@ const GitHubSync = (() => {
     return files[0];
   };
 
+  const stripBom = (s) => (s && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s;
+  const decodeBase64Utf8 = (b64) => {
+    const bin = atob(String(b64 || '').replace(/\s/g,''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return stripBom(new TextDecoder('utf-8').decode(bytes));
+  };
   const downloadFileText = async (path) => {
     const c = getConfig();
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
@@ -7958,8 +7965,7 @@ const GitHubSync = (() => {
     if (enc !== 'base64') {
       throw new Error('Unsupported file encoding: ' + enc);
     }
-    const raw = atob(content.replace(/\s/g,''));
-    return raw;
+    return decodeBase64Utf8(content);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
