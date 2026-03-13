@@ -3044,7 +3044,7 @@ async function renderPersonal() {
 
   templates = applyUiOrder(templates, 'personalTemplates', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
   conns = applyUiOrder(conns || [], 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
-  const assignments = specId ? await getEffectiveCareerOutputAssignments(careerId, specId) : await getOutputAssignments();
+  const assignments = await getOutputAssignments();
   const contentMap = new Map((contents || []).map(c => [c.templateId, c]));
   $('#hintPersonal').style.display = templates.length ? 'none' : 'block';
 
