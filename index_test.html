@@ -8041,32 +8041,75 @@ const GitHubSync = (() => {
     const c = getConfig();
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
-    const r = await ghFetch(url, c.token);
-    if (!r.ok) {
-      const t = await r.text().catch(()=> '');
-      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
-    }
-    const data = await r.json();
-    const content = data && data.content ? String(data.content) : '';
-    const enc = data && data.encoding ? String(data.encoding) : 'base64';
-    if (enc === 'base64') {
-      return decodeBase64Utf8(content);
-    }
-    if ((enc === 'none' || !content) && data && data.download_url) {
-      let rawResp = await fetch(String(data.download_url));
+
+    const fetchRawFromContentsApi = async () => {
+      const rawHeaders = (useTokenPrefix=false) => ({
+        ...authHeaders(c.token, useTokenPrefix),
+        'Accept': 'application/vnd.github.raw+json'
+      });
+      let rr = await fetch(url, { headers: rawHeaders(false) });
+      if (rr.status === 401) rr = await fetch(url, { headers: rawHeaders(true) });
+      if (!rr.ok) {
+        const t = await rr.text().catch(()=> '');
+        throw new Error(`Raw download failed (${rr.status}). ${t || ''}`.trim());
+      }
+      return stripBom(await rr.text());
+    };
+
+    const fetchRawFromDownloadUrl = async (downloadUrl) => {
+      if (!downloadUrl) return '';
+      let rawResp = await fetch(String(downloadUrl));
       if ((!rawResp.ok || rawResp.status === 0) && c.token) {
-        rawResp = await fetch(String(data.download_url), {
+        rawResp = await fetch(String(downloadUrl), {
           headers: {
             'Authorization': `Bearer ${c.token}`,
-            'Accept': 'application/vnd.github.raw'
+            'Accept': 'application/vnd.github.raw+json'
           }
         });
+        if (rawResp.status === 401) {
+          rawResp = await fetch(String(downloadUrl), {
+            headers: {
+              'Authorization': `token ${c.token}`,
+              'Accept': 'application/vnd.github.raw+json'
+            }
+          });
+        }
       }
       if (!rawResp.ok) {
         const t = await rawResp.text().catch(()=> '');
         throw new Error(`Raw download failed (${rawResp.status}). ${t || ''}`.trim());
       }
       return stripBom(await rawResp.text());
+    };
+
+    const r = await ghFetch(url, c.token);
+    if (!r.ok) {
+      const t = await r.text().catch(()=> '');
+      throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
+    }
+
+    let data = null;
+    try {
+      data = await r.json();
+    } catch {
+      const rawText = await fetchRawFromContentsApi();
+      if (rawText) return rawText;
+      throw new Error('GitHub import failed. Response was not valid JSON.');
+    }
+
+    const content = data && data.content ? String(data.content) : '';
+    const enc = data && data.encoding ? String(data.encoding).toLowerCase() : 'base64';
+    if (enc === 'base64') {
+      return decodeBase64Utf8(content);
+    }
+    if (enc === 'none' || !content) {
+      try {
+        const rawText = await fetchRawFromContentsApi();
+        if (rawText) return rawText;
+      } catch {}
+      const rawFromDownloadUrl = await fetchRawFromDownloadUrl(data && data.download_url);
+      if (rawFromDownloadUrl) return rawFromDownloadUrl;
+      throw new Error('Unsupported file encoding: none');
     }
     throw new Error('Unsupported file encoding: ' + enc);
   };

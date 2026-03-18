@@ -4717,6 +4717,13 @@ async function renderPromptPickers() {
   uSel.onchange = async () => {
     state.currentUserId = uSel.value || '';
     try { localStorage.setItem('mivida_current_user_id', state.currentUserId || ''); } catch {}
+
+    const setupUserSel = $('#userSelect');
+    if (setupUserSel) setupUserSel.value = state.currentUserId || '';
+
+    await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
+    await renderPersonal();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4738,8 +4745,14 @@ async function renderPromptPickers() {
     const t = nowISO();
     const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
     await putOne('userCareer', after);
-    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
+    rememberUserCareerSpecialization(userId, v || '', after.specializationId || '');
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+
+    const setupUcSel = $('#personalCareerPick');
+    if (setupUcSel) setupUcSel.value = v || '';
+
+    await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4756,8 +4769,9 @@ async function renderPromptPickers() {
       createdAt: before?.createdAt || t
     };
     await putOne('userCareer', after);
-    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
+    rememberUserCareerSpecialization(userId, after.careerId || '', after.specializationId || '');
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPersonalSpecializationPick();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4765,7 +4779,10 @@ async function renderPromptPickers() {
   csSel.onchange = async () => { await setCurrentSpecialization(csSel.value || ''); };
 }
 
+let promptPageRenderToken = 0;
+
 async function renderPromptPage() {
+  const renderToken = ++promptPageRenderToken;
   const userId = state.currentUserId;
   const user = userId ? await getOne('users', userId) : null;
   const userName = (user?.name || user?.title || (userId ? ('user ' + userId) : '(No user)'));
@@ -4783,12 +4800,15 @@ async function renderPromptPage() {
   conns = applyUiOrder(conns, 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
 
   const host = $('#promptConnections');
+  if (!host) return;
+  if (renderToken !== promptPageRenderToken) return;
   host.innerHTML = '';
 
   $('#promptEmpty').style.display = (conns.length === 0) ? 'block' : 'none';
 
   for (const c of conns) {
     const info = await analyzeConnectionForCurrentUser(c, 'prompt');
+    if (renderToken !== promptPageRenderToken) return;
     const hasExplicitOutput = !!info.hasExplicitOutput;
 
     const card = document.createElement('div');
@@ -5008,8 +5028,9 @@ const btnCopy = btn('Copy', { mini:true, onClick: async () => {
     header.appendChild(right);
 
     card.appendChild(header);
+    if (renderToken !== promptPageRenderToken) return;
     host.appendChild(card);
-}
+  }
 }
 
 
@@ -7766,81 +7787,8 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (b.textContent === 'Collapse') b.textContent = 'Expand';
     });
   });
-  // Prompt page: Current User / User Career / Current Career pickers
-  const promptUserSel = $('#promptUserSelect');
-  const promptUserCareerSel = $('#promptUserCareerSelect');
-  const promptCurrentCareerSel = $('#promptCurrentCareerSelect');
-
-  if (promptUserSel) promptUserSel.addEventListener('change', async () => {
-    state.currentUserId = promptUserSel.value || '';
-    try { localStorage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
-
-    // Sync Setup tab selector (selection only)
-    const setupUserSel = $('#userSelect');
-    if (setupUserSel) setupUserSel.value = state.currentUserId || '';
-
-    await renderPersonalCareerPick();
-    await renderPersonalSpecializationPick();
-    await renderPersonal();
-    await renderPromptPickers();
-    await renderPromptPage();
-  });
-
-  if (promptUserCareerSel) promptUserCareerSel.addEventListener('change', async () => {
-    const userId = state.currentUserId || '';
-    if (!userId) return;
-
-    const v = promptUserCareerSel.value || '';
-    const t = nowISO();
-    const before = await getOne('userCareer', userId);
-    let nextSpecId = before?.specializationId || null;
-    if (before?.careerId) rememberUserCareerSpecialization(userId, before.careerId, before?.specializationId || '');
-    if (v) {
-      const specs = await getSpecializationsForCareer(v);
-      const rememberedSpecId = getRememberedUserCareerSpecialization(userId, v);
-      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = rememberedSpecId || null;
-      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = null;
-    } else {
-      nextSpecId = null;
-    }
-    const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
-    await putOne('userCareer', after);
-    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-
-    const setupUcSel = $('#personalCareerPick');
-    if (setupUcSel) setupUcSel.value = v || '';
-
-    await renderPersonalCareerPick();
-    await renderPersonalSpecializationPick();
-    await renderPromptPickers();
-    await renderPromptPage();
-  });
-
-  const promptUserSpecSel = $('#promptUserSpecializationSelect');
-  if (promptUserSpecSel) promptUserSpecSel.addEventListener('change', async () => {
-    const userId = state.currentUserId || '';
-    if (!userId) return;
-    const before = await getOne('userCareer', userId);
-    const t = nowISO();
-    const after = {
-      userId,
-      careerId: (before?.careerId || $('#promptUserCareerSelect')?.value || null),
-      specializationId: promptUserSpecSel.value || null,
-      updatedAt: t,
-      createdAt: before?.createdAt || t
-    };
-    await putOne('userCareer', after);
-    rememberUserCareerSpecialization(userId, after.careerId || '', after.specializationId || '');
-    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-    await renderPersonalSpecializationPick();
-    await renderPromptPickers();
-    await renderPromptPage();
-  });
-
-  if (promptCurrentCareerSel) promptCurrentCareerSel.addEventListener('change', async () => {
-    await setCurrentCareer(promptCurrentCareerSel.value || '');
-  });
-
+  // Prompt page picker handlers are assigned inside renderPromptPickers()
+  // so they stay single-bound after each repopulation.
 
   // Theme toggle (Dark/Light)
   const btnTheme = $('#btnToggleTheme');
@@ -8101,10 +8049,26 @@ const GitHubSync = (() => {
     const data = await r.json();
     const content = data && data.content ? String(data.content) : '';
     const enc = data && data.encoding ? String(data.encoding) : 'base64';
-    if (enc !== 'base64') {
-      throw new Error('Unsupported file encoding: ' + enc);
+    if (enc === 'base64') {
+      return decodeBase64Utf8(content);
     }
-    return decodeBase64Utf8(content);
+    if ((enc === 'none' || !content) && data && data.download_url) {
+      let rawResp = await fetch(String(data.download_url));
+      if ((!rawResp.ok || rawResp.status === 0) && c.token) {
+        rawResp = await fetch(String(data.download_url), {
+          headers: {
+            'Authorization': `Bearer ${c.token}`,
+            'Accept': 'application/vnd.github.raw'
+          }
+        });
+      }
+      if (!rawResp.ok) {
+        const t = await rawResp.text().catch(()=> '');
+        throw new Error(`Raw download failed (${rawResp.status}). ${t || ''}`.trim());
+      }
+      return stripBom(await rawResp.text());
+    }
+    throw new Error('Unsupported file encoding: ' + enc);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
