@@ -168,6 +168,17 @@
       white-space:nowrap;
       opacity:.95;
     }
+    .syncStateTag{
+      font-size:11px;
+      line-height:1.2;
+      color: var(--muted);
+      white-space:nowrap;
+      opacity:.95;
+    }
+    .syncStateTag[data-state="synced"]{ color:#22c55e; }
+    .syncStateTag[data-state="unsynced"]{ color:var(--warn); }
+    .syncStateTag[data-state="syncing"]{ color:#60a5fa; }
+    .syncStateTag[data-state="error"]{ color:#f87171; }
 
 .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -754,6 +765,7 @@
               <span class="syncInfoLabel">JSON</span>
               <span class="syncInfoValue" id="syncVersionValue">—</span>
               <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
+              <span class="syncStateTag" id="syncStateTag" data-state="">Not synced yet</span>
             </div>
           </div>
         </div>
@@ -1347,7 +1359,7 @@ const DB_NAME = 'mivida_prompt_builder_offline';
 // IMPORTANT: DB_VERSION must be monotonically increasing.
 // Some users already have v4 in their browser; keeping this at 3 will cause:
 // "The requested version (3) is less than the existing version (4)".
-const DB_VERSION = 10;
+const DB_VERSION = 9;
 
 let dbPromise = null;
 
@@ -1479,6 +1491,20 @@ function openDB() {
           cc.createIndex('by_careerId_updatedAt', ['careerId', 'updatedAt'], { unique: false });
         }
 
+        // v9: specialization data structure (base career + overrides)
+        if (!db.objectStoreNames.contains('specializations')) {
+          const sp = db.createObjectStore('specializations', { keyPath: 'id' });
+          sp.createIndex('by_baseCareerId', 'baseCareerId', { unique: false });
+          sp.createIndex('by_title', 'title', { unique: false });
+          sp.createIndex('by_baseCareerId_updatedAt', ['baseCareerId', 'updatedAt'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains('specializationContent')) {
+          const sc2 = db.createObjectStore('specializationContent', { keyPath: ['specializationId', 'templateId'] });
+          sc2.createIndex('by_specializationId', 'specializationId', { unique: false });
+          sc2.createIndex('by_templateId', 'templateId', { unique: false });
+          sc2.createIndex('by_specializationId_updatedAt', ['specializationId', 'updatedAt'], { unique: false });
+        }
+
         // Migration: personalItems (per-user) -> personalTemplates (global) + personalContent (per-user)
         try {
           if (db.objectStoreNames.contains('personalItems')) {
@@ -1598,21 +1624,6 @@ function openDB() {
         } catch (err) { /* best effort */ }
       }
 
-      // v10: ensure specialization stores exist for databases that were already on v3-v9
-      // before specialization support was added.
-      if (!db.objectStoreNames.contains('specializations')) {
-        const sp = db.createObjectStore('specializations', { keyPath: 'id' });
-        sp.createIndex('by_baseCareerId', 'baseCareerId', { unique: false });
-        sp.createIndex('by_title', 'title', { unique: false });
-        sp.createIndex('by_baseCareerId_updatedAt', ['baseCareerId', 'updatedAt'], { unique: false });
-      }
-      if (!db.objectStoreNames.contains('specializationContent')) {
-        const sc2 = db.createObjectStore('specializationContent', { keyPath: ['specializationId', 'templateId'] });
-        sc2.createIndex('by_specializationId', 'specializationId', { unique: false });
-        sc2.createIndex('by_templateId', 'templateId', { unique: false });
-        sc2.createIndex('by_specializationId_updatedAt', ['specializationId', 'updatedAt'], { unique: false });
-      }
-
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -1635,16 +1646,8 @@ async function withStore(storeName, mode, fn) {
     tx.onabort = () => reject(tx.error);
   });
 }
-function inferFieldFromIndexName(indexName) {
-  if (!indexName || typeof indexName !== 'string') return '';
-  if (!indexName.startsWith('by_')) return '';
-  const raw = indexName.slice(3);
-  return raw.replace(/_updatedAt$/, '');
-}
-
 async function getAll(storeName) {
   const db = await openDB();
-  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1655,7 +1658,6 @@ async function getAll(storeName) {
 }
 async function getOne(storeName, key) {
   const db = await openDB();
-  if (!db.objectStoreNames.contains(storeName)) return null;
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
@@ -1781,23 +1783,9 @@ async function deleteOne(storeName, key) { return withStore(storeName, 'readwrit
 
 async function getByIndex(storeName, indexName, query) {
   const db = await openDB();
-  if (!db.objectStoreNames.contains(storeName)) return [];
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
-    if (!store.indexNames.contains(indexName)) {
-      const fallbackField = inferFieldFromIndexName(indexName);
-      const reqAll = store.getAll();
-      reqAll.onsuccess = () => {
-        let rows = reqAll.result || [];
-        if (fallbackField && !fallbackField.includes('_')) {
-          rows = rows.filter(r => (r && r[fallbackField]) === query);
-        }
-        resolve(rows);
-      };
-      reqAll.onerror = () => reject(reqAll.error);
-      return;
-    }
     const idx = store.index(indexName);
     const req = idx.getAll(query);
     req.onsuccess = () => resolve(req.result || []);
@@ -4717,13 +4705,6 @@ async function renderPromptPickers() {
   uSel.onchange = async () => {
     state.currentUserId = uSel.value || '';
     try { localStorage.setItem('mivida_current_user_id', state.currentUserId || ''); } catch {}
-
-    const setupUserSel = $('#userSelect');
-    if (setupUserSel) setupUserSel.value = state.currentUserId || '';
-
-    await renderPersonalCareerPick();
-    await renderPersonalSpecializationPick();
-    await renderPersonal();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4745,14 +4726,8 @@ async function renderPromptPickers() {
     const t = nowISO();
     const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
     await putOne('userCareer', after);
-    rememberUserCareerSpecialization(userId, v || '', after.specializationId || '');
+    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-
-    const setupUcSel = $('#personalCareerPick');
-    if (setupUcSel) setupUcSel.value = v || '';
-
-    await renderPersonalCareerPick();
-    await renderPersonalSpecializationPick();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4769,9 +4744,8 @@ async function renderPromptPickers() {
       createdAt: before?.createdAt || t
     };
     await putOne('userCareer', after);
-    rememberUserCareerSpecialization(userId, after.careerId || '', after.specializationId || '');
+    rememberUserCareerSpecialization(userId, careerId, after.specializationId || '');
     await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
-    await renderPersonalSpecializationPick();
     await renderPromptPickers();
     await renderPromptPage();
   };
@@ -4779,10 +4753,7 @@ async function renderPromptPickers() {
   csSel.onchange = async () => { await setCurrentSpecialization(csSel.value || ''); };
 }
 
-let promptPageRenderToken = 0;
-
 async function renderPromptPage() {
-  const renderToken = ++promptPageRenderToken;
   const userId = state.currentUserId;
   const user = userId ? await getOne('users', userId) : null;
   const userName = (user?.name || user?.title || (userId ? ('user ' + userId) : '(No user)'));
@@ -4800,15 +4771,12 @@ async function renderPromptPage() {
   conns = applyUiOrder(conns, 'connections', (x)=>x.id, (a,b) => (a.title || '').localeCompare(b.title || ''));
 
   const host = $('#promptConnections');
-  if (!host) return;
-  if (renderToken !== promptPageRenderToken) return;
   host.innerHTML = '';
 
   $('#promptEmpty').style.display = (conns.length === 0) ? 'block' : 'none';
 
   for (const c of conns) {
     const info = await analyzeConnectionForCurrentUser(c, 'prompt');
-    if (renderToken !== promptPageRenderToken) return;
     const hasExplicitOutput = !!info.hasExplicitOutput;
 
     const card = document.createElement('div');
@@ -5028,9 +4996,8 @@ const btnCopy = btn('Copy', { mini:true, onClick: async () => {
     header.appendChild(right);
 
     card.appendChild(header);
-    if (renderToken !== promptPageRenderToken) return;
     host.appendChild(card);
-  }
+}
 }
 
 
@@ -5064,7 +5031,9 @@ async function exportSnapshotJson(options=null) {
     careers: false,
     connections: false,
     changeLogs: false,
-    includeOrder: false
+    includeOrder: false,
+    silentUpload: false,
+    uploadReason: ''
   };
   const opts = Object.assign({}, defaults, options || {});
 
@@ -5298,10 +5267,17 @@ async function exportSnapshotJson(options=null) {
       snapshot.toolVersion = toolVersion;
       const jsonText = JSON.stringify(snapshot, null, 2);
       const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
-      toast(`Uploaded: ${up.filename}`);
+      finalizeOnlineSyncMeta({
+        uploadedAtLocal,
+        uploadedBy: cfg.uploader || '',
+        toolVersion,
+        sourceName: up.filename || '',
+        sourcePath: up.path || ''
+      });
+      if (!opts.silentUpload) toast(`Uploaded: ${up.filename}`);
     } catch (err) {
       console.error(err);
-      alert('Online export failed\n\n' + (err?.message || String(err)));
+      if (!opts.silentUpload) alert('Online export failed\n\n' + (err?.message || String(err)));
       throw err;
     }
     return snapshot;
@@ -7787,8 +7763,81 @@ $('#btnAddConnection').addEventListener('click', () => openConnectionModal({
       if (b.textContent === 'Collapse') b.textContent = 'Expand';
     });
   });
-  // Prompt page picker handlers are assigned inside renderPromptPickers()
-  // so they stay single-bound after each repopulation.
+  // Prompt page: Current User / User Career / Current Career pickers
+  const promptUserSel = $('#promptUserSelect');
+  const promptUserCareerSel = $('#promptUserCareerSelect');
+  const promptCurrentCareerSel = $('#promptCurrentCareerSelect');
+
+  if (promptUserSel) promptUserSel.addEventListener('change', async () => {
+    state.currentUserId = promptUserSel.value || '';
+    try { localStorage.setItem('mivida_current_user_id', state.currentUserId); } catch {}
+
+    // Sync Setup tab selector (selection only)
+    const setupUserSel = $('#userSelect');
+    if (setupUserSel) setupUserSel.value = state.currentUserId || '';
+
+    await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
+    await renderPersonal();
+    await renderPromptPickers();
+    await renderPromptPage();
+  });
+
+  if (promptUserCareerSel) promptUserCareerSel.addEventListener('change', async () => {
+    const userId = state.currentUserId || '';
+    if (!userId) return;
+
+    const v = promptUserCareerSel.value || '';
+    const t = nowISO();
+    const before = await getOne('userCareer', userId);
+    let nextSpecId = before?.specializationId || null;
+    if (before?.careerId) rememberUserCareerSpecialization(userId, before.careerId, before?.specializationId || '');
+    if (v) {
+      const specs = await getSpecializationsForCareer(v);
+      const rememberedSpecId = getRememberedUserCareerSpecialization(userId, v);
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = rememberedSpecId || null;
+      if (!specs.some(sp => sp.id === nextSpecId)) nextSpecId = null;
+    } else {
+      nextSpecId = null;
+    }
+    const after = { userId, careerId: v || null, specializationId: nextSpecId || null, updatedAt: t, createdAt: before?.createdAt || t };
+    await putOne('userCareer', after);
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+
+    const setupUcSel = $('#personalCareerPick');
+    if (setupUcSel) setupUcSel.value = v || '';
+
+    await renderPersonalCareerPick();
+    await renderPersonalSpecializationPick();
+    await renderPromptPickers();
+    await renderPromptPage();
+  });
+
+  const promptUserSpecSel = $('#promptUserSpecializationSelect');
+  if (promptUserSpecSel) promptUserSpecSel.addEventListener('change', async () => {
+    const userId = state.currentUserId || '';
+    if (!userId) return;
+    const before = await getOne('userCareer', userId);
+    const t = nowISO();
+    const after = {
+      userId,
+      careerId: (before?.careerId || $('#promptUserCareerSelect')?.value || null),
+      specializationId: promptUserSpecSel.value || null,
+      updatedAt: t,
+      createdAt: before?.createdAt || t
+    };
+    await putOne('userCareer', after);
+    rememberUserCareerSpecialization(userId, after.careerId || '', after.specializationId || '');
+    await logChange({ entityType:'userCareer', entityId:userId, action: before ? 'update' : 'create', after, before });
+    await renderPersonalSpecializationPick();
+    await renderPromptPickers();
+    await renderPromptPage();
+  });
+
+  if (promptCurrentCareerSel) promptCurrentCareerSel.addEventListener('change', async () => {
+    await setCurrentCareer(promptCurrentCareerSel.value || '');
+  });
+
 
   // Theme toggle (Dark/Light)
   const btnTheme = $('#btnToggleTheme');
@@ -8041,76 +8090,37 @@ const GitHubSync = (() => {
     const c = getConfig();
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}?ref=${encodeURIComponent(c.branch)}`;
-
-    const fetchRawFromContentsApi = async () => {
-      const rawHeaders = (useTokenPrefix=false) => ({
-        ...authHeaders(c.token, useTokenPrefix),
-        'Accept': 'application/vnd.github.raw+json'
-      });
-      let rr = await fetch(url, { headers: rawHeaders(false) });
-      if (rr.status === 401) rr = await fetch(url, { headers: rawHeaders(true) });
-      if (!rr.ok) {
-        const t = await rr.text().catch(()=> '');
-        throw new Error(`Raw download failed (${rr.status}). ${t || ''}`.trim());
-      }
-      return stripBom(await rr.text());
-    };
-
-    const fetchRawFromDownloadUrl = async (downloadUrl) => {
-      if (!downloadUrl) return '';
-      let rawResp = await fetch(String(downloadUrl));
-      if ((!rawResp.ok || rawResp.status === 0) && c.token) {
-        rawResp = await fetch(String(downloadUrl), {
-          headers: {
-            'Authorization': `Bearer ${c.token}`,
-            'Accept': 'application/vnd.github.raw+json'
-          }
-        });
-        if (rawResp.status === 401) {
-          rawResp = await fetch(String(downloadUrl), {
-            headers: {
-              'Authorization': `token ${c.token}`,
-              'Accept': 'application/vnd.github.raw+json'
-            }
-          });
-        }
-      }
-      if (!rawResp.ok) {
-        const t = await rawResp.text().catch(()=> '');
-        throw new Error(`Raw download failed (${rawResp.status}). ${t || ''}`.trim());
-      }
-      return stripBom(await rawResp.text());
-    };
-
     const r = await ghFetch(url, c.token);
     if (!r.ok) {
       const t = await r.text().catch(()=> '');
       throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-
-    let data = null;
-    try {
-      data = await r.json();
-    } catch {
-      const rawText = await fetchRawFromContentsApi();
-      if (rawText) return rawText;
-      throw new Error('GitHub import failed. Response was not valid JSON.');
-    }
-
+    const data = await r.json().catch(() => null);
     const content = data && data.content ? String(data.content) : '';
-    const enc = data && data.encoding ? String(data.encoding).toLowerCase() : 'base64';
-    if (enc === 'base64') {
+    const enc = data && data.encoding ? String(data.encoding) : 'base64';
+    if (enc === 'base64' && content) {
       return decodeBase64Utf8(content);
     }
-    if (enc === 'none' || !content) {
-      try {
-        const rawText = await fetchRawFromContentsApi();
-        if (rawText) return rawText;
-      } catch {}
-      const rawFromDownloadUrl = await fetchRawFromDownloadUrl(data && data.download_url);
-      if (rawFromDownloadUrl) return rawFromDownloadUrl;
-      throw new Error('Unsupported file encoding: none');
+
+    const doRaw = async (useTokenPrefix=false) => fetch(url, {
+      headers: {
+        ...authHeaders(c.token, useTokenPrefix),
+        'Accept': 'application/vnd.github.raw+json'
+      }
+    });
+
+    let rr = await doRaw(false);
+    if (rr.status === 401) rr = await doRaw(true);
+    if (rr.ok) {
+      return stripBom(await rr.text());
     }
+
+    const dl = data && data.download_url ? String(data.download_url) : '';
+    if (dl) {
+      const dr = await fetch(dl);
+      if (dr.ok) return stripBom(await dr.text());
+    }
+
     throw new Error('Unsupported file encoding: ' + enc);
   };
   const toBase64Utf8 = (str) => {
@@ -8323,9 +8333,14 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
-const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last imported snapshot metadata (online only)
+const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last synced snapshot metadata (online only)
 const LOCAL_LAST_MOD_KEY = 'mivida_local_last_modified_at_v1';           // stores last local edit timestamp
+const AUTO_SYNC_IDLE_MS = 3 * 60 * 1000;
+const AUTO_SYNC_RETRY_MS = 60 * 1000;
 let pendingOnlineImportMeta = null;
+let _autoSyncTimer = null;
+let _autoSyncInFlight = false;
+let _autoSyncLastError = '';
 
 function _parseLocalStampToDate(s){
   const str = String(s || '').trim();
@@ -8442,6 +8457,7 @@ let _localModT = null;
 let _localModLatest = 0;
 function markLocalModified(){
   _localModLatest = Date.now();
+  scheduleAutoSyncIfNeeded();
   if (_localModT) return;
   _localModT = setTimeout(() => {
     _localModT = null;
@@ -8450,12 +8466,94 @@ function markLocalModified(){
   }, 250);
 }
 
+function getEffectiveLocalModifiedTime(){
+  const localIso = String(getLocalLastModifiedIso() || '').trim();
+  const localT = localIso ? (new Date(localIso)).getTime() : 0;
+  return Math.max(localT || 0, _localModLatest || 0);
+}
+
+function hasUnsyncedChanges(){
+  const info = getLastOnlineImportInfo();
+  const baselineIso = String(info && info.localBaselineIso ? info.localBaselineIso : '').trim();
+  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
+  const localT = getEffectiveLocalModifiedTime();
+  if (!baselineT) return !!localT;
+  return !!localT && localT > baselineT + 500;
+}
+
+function clearAutoSyncTimer(){
+  try { if (_autoSyncTimer) clearTimeout(_autoSyncTimer); } catch {}
+  _autoSyncTimer = null;
+}
+
+function scheduleAutoSyncIfNeeded(delayMs = AUTO_SYNC_IDLE_MS){
+  clearAutoSyncTimer();
+  if (_autoSyncInFlight) return;
+  const s = getSyncUiState();
+  if (s.provider !== 'github' || s.mode !== 'auto') return;
+  if (!GitHubSync.isConfigured()) return;
+  if (!hasUnsyncedChanges()) return;
+  _autoSyncTimer = setTimeout(() => {
+    _autoSyncTimer = null;
+    void runAutoSync('idle');
+  }, Math.max(1000, delayMs || 0));
+  applySyncInfoUI();
+}
+
+function finalizeOnlineSyncMeta(meta){
+  clearAutoSyncTimer();
+  _autoSyncLastError = '';
+  const baselineIso = new Date().toISOString();
+  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
+  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
+  _localModLatest = new Date(baselineIso).getTime();
+  const next = { ...(meta || {}), localBaselineIso: baselineIso };
+  setLastOnlineImportInfo(next);
+}
+
+async function runAutoSync(reason = 'idle'){
+  clearAutoSyncTimer();
+  if (_autoSyncInFlight) return false;
+  const s = getSyncUiState();
+  if (s.provider !== 'github' || s.mode !== 'auto') return false;
+  if (!GitHubSync.isConfigured()) return false;
+  if (!hasUnsyncedChanges()) {
+    applySyncInfoUI();
+    return false;
+  }
+  _autoSyncInFlight = true;
+  _autoSyncLastError = '';
+  applySyncInfoUI();
+  try {
+    await exportSnapshotJson({
+      promptItems: true,
+      profiles: true,
+      careers: true,
+      connections: true,
+      changeLogs: true,
+      includeOrder: true,
+      silentUpload: true,
+      uploadReason: reason
+    });
+    return true;
+  } catch (err) {
+    console.error(err);
+    _autoSyncLastError = err && err.message ? String(err.message) : String(err || 'Auto sync failed');
+    scheduleAutoSyncIfNeeded(AUTO_SYNC_RETRY_MS);
+    return false;
+  } finally {
+    _autoSyncInFlight = false;
+    applySyncInfoUI();
+  }
+}
+
 function applySyncInfoUI(){
   const s = getSyncUiState();
   const badge = document.getElementById('syncInfoBadge');
   const valueEl = document.getElementById('syncVersionValue');
   const editedEl = document.getElementById('syncEditedTag');
-  if (!badge || !valueEl || !editedEl) return;
+  const stateEl = document.getElementById('syncStateTag');
+  if (!badge || !valueEl || !editedEl || !stateEl) return;
 
   if (s.provider !== 'github') {
     badge.style.display = 'none';
@@ -8467,47 +8565,57 @@ function applySyncInfoUI(){
   if (!info) {
     valueEl.textContent = '—';
     editedEl.style.display = 'none';
-    badge.title = '';
+    stateEl.textContent = _autoSyncInFlight ? 'Syncing...' : 'Not synced yet';
+    stateEl.dataset.state = _autoSyncInFlight ? 'syncing' : '';
+    badge.title = _autoSyncLastError ? ('Last sync error: ' + _autoSyncLastError) : '';
     return;
   }
 
   const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
-  // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
   valueEl.textContent = `${dt} · ${by}`;
 
-  // Edited detection: compare local last modified vs baseline captured at import.
-  const baselineIso = String(info.localBaselineIso || '').trim();
-  const localIso = String(getLocalLastModifiedIso() || '').trim();
-  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
-  const localT = localIso ? (new Date(localIso)).getTime() : 0;
-  const isEdited = (!!baselineT && !!localT && localT > baselineT + 500); // small buffer
+  const isEdited = hasUnsyncedChanges();
 
   if (isEdited) {
     editedEl.style.display = '';
-    const tip = fmtLocalStampFull(localIso) || '';
-    badge.title = tip ? (`Last local edit: ${tip}`) : 'Last local edit: —';
   } else {
     editedEl.style.display = 'none';
-    badge.title = '';
   }
+
+  if (_autoSyncInFlight) {
+    stateEl.textContent = 'Syncing...';
+    stateEl.dataset.state = 'syncing';
+  } else if (_autoSyncLastError) {
+    stateEl.textContent = 'Sync failed';
+    stateEl.dataset.state = 'error';
+  } else if (isEdited) {
+    stateEl.textContent = 'Unsynced changes';
+    stateEl.dataset.state = 'unsynced';
+  } else {
+    stateEl.textContent = 'Synced';
+    stateEl.dataset.state = 'synced';
+  }
+
+  const parts = [];
+  const lastUpload = fmtLocalStampFull(dtRaw) || '';
+  if (lastUpload) parts.push(`Last uploaded: ${lastUpload}`);
+  const sourceName = String(info.sourceName || '').trim();
+  if (sourceName) parts.push(`Snapshot: ${sourceName}`);
+  if (_autoSyncLastError) parts.push(`Last sync error: ${_autoSyncLastError}`);
+  else if (isEdited) {
+    const localT = getEffectiveLocalModifiedTime();
+    const localIso = localT ? new Date(localT).toISOString() : '';
+    const tip = fmtLocalStampFull(localIso) || '';
+    if (tip) parts.push(`Last local edit: ${tip}`);
+  }
+  badge.title = parts.join('\n');
 }
 
 function finalizeOnlineImportMeta(){
   if (!pendingOnlineImportMeta) return;
-
-  // Treat the just-imported local state as the baseline (not edited).
-  const baselineIso = new Date().toISOString();
-  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
-
-  // Cancel any pending debounced local-mod writes from the import burst.
-  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
-
-  const meta = { ...(pendingOnlineImportMeta || {}) };
-  meta.localBaselineIso = baselineIso;
-
-  setLastOnlineImportInfo(meta);
+  finalizeOnlineSyncMeta({ ...(pendingOnlineImportMeta || {}) });
   pendingOnlineImportMeta = null;
 }
 
@@ -8550,7 +8658,7 @@ function applySyncUiState(){
 
   if (subEl){
     if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
-    else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
+    else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto sync: upload after idle changes and import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
 
   applySyncInfoUI();
@@ -8708,6 +8816,14 @@ function initSyncUi(){
       window.location.replace(url.toString());
     });
   }
+
+  window.addEventListener('beforeunload', (e) => {
+    const s = getSyncUiState();
+    if (s.provider !== 'github') return;
+    if (!hasUnsyncedChanges()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
 }
 
 
@@ -8719,6 +8835,7 @@ function initSyncUi(){
   initSyncUi();
   await ensureSeed();
   await refreshAll();
+  scheduleAutoSyncIfNeeded(5000);
 })();
 </script>
 </body>
