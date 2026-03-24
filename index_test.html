@@ -5257,16 +5257,39 @@ async function exportSnapshotJson(options=null) {
   const s = getSyncUiState();
 
   if (s.provider === 'github') {
-    // Online export: upload to GitHub (append-only; never overwrite).
+    // Online export: upload snapshot to the configured snapshot folder, and store change logs separately.
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
       const uploadedAtLocal = exportVersion;
       const cfg = GitHubSync.getConfig();
+      const uploadStamp = GitHubSync.makeUploadStamp();
+      const onlineChangeLogs = exportLogs ? (changeLogs || []) : [];
+
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
       snapshot.toolVersion = toolVersion;
+      snapshot.changeLogs = [];
+      snapshot.changeLogsSeparated = !!exportLogs;
+      snapshot.changeLogsFolder = exportLogs ? GITHUB_CHANGELOG_FOLDER : '';
+
       const jsonText = JSON.stringify(snapshot, null, 2);
-      const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
+      const up = await GitHubSync.uploadSnapshotJsonText(jsonText, uploadStamp);
+
+      if (exportLogs) {
+        const changeLogBundle = {
+          version: exportVersion,
+          exportedAt: nowISO(),
+          snapshotVersion: exportVersion,
+          uploadedAtLocal,
+          uploadedBy: cfg.uploader || '',
+          toolVersion,
+          sourceSnapshotFilename: up.filename || '',
+          sourceSnapshotPath: up.path || '',
+          changeLogs: onlineChangeLogs
+        };
+        await GitHubSync.uploadChangeLogJsonText(JSON.stringify(changeLogBundle, null, 2), uploadStamp);
+      }
+
       finalizeOnlineSyncMeta({
         uploadedAtLocal,
         uploadedBy: cfg.uploader || '',
@@ -7933,6 +7956,8 @@ const SecretStore = (() => {
 })();
 
 
+const GITHUB_CHANGELOG_FOLDER = 'Changelog';
+
 const GitHubSync = (() => {
   const getConfig = () => {
     let v = {};
@@ -8131,9 +8156,11 @@ const GitHubSync = (() => {
     return btoa(bin);
   };
 
-  const ensureFolderExists = async () => {
+  const ensureFolderExists = async (folderOverride = null) => {
     const c = getConfig();
-    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
+    const folderValue = (typeof folderOverride === 'string') ? folderOverride : c.folder;
+    const cleanFolder = String(folderValue || '').trim().replace(/^\/+|\/+$/g,'');
+    const folderPath = cleanFolder ? ('/' + cleanFolder.split('/').map(encodeURIComponent).join('/')) : '';
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
     const r = await ghFetch(url, c.token);
     if (!r.ok) {
@@ -8143,15 +8170,17 @@ const GitHubSync = (() => {
     const data = await r.json().catch(()=>null);
     if (!Array.isArray(data) && !(data && data.type === 'dir')) {
       // GitHub returns array for a folder, object for a file.
-      throw new Error('Folder path is not a directory: ' + (c.folder || '(root)'));
+      throw new Error('Folder path is not a directory: ' + (cleanFolder || '(root)'));
     }
     return true;
   };
 
-  const uploadNewFile = async (path, contentText, message) => {
+  const uploadNewFile = async (path, contentText, message, options = {}) => {
     const c = getConfig();
     if (!c.token) throw new Error('Missing GitHub token');
-    await ensureFolderExists();
+    const ensureFolder = options && Object.prototype.hasOwnProperty.call(options, 'ensureFolder') ? options.ensureFolder : c.folder;
+    const skipEnsure = !!(options && options.skipEnsure);
+    if (!skipEnsure) await ensureFolderExists(ensureFolder);
 
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}`;
@@ -8187,21 +8216,32 @@ const GitHubSync = (() => {
     .replace(/[^a-zA-Z0-9._-]+/g,'')
     .replace(/^_+|_+$/g,'') || 'unknown';
 
-  const uploadSnapshotJsonText = async (jsonText) => {
+  const uploadSnapshotJsonText = async (jsonText, stampOverride = '') => {
     const c = getConfig();
-    const stamp = makeLocalStamp();
+    const stamp = String(stampOverride || '').trim() || makeLocalStamp();
     const uploader = sanitizeFilePart(c.uploader || 'unknown');
     const filename = `${stamp}__${uploader}.json`;
     const relPath = (c.folder ? (c.folder.replace(/^\/+|\/+$/g,'') + '/') : '') + filename;
-    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`);
+    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`, { ensureFolder: c.folder });
     return { filename, path: relPath };
+  };
+
+  const uploadChangeLogJsonText = async (jsonText, stampOverride = '') => {
+    const c = getConfig();
+    const stamp = String(stampOverride || '').trim() || makeLocalStamp();
+    const uploader = sanitizeFilePart(c.uploader || 'unknown');
+    const filename = `${stamp}__${uploader}.json`;
+    const folder = String(GITHUB_CHANGELOG_FOLDER || '').trim().replace(/^\/+|\/+$/g,'');
+    const relPath = (folder ? (folder + '/') : '') + filename;
+    await uploadNewFile(relPath, jsonText, `Add changelog ${filename}`, { skipEnsure: true });
+    return { filename, path: relPath, folder };
   };
 
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists,
-    parseFilenameMeta: parseSnapshotFilenameMeta
+    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, uploadChangeLogJsonText, ensureFolderExists,
+    parseFilenameMeta: parseSnapshotFilenameMeta, makeUploadStamp: makeLocalStamp
   };
 })();
 
@@ -8692,7 +8732,7 @@ function openSyncSettingsModal(){
       <input id="ghBranch" type="text" placeholder="main" value="${escapeHtml(cfg.branch)}" style="flex:1;" />
     </div>
     <div class="row">
-      <label style="min-width:120px;">Folder</label>
+      <label style="min-width:120px;">Snapshot folder</label>
       <input id="ghFolder" type="text" placeholder="e.g. snapshots" value="${escapeHtml(cfg.folder)}" style="flex:1;" />
     </div>
     <div class="row">
@@ -8719,7 +8759,7 @@ function openSyncSettingsModal(){
         </div>
       </div>
     </div>
-    <div class="muted" style="margin-top:10px;">This stores settings locally in your browser. Token is required for private repos. Read only support is implemented (import only).</div>
+    <div class="muted" style="margin-top:10px;">This stores settings locally in your browser. Token is required for private repos. Snapshot uploads use the folder above. Changelog uploads are always written to /Changelog.</div>
   `;
 
   const statusEl = wrap.querySelector('#ghStatus');
