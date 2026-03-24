@@ -168,17 +168,6 @@
       white-space:nowrap;
       opacity:.95;
     }
-    .syncStateTag{
-      font-size:11px;
-      line-height:1.2;
-      color: var(--muted);
-      white-space:nowrap;
-      opacity:.95;
-    }
-    .syncStateTag[data-state="synced"]{ color:#22c55e; }
-    .syncStateTag[data-state="unsynced"]{ color:var(--warn); }
-    .syncStateTag[data-state="syncing"]{ color:#60a5fa; }
-    .syncStateTag[data-state="error"]{ color:#f87171; }
 
 .title .sub{ color:var(--muted); font-size:13px; }
     .tabs{
@@ -765,7 +754,6 @@
               <span class="syncInfoLabel">JSON</span>
               <span class="syncInfoValue" id="syncVersionValue">—</span>
               <span class="syncEditedTag" id="syncEditedTag" style="display:none">(edited)</span>
-              <span class="syncStateTag" id="syncStateTag" data-state="">Not synced yet</span>
             </div>
           </div>
         </div>
@@ -2273,16 +2261,8 @@ async function duplicateUserFlow() {
     }
   } catch {}
 
-  // Copy legacy per-user items too (if any exist from older versions)
-  try {
-    const leg = await getByIndex('personalItems', 'by_userId', userId);
-    for (const p of (leg || [])) {
-      const nid = uid();
-      const np = { ...p, id: nid, userId: newId, createdAt: t, updatedAt: t };
-      await putOne('personalItems', np);
-      await logChange({ entityType: 'personalItem', entityId: nid, action: 'create', after: np });
-    }
-  } catch {}
+  // Legacy personalItems are no longer copied for duplicated users.
+  // Current rendering/saving uses personalTemplates + personalContent.
 
   // Copy selected career mapping for the user (if any)
   try {
@@ -2424,16 +2404,8 @@ async function duplicateCareerFlow() {
     }
   } catch {}
 
-  // Copy legacy career blocks too (if any)
-  try {
-    const blocks = await getByIndex('careerBlocks', 'by_careerId', careerId);
-    for (const b of (blocks || [])) {
-      const nid = uid();
-      const nb = { ...b, id: nid, careerId: newId, createdAt: t, updatedAt: t };
-      await putOne('careerBlocks', nb);
-      await logChange({ entityType: 'careerBlock', entityId: nid, action: 'create', after: nb });
-    }
-  } catch {}
+  // Legacy careerBlocks are no longer copied for duplicated careers.
+  // Current rendering/saving uses careerTemplates + careerContent.
 
   await loadCareerFilterSelect();
   await setCurrentCareer(newId);
@@ -5022,6 +4994,7 @@ async function exportSnapshotJson(options=null) {
   // - promptItems
   // - profiles (users + personal titles + personal content)
   // - careers (careers + career titles + career content)
+  // New exports use only the current v3 structure; legacy personalItems/careerBlocks are not emitted.
   // - connections (connections + required prompt items + required title templates only; does NOT force profile/career content)
   // - changeLogs
   // - includeOrder (exports UI list order for selected sections)
@@ -5031,9 +5004,7 @@ async function exportSnapshotJson(options=null) {
     careers: false,
     connections: false,
     changeLogs: false,
-    includeOrder: false,
-    silentUpload: false,
-    uploadReason: ''
+    includeOrder: false
   };
   const opts = Object.assign({}, defaults, options || {});
 
@@ -5157,32 +5128,8 @@ async function exportSnapshotJson(options=null) {
   });
 
 
-  // Legacy arrays for backward compatibility: include only when exporting the full paired data.
-  let personalItemsLegacy = [];
-  if (exportProfiles) {
-    const tMap = new Map((personalTemplates || []).map(t => [t.id, t.title]));
-    personalItemsLegacy = (personalContentOut || []).map(r => ({
-      id: `${r.userId}::${r.templateId}`,
-      userId: r.userId,
-      title: tMap.get(r.templateId) || '',
-      content: r.content || '',
-      createdAt: r.createdAt || null,
-      updatedAt: r.updatedAt || null
-    })).filter(r => r.userId && r.title);
-  }
-
-  let careerBlocksLegacy = [];
-  if (exportCareers) {
-    const tMap = new Map((careerTemplates || []).map(t => [t.id, t.title]));
-    careerBlocksLegacy = (careerContentOut || []).map(r => ({
-      id: `${r.careerId}::${r.templateId}`,
-      careerId: r.careerId,
-      title: tMap.get(r.templateId) || '',
-      content: r.content || '',
-      createdAt: r.createdAt || null,
-      updatedAt: r.updatedAt || null
-    })).filter(r => r.careerId && r.title);
-  }
+  // Legacy personalItems / careerBlocks are intentionally NOT generated in new exports.
+  // Import still accepts them from older snapshots.
 
   // Optional: export UI item order (Setup page list order), scoped to the exported data.
   let uiSortOut = null;
@@ -5247,60 +5194,26 @@ async function exportSnapshotJson(options=null) {
     changeLogs: exportLogs ? (changeLogs || []) : [],
 
     // Optional UI ordering
-    uiSort: uiSortOut,
-
-    // legacy (generated for backward compatibility)
-    personalItems: exportProfiles ? (personalItemsLegacy || []) : [],
-    careerBlocks: exportCareers ? (careerBlocksLegacy || []) : []
+    uiSort: uiSortOut
   };
 
   const s = getSyncUiState();
 
   if (s.provider === 'github') {
-    // Online export: upload snapshot to the configured snapshot folder, and store change logs separately.
+    // Online export: upload to GitHub (append-only; never overwrite).
     try {
       const toolVersion = (document.getElementById('appVersionPill')?.textContent || '').trim() || '';
       const uploadedAtLocal = exportVersion;
       const cfg = GitHubSync.getConfig();
-      const uploadStamp = GitHubSync.makeUploadStamp();
-      const onlineChangeLogs = exportLogs ? (changeLogs || []) : [];
-
       snapshot.uploadedBy = cfg.uploader || '';
       snapshot.uploadedAtLocal = uploadedAtLocal;
       snapshot.toolVersion = toolVersion;
-      snapshot.changeLogs = [];
-      snapshot.changeLogsSeparated = !!exportLogs;
-      snapshot.changeLogsFolder = exportLogs ? GITHUB_CHANGELOG_FOLDER : '';
-
       const jsonText = JSON.stringify(snapshot, null, 2);
-      const up = await GitHubSync.uploadSnapshotJsonText(jsonText, uploadStamp);
-
-      if (exportLogs) {
-        const changeLogBundle = {
-          version: exportVersion,
-          exportedAt: nowISO(),
-          snapshotVersion: exportVersion,
-          uploadedAtLocal,
-          uploadedBy: cfg.uploader || '',
-          toolVersion,
-          sourceSnapshotFilename: up.filename || '',
-          sourceSnapshotPath: up.path || '',
-          changeLogs: onlineChangeLogs
-        };
-        await GitHubSync.uploadChangeLogJsonText(JSON.stringify(changeLogBundle, null, 2), uploadStamp);
-      }
-
-      finalizeOnlineSyncMeta({
-        uploadedAtLocal,
-        uploadedBy: cfg.uploader || '',
-        toolVersion,
-        sourceName: up.filename || '',
-        sourcePath: up.path || ''
-      });
-      if (!opts.silentUpload) toast(`Uploaded: ${up.filename}`);
+      const up = await GitHubSync.uploadSnapshotJsonText(jsonText);
+      toast(`Uploaded: ${up.filename}`);
     } catch (err) {
       console.error(err);
-      if (!opts.silentUpload) alert('Online export failed\n\n' + (err?.message || String(err)));
+      alert('Online export failed\n\n' + (err?.message || String(err)));
       throw err;
     }
     return snapshot;
@@ -5892,7 +5805,7 @@ function normalizeSnapshotForImport(s) {
   const tNow = nowISO();
   const mkId = () => uid();
 
-  // Personal: prefer v3; fall back to legacy personalItems
+  // Personal: prefer v3; still accept legacy personalItems from older snapshots
   let personalTemplates = Array.isArray(s.personalTemplates) ? s.personalTemplates : [];
   let personalContent = Array.isArray(s.personalContent) ? s.personalContent : [];
   const legacyPersonalItems = Array.isArray(s.personalItems) ? s.personalItems : [];
@@ -5916,7 +5829,7 @@ function normalizeSnapshotForImport(s) {
     })).filter(r => r.userId && r.templateId);
   }
 
-  // Career: prefer v3; fall back to legacy careerBlocks
+  // Career: prefer v3; still accept legacy careerBlocks from older snapshots
   let careerTemplates = Array.isArray(s.careerTemplates) ? s.careerTemplates : [];
   let careerContent = Array.isArray(s.careerContent) ? s.careerContent : [];
   const legacyCareerBlocks = Array.isArray(s.careerBlocks) ? s.careerBlocks : [];
@@ -7956,8 +7869,6 @@ const SecretStore = (() => {
 })();
 
 
-const GITHUB_CHANGELOG_FOLDER = 'Changelog';
-
 const GitHubSync = (() => {
   const getConfig = () => {
     let v = {};
@@ -8120,33 +8031,13 @@ const GitHubSync = (() => {
       const t = await r.text().catch(()=> '');
       throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-    const data = await r.json().catch(() => null);
+    const data = await r.json();
     const content = data && data.content ? String(data.content) : '';
     const enc = data && data.encoding ? String(data.encoding) : 'base64';
-    if (enc === 'base64' && content) {
-      return decodeBase64Utf8(content);
+    if (enc !== 'base64') {
+      throw new Error('Unsupported file encoding: ' + enc);
     }
-
-    const doRaw = async (useTokenPrefix=false) => fetch(url, {
-      headers: {
-        ...authHeaders(c.token, useTokenPrefix),
-        'Accept': 'application/vnd.github.raw+json'
-      }
-    });
-
-    let rr = await doRaw(false);
-    if (rr.status === 401) rr = await doRaw(true);
-    if (rr.ok) {
-      return stripBom(await rr.text());
-    }
-
-    const dl = data && data.download_url ? String(data.download_url) : '';
-    if (dl) {
-      const dr = await fetch(dl);
-      if (dr.ok) return stripBom(await dr.text());
-    }
-
-    throw new Error('Unsupported file encoding: ' + enc);
+    return decodeBase64Utf8(content);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
@@ -8156,11 +8047,9 @@ const GitHubSync = (() => {
     return btoa(bin);
   };
 
-  const ensureFolderExists = async (folderOverride = null) => {
+  const ensureFolderExists = async () => {
     const c = getConfig();
-    const folderValue = (typeof folderOverride === 'string') ? folderOverride : c.folder;
-    const cleanFolder = String(folderValue || '').trim().replace(/^\/+|\/+$/g,'');
-    const folderPath = cleanFolder ? ('/' + cleanFolder.split('/').map(encodeURIComponent).join('/')) : '';
+    const folderPath = c.folder ? ('/' + c.folder.split('/').map(encodeURIComponent).join('/')) : '';
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents${folderPath}?ref=${encodeURIComponent(c.branch)}`;
     const r = await ghFetch(url, c.token);
     if (!r.ok) {
@@ -8170,17 +8059,15 @@ const GitHubSync = (() => {
     const data = await r.json().catch(()=>null);
     if (!Array.isArray(data) && !(data && data.type === 'dir')) {
       // GitHub returns array for a folder, object for a file.
-      throw new Error('Folder path is not a directory: ' + (cleanFolder || '(root)'));
+      throw new Error('Folder path is not a directory: ' + (c.folder || '(root)'));
     }
     return true;
   };
 
-  const uploadNewFile = async (path, contentText, message, options = {}) => {
+  const uploadNewFile = async (path, contentText, message) => {
     const c = getConfig();
     if (!c.token) throw new Error('Missing GitHub token');
-    const ensureFolder = options && Object.prototype.hasOwnProperty.call(options, 'ensureFolder') ? options.ensureFolder : c.folder;
-    const skipEnsure = !!(options && options.skipEnsure);
-    if (!skipEnsure) await ensureFolderExists(ensureFolder);
+    await ensureFolderExists();
 
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
     const url = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${safePath}`;
@@ -8216,32 +8103,21 @@ const GitHubSync = (() => {
     .replace(/[^a-zA-Z0-9._-]+/g,'')
     .replace(/^_+|_+$/g,'') || 'unknown';
 
-  const uploadSnapshotJsonText = async (jsonText, stampOverride = '') => {
+  const uploadSnapshotJsonText = async (jsonText) => {
     const c = getConfig();
-    const stamp = String(stampOverride || '').trim() || makeLocalStamp();
+    const stamp = makeLocalStamp();
     const uploader = sanitizeFilePart(c.uploader || 'unknown');
     const filename = `${stamp}__${uploader}.json`;
     const relPath = (c.folder ? (c.folder.replace(/^\/+|\/+$/g,'') + '/') : '') + filename;
-    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`, { ensureFolder: c.folder });
+    await uploadNewFile(relPath, jsonText, `Add snapshot ${filename}`);
     return { filename, path: relPath };
-  };
-
-  const uploadChangeLogJsonText = async (jsonText, stampOverride = '') => {
-    const c = getConfig();
-    const stamp = String(stampOverride || '').trim() || makeLocalStamp();
-    const uploader = sanitizeFilePart(c.uploader || 'unknown');
-    const filename = `${stamp}__${uploader}.json`;
-    const folder = String(GITHUB_CHANGELOG_FOLDER || '').trim().replace(/^\/+|\/+$/g,'');
-    const relPath = (folder ? (folder + '/') : '') + filename;
-    await uploadNewFile(relPath, jsonText, `Add changelog ${filename}`, { skipEnsure: true });
-    return { filename, path: relPath, folder };
   };
 
 
   return {
     getConfig, setConfig, isConfigured,
-    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, uploadChangeLogJsonText, ensureFolderExists,
-    parseFilenameMeta: parseSnapshotFilenameMeta, makeUploadStamp: makeLocalStamp
+    testConnection, listJsonFiles, getLatestFile, downloadFileText, uploadSnapshotJsonText, ensureFolderExists,
+    parseFilenameMeta: parseSnapshotFilenameMeta
   };
 })();
 
@@ -8373,14 +8249,9 @@ function openGitHubSnapshotPicker({ title, files, onPick }){
 const SYNC_UI_PROVIDER_KEY = 'mivida_sync_provider'; // 'local' | 'github'
 const SYNC_UI_MODE_KEY = 'mivida_sync_mode'; // 'auto' | 'manual'
 
-const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last synced snapshot metadata (online only)
+const SYNC_LAST_ONLINE_IMPORT_KEY = 'mivida_sync_last_online_import_v1'; // stores last imported snapshot metadata (online only)
 const LOCAL_LAST_MOD_KEY = 'mivida_local_last_modified_at_v1';           // stores last local edit timestamp
-const AUTO_SYNC_IDLE_MS = 3 * 60 * 1000;
-const AUTO_SYNC_RETRY_MS = 60 * 1000;
 let pendingOnlineImportMeta = null;
-let _autoSyncTimer = null;
-let _autoSyncInFlight = false;
-let _autoSyncLastError = '';
 
 function _parseLocalStampToDate(s){
   const str = String(s || '').trim();
@@ -8497,7 +8368,6 @@ let _localModT = null;
 let _localModLatest = 0;
 function markLocalModified(){
   _localModLatest = Date.now();
-  scheduleAutoSyncIfNeeded();
   if (_localModT) return;
   _localModT = setTimeout(() => {
     _localModT = null;
@@ -8506,94 +8376,12 @@ function markLocalModified(){
   }, 250);
 }
 
-function getEffectiveLocalModifiedTime(){
-  const localIso = String(getLocalLastModifiedIso() || '').trim();
-  const localT = localIso ? (new Date(localIso)).getTime() : 0;
-  return Math.max(localT || 0, _localModLatest || 0);
-}
-
-function hasUnsyncedChanges(){
-  const info = getLastOnlineImportInfo();
-  const baselineIso = String(info && info.localBaselineIso ? info.localBaselineIso : '').trim();
-  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
-  const localT = getEffectiveLocalModifiedTime();
-  if (!baselineT) return !!localT;
-  return !!localT && localT > baselineT + 500;
-}
-
-function clearAutoSyncTimer(){
-  try { if (_autoSyncTimer) clearTimeout(_autoSyncTimer); } catch {}
-  _autoSyncTimer = null;
-}
-
-function scheduleAutoSyncIfNeeded(delayMs = AUTO_SYNC_IDLE_MS){
-  clearAutoSyncTimer();
-  if (_autoSyncInFlight) return;
-  const s = getSyncUiState();
-  if (s.provider !== 'github' || s.mode !== 'auto') return;
-  if (!GitHubSync.isConfigured()) return;
-  if (!hasUnsyncedChanges()) return;
-  _autoSyncTimer = setTimeout(() => {
-    _autoSyncTimer = null;
-    void runAutoSync('idle');
-  }, Math.max(1000, delayMs || 0));
-  applySyncInfoUI();
-}
-
-function finalizeOnlineSyncMeta(meta){
-  clearAutoSyncTimer();
-  _autoSyncLastError = '';
-  const baselineIso = new Date().toISOString();
-  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
-  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
-  _localModLatest = new Date(baselineIso).getTime();
-  const next = { ...(meta || {}), localBaselineIso: baselineIso };
-  setLastOnlineImportInfo(next);
-}
-
-async function runAutoSync(reason = 'idle'){
-  clearAutoSyncTimer();
-  if (_autoSyncInFlight) return false;
-  const s = getSyncUiState();
-  if (s.provider !== 'github' || s.mode !== 'auto') return false;
-  if (!GitHubSync.isConfigured()) return false;
-  if (!hasUnsyncedChanges()) {
-    applySyncInfoUI();
-    return false;
-  }
-  _autoSyncInFlight = true;
-  _autoSyncLastError = '';
-  applySyncInfoUI();
-  try {
-    await exportSnapshotJson({
-      promptItems: true,
-      profiles: true,
-      careers: true,
-      connections: true,
-      changeLogs: true,
-      includeOrder: true,
-      silentUpload: true,
-      uploadReason: reason
-    });
-    return true;
-  } catch (err) {
-    console.error(err);
-    _autoSyncLastError = err && err.message ? String(err.message) : String(err || 'Auto sync failed');
-    scheduleAutoSyncIfNeeded(AUTO_SYNC_RETRY_MS);
-    return false;
-  } finally {
-    _autoSyncInFlight = false;
-    applySyncInfoUI();
-  }
-}
-
 function applySyncInfoUI(){
   const s = getSyncUiState();
   const badge = document.getElementById('syncInfoBadge');
   const valueEl = document.getElementById('syncVersionValue');
   const editedEl = document.getElementById('syncEditedTag');
-  const stateEl = document.getElementById('syncStateTag');
-  if (!badge || !valueEl || !editedEl || !stateEl) return;
+  if (!badge || !valueEl || !editedEl) return;
 
   if (s.provider !== 'github') {
     badge.style.display = 'none';
@@ -8605,57 +8393,47 @@ function applySyncInfoUI(){
   if (!info) {
     valueEl.textContent = '—';
     editedEl.style.display = 'none';
-    stateEl.textContent = _autoSyncInFlight ? 'Syncing...' : 'Not synced yet';
-    stateEl.dataset.state = _autoSyncInFlight ? 'syncing' : '';
-    badge.title = _autoSyncLastError ? ('Last sync error: ' + _autoSyncLastError) : '';
+    badge.title = '';
     return;
   }
 
   const dtRaw = (info.uploadedAtLocal || info.uploadedAt || info.importedAtLocal || '') || '';
   const dt = fmtLocalStampVersion(dtRaw) || '—';
   const by = String(info.uploadedBy || info.uploader || '').trim() || '—';
+  // UI shows the JSON "version" as (datetime · uploader). Do not show tool/app version here.
   valueEl.textContent = `${dt} · ${by}`;
 
-  const isEdited = hasUnsyncedChanges();
+  // Edited detection: compare local last modified vs baseline captured at import.
+  const baselineIso = String(info.localBaselineIso || '').trim();
+  const localIso = String(getLocalLastModifiedIso() || '').trim();
+  const baselineT = baselineIso ? (new Date(baselineIso)).getTime() : 0;
+  const localT = localIso ? (new Date(localIso)).getTime() : 0;
+  const isEdited = (!!baselineT && !!localT && localT > baselineT + 500); // small buffer
 
   if (isEdited) {
     editedEl.style.display = '';
+    const tip = fmtLocalStampFull(localIso) || '';
+    badge.title = tip ? (`Last local edit: ${tip}`) : 'Last local edit: —';
   } else {
     editedEl.style.display = 'none';
+    badge.title = '';
   }
-
-  if (_autoSyncInFlight) {
-    stateEl.textContent = 'Syncing...';
-    stateEl.dataset.state = 'syncing';
-  } else if (_autoSyncLastError) {
-    stateEl.textContent = 'Sync failed';
-    stateEl.dataset.state = 'error';
-  } else if (isEdited) {
-    stateEl.textContent = 'Unsynced changes';
-    stateEl.dataset.state = 'unsynced';
-  } else {
-    stateEl.textContent = 'Synced';
-    stateEl.dataset.state = 'synced';
-  }
-
-  const parts = [];
-  const lastUpload = fmtLocalStampFull(dtRaw) || '';
-  if (lastUpload) parts.push(`Last uploaded: ${lastUpload}`);
-  const sourceName = String(info.sourceName || '').trim();
-  if (sourceName) parts.push(`Snapshot: ${sourceName}`);
-  if (_autoSyncLastError) parts.push(`Last sync error: ${_autoSyncLastError}`);
-  else if (isEdited) {
-    const localT = getEffectiveLocalModifiedTime();
-    const localIso = localT ? new Date(localT).toISOString() : '';
-    const tip = fmtLocalStampFull(localIso) || '';
-    if (tip) parts.push(`Last local edit: ${tip}`);
-  }
-  badge.title = parts.join('\n');
 }
 
 function finalizeOnlineImportMeta(){
   if (!pendingOnlineImportMeta) return;
-  finalizeOnlineSyncMeta({ ...(pendingOnlineImportMeta || {}) });
+
+  // Treat the just-imported local state as the baseline (not edited).
+  const baselineIso = new Date().toISOString();
+  try { localStorage.setItem(LOCAL_LAST_MOD_KEY, baselineIso); } catch {}
+
+  // Cancel any pending debounced local-mod writes from the import burst.
+  try { if (_localModT) { clearTimeout(_localModT); _localModT = null; } } catch {}
+
+  const meta = { ...(pendingOnlineImportMeta || {}) };
+  meta.localBaselineIso = baselineIso;
+
+  setLastOnlineImportInfo(meta);
   pendingOnlineImportMeta = null;
 }
 
@@ -8698,7 +8476,7 @@ function applySyncUiState(){
 
   if (subEl){
     if (s.provider === 'local') subEl.textContent = 'Offline · Local cache';
-    else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto sync: upload after idle changes and import latest snapshot' : 'Online · Manual: choose snapshot on import';
+    else subEl.textContent = (s.mode === 'auto') ? 'Online · Auto: import latest snapshot' : 'Online · Manual: choose snapshot on import';
   }
 
   applySyncInfoUI();
@@ -8732,7 +8510,7 @@ function openSyncSettingsModal(){
       <input id="ghBranch" type="text" placeholder="main" value="${escapeHtml(cfg.branch)}" style="flex:1;" />
     </div>
     <div class="row">
-      <label style="min-width:120px;">Snapshot folder</label>
+      <label style="min-width:120px;">Folder</label>
       <input id="ghFolder" type="text" placeholder="e.g. snapshots" value="${escapeHtml(cfg.folder)}" style="flex:1;" />
     </div>
     <div class="row">
@@ -8759,7 +8537,7 @@ function openSyncSettingsModal(){
         </div>
       </div>
     </div>
-    <div class="muted" style="margin-top:10px;">This stores settings locally in your browser. Token is required for private repos. Snapshot uploads use the folder above. Changelog uploads are always written to /Changelog.</div>
+    <div class="muted" style="margin-top:10px;">This stores settings locally in your browser. Token is required for private repos. Read only support is implemented (import only).</div>
   `;
 
   const statusEl = wrap.querySelector('#ghStatus');
@@ -8856,14 +8634,6 @@ function initSyncUi(){
       window.location.replace(url.toString());
     });
   }
-
-  window.addEventListener('beforeunload', (e) => {
-    const s = getSyncUiState();
-    if (s.provider !== 'github') return;
-    if (!hasUnsyncedChanges()) return;
-    e.preventDefault();
-    e.returnValue = '';
-  });
 }
 
 
@@ -8875,7 +8645,6 @@ function initSyncUi(){
   initSyncUi();
   await ensureSeed();
   await refreshAll();
-  scheduleAutoSyncIfNeeded(5000);
 })();
 </script>
 </body>
