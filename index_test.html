@@ -2261,8 +2261,16 @@ async function duplicateUserFlow() {
     }
   } catch {}
 
-  // Legacy personalItems are no longer copied for duplicated users.
-  // Current rendering/saving uses personalTemplates + personalContent.
+  // Copy legacy per-user items too (if any exist from older versions)
+  try {
+    const leg = await getByIndex('personalItems', 'by_userId', userId);
+    for (const p of (leg || [])) {
+      const nid = uid();
+      const np = { ...p, id: nid, userId: newId, createdAt: t, updatedAt: t };
+      await putOne('personalItems', np);
+      await logChange({ entityType: 'personalItem', entityId: nid, action: 'create', after: np });
+    }
+  } catch {}
 
   // Copy selected career mapping for the user (if any)
   try {
@@ -2404,8 +2412,16 @@ async function duplicateCareerFlow() {
     }
   } catch {}
 
-  // Legacy careerBlocks are no longer copied for duplicated careers.
-  // Current rendering/saving uses careerTemplates + careerContent.
+  // Copy legacy career blocks too (if any)
+  try {
+    const blocks = await getByIndex('careerBlocks', 'by_careerId', careerId);
+    for (const b of (blocks || [])) {
+      const nid = uid();
+      const nb = { ...b, id: nid, careerId: newId, createdAt: t, updatedAt: t };
+      await putOne('careerBlocks', nb);
+      await logChange({ entityType: 'careerBlock', entityId: nid, action: 'create', after: nb });
+    }
+  } catch {}
 
   await loadCareerFilterSelect();
   await setCurrentCareer(newId);
@@ -4994,7 +5010,6 @@ async function exportSnapshotJson(options=null) {
   // - promptItems
   // - profiles (users + personal titles + personal content)
   // - careers (careers + career titles + career content)
-  // New exports use only the current v3 structure; legacy personalItems/careerBlocks are not emitted.
   // - connections (connections + required prompt items + required title templates only; does NOT force profile/career content)
   // - changeLogs
   // - includeOrder (exports UI list order for selected sections)
@@ -5128,8 +5143,32 @@ async function exportSnapshotJson(options=null) {
   });
 
 
-  // Legacy personalItems / careerBlocks are intentionally NOT generated in new exports.
-  // Import still accepts them from older snapshots.
+  // Legacy arrays for backward compatibility: include only when exporting the full paired data.
+  let personalItemsLegacy = [];
+  if (exportProfiles) {
+    const tMap = new Map((personalTemplates || []).map(t => [t.id, t.title]));
+    personalItemsLegacy = (personalContentOut || []).map(r => ({
+      id: `${r.userId}::${r.templateId}`,
+      userId: r.userId,
+      title: tMap.get(r.templateId) || '',
+      content: r.content || '',
+      createdAt: r.createdAt || null,
+      updatedAt: r.updatedAt || null
+    })).filter(r => r.userId && r.title);
+  }
+
+  let careerBlocksLegacy = [];
+  if (exportCareers) {
+    const tMap = new Map((careerTemplates || []).map(t => [t.id, t.title]));
+    careerBlocksLegacy = (careerContentOut || []).map(r => ({
+      id: `${r.careerId}::${r.templateId}`,
+      careerId: r.careerId,
+      title: tMap.get(r.templateId) || '',
+      content: r.content || '',
+      createdAt: r.createdAt || null,
+      updatedAt: r.updatedAt || null
+    })).filter(r => r.careerId && r.title);
+  }
 
   // Optional: export UI item order (Setup page list order), scoped to the exported data.
   let uiSortOut = null;
@@ -5194,7 +5233,11 @@ async function exportSnapshotJson(options=null) {
     changeLogs: exportLogs ? (changeLogs || []) : [],
 
     // Optional UI ordering
-    uiSort: uiSortOut
+    uiSort: uiSortOut,
+
+    // legacy (generated for backward compatibility)
+    personalItems: exportProfiles ? (personalItemsLegacy || []) : [],
+    careerBlocks: exportCareers ? (careerBlocksLegacy || []) : []
   };
 
   const s = getSyncUiState();
@@ -5805,7 +5848,7 @@ function normalizeSnapshotForImport(s) {
   const tNow = nowISO();
   const mkId = () => uid();
 
-  // Personal: prefer v3; still accept legacy personalItems from older snapshots
+  // Personal: prefer v3; fall back to legacy personalItems
   let personalTemplates = Array.isArray(s.personalTemplates) ? s.personalTemplates : [];
   let personalContent = Array.isArray(s.personalContent) ? s.personalContent : [];
   const legacyPersonalItems = Array.isArray(s.personalItems) ? s.personalItems : [];
@@ -5829,7 +5872,7 @@ function normalizeSnapshotForImport(s) {
     })).filter(r => r.userId && r.templateId);
   }
 
-  // Career: prefer v3; still accept legacy careerBlocks from older snapshots
+  // Career: prefer v3; fall back to legacy careerBlocks
   let careerTemplates = Array.isArray(s.careerTemplates) ? s.careerTemplates : [];
   let careerContent = Array.isArray(s.careerContent) ? s.careerContent : [];
   const legacyCareerBlocks = Array.isArray(s.careerBlocks) ? s.careerBlocks : [];
@@ -7906,7 +7949,8 @@ const GitHubSync = (() => {
   const authHeaders = (token, useTokenPrefix=false) => {
     const t = String(token || '').trim();
     const h = {
-      'Accept': 'application/vnd.github+json'
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
     };
     if (t) h['Authorization'] = (useTokenPrefix ? `token ${t}` : `Bearer ${t}`);
     return h;
@@ -8031,13 +8075,47 @@ const GitHubSync = (() => {
       const t = await r.text().catch(()=> '');
       throw new Error(`Download failed (${r.status}). ${t || ''}`.trim());
     }
-    const data = await r.json();
+    const data = await r.json().catch(() => null);
     const content = data && data.content ? String(data.content) : '';
     const enc = data && data.encoding ? String(data.encoding) : 'base64';
-    if (enc !== 'base64') {
-      throw new Error('Unsupported file encoding: ' + enc);
+    if (enc === 'base64' && content) {
+      return decodeBase64Utf8(content);
     }
-    return decodeBase64Utf8(content);
+
+    const fileSha = data && data.sha ? String(data.sha) : '';
+    if (fileSha) {
+      const blobUrl = `https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/git/blobs/${encodeURIComponent(fileSha)}`;
+      const br = await ghFetch(blobUrl, c.token);
+      if (br.ok) {
+        const blob = await br.json().catch(() => null);
+        const blobContent = blob && blob.content ? String(blob.content) : '';
+        const blobEnc = blob && blob.encoding ? String(blob.encoding) : '';
+        if (blobEnc === 'base64' && blobContent) {
+          return decodeBase64Utf8(blobContent);
+        }
+      }
+    }
+
+    const doRaw = async (useTokenPrefix=false) => fetch(url, {
+      headers: {
+        ...authHeaders(c.token, useTokenPrefix),
+        'Accept': 'application/vnd.github.raw+json'
+      }
+    });
+
+    let rr = await doRaw(false);
+    if (rr.status === 401) rr = await doRaw(true);
+    if (rr.ok) {
+      return stripBom(await rr.text());
+    }
+
+    const dl = data && data.download_url ? String(data.download_url) : '';
+    if (dl) {
+      const dr = await fetch(dl);
+      if (dr.ok) return stripBom(await dr.text());
+    }
+
+    throw new Error('Unsupported file encoding: ' + enc);
   };
   const toBase64Utf8 = (str) => {
     // Safe base64 for unicode
