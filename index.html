@@ -255,7 +255,8 @@
         <div><label class="fld">data.json path</label><input class="inp" id="ghDataPath" placeholder="data.json"></div>
         <div><label class="fld">history.json path</label><input class="inp" id="ghHistPath" placeholder="history.json"></div>
       </div>
-      <div><label class="fld">Personal access token</label><input class="inp" id="ghToken" type="password" placeholder="ghp_… (Contents: read & write)"></div>
+      <div><label class="fld">Your name (recorded on each commit &amp; saved output)</label><input class="inp" id="ghUploader" placeholder="e.g. Sylvia"></div>
+      <div><label class="fld">Personal access token</label><input class="inp" id="ghToken" type="password" placeholder="ghp_… (Contents: read &amp; write)"></div>
     </div>
   </div>
   <div class="mft"><button class="bb n" data-close>Cancel</button><button class="bb p" id="saveSettings">Save settings</button></div>
@@ -269,7 +270,7 @@
 const LS_DB='pb-db-v3', LS_HIST='pb-history-v3', LS_GH='pb-github-v1', LS_CLEAN='pb-clean-v1';
 let DB={ personFields:[], careerFields:[], people:[], careers:[], prompts:[], recipes:[] };
 let HISTORY=[]; let dirty=false;
-let gh={ owner:'', repo:'', branch:'main', dataPath:'data.json', histPath:'history.json', token:'' };
+let gh={ owner:'', repo:'', branch:'main', dataPath:'data.json', histPath:'history.json', token:'', uploader:'' };
 
 const $=s=>document.querySelector(s); const $$=s=>Array.from(document.querySelectorAll(s));
 const uid=p=>p+'-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -540,7 +541,7 @@ function renderHistory(){
   host.innerHTML=items.map(h=>`<div class="litem">
     <div style="min-width:0">
       <div class="ttl">${esc(h.recipeTitle||h.templateName||'')}</div>
-      <div class="sub">${esc([h.personName,h.careerName].filter(Boolean).join(' · '))} — ${esc(h.createdAt||'')}</div>
+      <div class="sub">${esc([h.personName,h.careerName].filter(Boolean).join(' · '))} — ${esc(h.createdAt||'')}${h.by?' · by '+esc(h.by):''}</div>
       <div class="sub mono" style="margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px">${esc((h.output||'').slice(0,110))}</div>
     </div>
     <div class="row"><button class="bb n sm" onclick="viewHistory('${h.id}')">View</button><button class="bb danger sm" onclick="delHistory('${h.id}')">Delete</button></div>
@@ -597,8 +598,8 @@ window.openPromptGroups=function(){
   editCtx={kind:'promptgroups'};
   const groups=Array.from(new Set(DB.prompts.map(p=>p.group).filter(Boolean)));
   $('#editModal').className='modal'; $('#editTitle').textContent='Prompt groups';
-  $('#editBody').innerHTML=`<p class="muted small" style="margin-top:0">Rename a group here once; it applies to every prompt in it.</p>
-    <div id="promptGroupRows" style="display:flex; flex-wrap:wrap; gap:8px">${groups.length?groups.map(g=>`<input class="inp grp-rename" data-orig="${esc(g)}" value="${esc(g)}">`).join(''):'<span class="muted small">No groups yet. Set a prompt’s group in its editor.</span>'}</div>`;
+  $('#editBody').innerHTML=`<p class="muted small" style="margin-top:0">Rename or remove a group; changes apply to every prompt in it. Removing moves its prompts to General. Add a group from a prompt’s editor.</p>
+    <div id="promptGroupRows" style="display:flex; flex-wrap:wrap; gap:10px">${groups.length?groups.map(g=>`<span class="grp-row" data-orig="${esc(g)}" style="display:inline-flex;align-items:center;gap:3px"><input class="inp" value="${esc(g)}" style="width:auto;min-width:140px"><button class="bb danger sm" type="button" onclick="this.closest('.grp-row').remove()">✕</button></span>`).join(''):'<span class="muted small">No groups yet. Set a prompt’s group in its editor.</span>'}</div>`;
   showOverlay('editOverlay');
 };
 window.delPrompt=function(id){ const used=DB.recipes.filter(r=>r.promptId===id).map(r=>r.title); if(used.length){ if(!confirm('Used by recipe(s): '+used.join(', ')+'. Delete anyway?'))return; } if(!confirm('Delete this prompt?'))return; DB.prompts=DB.prompts.filter(p=>p.id!==id); markDirty(); renderAll(); };
@@ -668,8 +669,8 @@ $('#editSave').addEventListener('click', ()=>{
     let g=$('#prGroup').value; if(!g||g==='__new__') g='General';
     upsert(DB.prompts,{id:editCtx.id||uid('pr'), title:$('#prTitle').value.trim()||'Untitled prompt', group:g, body:$('#prBody').value});
   } else if(k==='promptgroups'){
-    const map={}; $$('#promptGroupRows .grp-rename').forEach(inp=>{ const o=inp.dataset.orig, n=inp.value.trim()||o; if(o) map[o]=n; });
-    DB.prompts.forEach(p=>{ if(map[p.group]) p.group=map[p.group]; });
+    const remaining={}; $$('#promptGroupRows .grp-row').forEach(row=>{ const o=row.dataset.orig; const n=row.querySelector('input').value.trim()||o; remaining[o]=n; });
+    DB.prompts.forEach(p=>{ if(p.group in remaining) p.group=remaining[p.group]; else if(p.group) p.group='General'; });
   } else if(k==='recipe'){
     const d=editCtx.draft; const subject=$('#rcSubject').value;
     upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', promptId:$('#rcPrompt').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
@@ -686,44 +687,52 @@ function groupOptionsHTML(groups, cur){
   return all.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__new__">＋ New group…</option>`;
 }
 window.onGroupSelect=function(sel){ if(sel.value==='__new__'){ const n=prompt('New group name:'); if(n&&n.trim()){ const o=document.createElement('option'); o.value=n.trim(); o.textContent=n.trim(); sel.insertBefore(o, sel.lastElementChild); sel.value=n.trim(); } else { sel.selectedIndex=0; } } };
+window.onGroupRename=function(i,val){ schemaCtx.groups[i]=val; refreshGroupSelects(); };
+window.addGroup=function(){ schemaCtx.groups.push('New Group'); renderGroupRows(); refreshGroupSelects(); };
+window.delGroup=function(i){ if(schemaCtx.groups.length<=1){ alert('Keep at least one group.'); return; } schemaCtx.groups.splice(i,1); $$('#schemaRows .schema-row').forEach(r=>{ let gi=parseInt(r.dataset.gi||'0',10); if(gi===i) gi=0; else if(gi>i) gi--; r.dataset.gi=String(gi); }); renderGroupRows(); refreshGroupSelects(); };
+function renderGroupRows(){ $('#groupRows').innerHTML=schemaCtx.groups.map((g,i)=>`<span style="display:inline-flex;align-items:center;gap:3px"><input class="inp grp-rename" value="${esc(g)}" oninput="onGroupRename(${i}, this.value)" style="width:auto;min-width:140px"><button class="bb danger sm" type="button" title="Remove group" onclick="delGroup(${i})">✕</button></span>`).join(''); }
+function refreshGroupSelects(){ $$('#schemaRows .schema-row').forEach(r=>{ const sel=r.querySelector('.grpi'); let gi=parseInt(r.dataset.gi||'0',10); if(gi<0||gi>=schemaCtx.groups.length) gi=0; r.dataset.gi=String(gi); sel.innerHTML=schemaCtx.groups.map((g,i)=>`<option value="${i}" ${i===gi?'selected':''}>${esc(g)}</option>`).join(''); }); }
 window.openSchema=function(which){
   const isP=which==='person';
   const defs=which==='person'?DB.personFields:DB.careerFields;
-  const groups=Array.from(new Set(defs.map(f=>f.group).filter(Boolean)));
+  let groups=Array.from(new Set(defs.map(f=>f.group||'General'))); if(!groups.length) groups=['General'];
   schemaCtx={which, groups};
   $('#schemaTitle').textContent='Manage '+which+' fields';
   $('#schemaBody').innerHTML=`
     <p class="muted small" style="margin-top:0">Every ${which} shares these fields. The ${isP?'Name':'Title'} is built in. You set the <b>display label</b>; the internal key is generated for you. <b>output</b> fields are filled by AI results (via Generate) and reused downstream; <b>manual</b> fields you type.</p>
-    <label class="fld">Groups (rename here, applies everywhere)</label>
-    <div id="groupRows" style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 18px">${groups.length?groups.map(g=>`<input class="inp grp-rename" data-orig="${esc(g)}" value="${esc(g)}">`).join(''):'<span class="muted small">No groups yet. Add one from a field’s Group dropdown.</span>'}</div>
+    <label class="fld">Groups</label>
+    <div class="help-hint" style="margin-top:0;margin-bottom:8px">Rename, add, or remove groups. Renaming applies to every field in the group; removing a group moves its fields to the first group.</div>
+    <div id="groupRows" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px"></div>
+    <button class="bb n sm" type="button" onclick="addGroup()" style="margin-bottom:18px">+ Add group</button>
     <div class="srow" style="font-weight:700;color:var(--ink-600)"><div>Display label</div><div>Group</div><div>Kind</div><div></div></div>
-    <div id="schemaRows">${defs.map(f=>schemaRow(f, groups)).join('')}</div>
+    <div id="schemaRows">${defs.map(f=>schemaRow(f)).join('')}</div>
     <button class="bb n sm" type="button" onclick="addSchemaRow()" style="margin-top:6px">+ Add field</button>`;
+  renderGroupRows(); refreshGroupSelects();
   showOverlay('schemaOverlay');
 };
-function schemaRow(f, groups){
-  f=f||{key:'',label:'',kind:'manual',group:''};
-  groups=groups||(schemaCtx&&schemaCtx.groups)||[];
-  return `<div class="srow schema-row" data-orig="${esc(f.key||'')}">
+function schemaRow(f){
+  f=f||{key:'',label:'',kind:'manual',group:(schemaCtx&&schemaCtx.groups[0])||'General'};
+  let gi=schemaCtx?schemaCtx.groups.indexOf(f.group):-1; if(gi<0) gi=0;
+  return `<div class="srow schema-row" data-orig="${esc(f.key||'')}" data-gi="${gi}">
     <input class="inp labi" value="${esc(f.label||'')}" placeholder="e.g. Age">
-    <select class="inp grpi" onchange="onGroupSelect(this)">${groupOptionsHTML(groups, f.group)}</select>
+    <select class="inp grpi" onchange="this.closest('.schema-row').dataset.gi=this.value"></select>
     <select class="inp kindi"><option value="manual" ${f.kind!=='output'?'selected':''}>manual</option><option value="output" ${f.kind==='output'?'selected':''}>output</option></select>
     <button class="bb danger sm" type="button" onclick="this.closest('.schema-row').remove()">✕</button>
   </div>`;
 }
-window.addSchemaRow=function(){ const c=$('#schemaRows'); const d=document.createElement('div'); d.innerHTML=schemaRow(null, schemaCtx.groups); c.appendChild(d.firstElementChild); };
+window.addSchemaRow=function(){ const c=$('#schemaRows'); const d=document.createElement('div'); d.innerHTML=schemaRow(null); c.appendChild(d.firstElementChild); refreshGroupSelects(); };
 $('#schemaSave').addEventListener('click', ()=>{
   if(!schemaCtx)return; const which=schemaCtx.which;
-  const renameG={}; $$('#groupRows .grp-rename').forEach(inp=>{ const o=inp.dataset.orig, n=inp.value.trim()||o; if(o) renameG[o]=n; });
+  const groups=schemaCtx.groups.map(g=>(g||'').trim()||'General');
   const rows=$$('#schemaRows .schema-row'); const newDefs=[], seen=new Set();
   const existingKeys=new Set(rows.map(r=>r.dataset.orig).filter(Boolean));
   for(const r of rows){
     const label=r.querySelector('.labi').value.trim();
     if(!label){ alert('Display label cannot be empty.'); return; }
     const kind=r.querySelector('.kindi').value;
-    let group=r.querySelector('.grpi').value; if(!group||group==='__new__') group='General'; group=renameG[group]||group;
-    let key=r.dataset.orig;
-    if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
+    let gi=parseInt(r.dataset.gi||'0',10); if(gi<0||gi>=groups.length) gi=0;
+    const group=groups[gi]||'General';
+    let key=r.dataset.orig; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
     seen.add(key); newDefs.push({key,label,kind,group});
   }
@@ -746,15 +755,15 @@ $('#btnSaveOutput').addEventListener('click', ()=>{
   if(!dest){ toast('No '+recipe.outputTarget+' to save into.'); return; }
   dest.values[recipe.outputKey]=out;
   const {prompt}=assembleRecipe(recipe, person, career);
-  HISTORY.push({ id:uid('h'), createdAt:new Date().toISOString().slice(0,16).replace('T',' '),
-    recipeId:recipe.id, recipeTitle:recipe.title, personId:person.id, personName:pName(person),
+  HISTORY.push({ id:uid('h'), createdAt:new Date().toISOString().slice(0,16).replace('T',' '), by:gh.uploader||'',
+    recipeId:recipe.id, recipeTitle:recipe.title, personId:person&&person.id, personName:person?pName(person):'',
     careerId:career&&career.id, careerName:career?cName(career):'', prompt, output:out });
   $('#genOutput').value=''; markDirty(); renderAll(); toast('Saved to '+recipe.outputTarget+'.'+recipe.outputKey+' + history.');
 });
 window.viewHistory=function(id){ const h=HISTORY.find(x=>x.id===id); if(!h)return;
   $('#viewModal').className='modal xwide';
   $('#viewTitle').textContent=h.recipeTitle||'';
-  $('#viewBody').innerHTML=`<div class="muted small" style="margin-bottom:12px">${esc([h.personName,h.careerName].filter(Boolean).join(' · '))} — ${esc(h.createdAt||'')}</div>
+  $('#viewBody').innerHTML=`<div class="muted small" style="margin-bottom:12px">${esc([h.personName,h.careerName].filter(Boolean).join(' · '))} — ${esc(h.createdAt||'')}${h.by?' · by '+esc(h.by):''}</div>
     <div class="hist-2col">
       <div><label class="fld">Prompt used (snapshot)</label><div class="preview" style="max-height:64vh">${esc(h.prompt)}</div></div>
       <div><label class="fld">Output</label><div class="rendered" style="max-height:64vh">${renderMarkdown(h.output)}</div></div>
@@ -778,13 +787,16 @@ $('#btnGit').addEventListener('click', async ()=>{
     const files=[{path:gh.dataPath||'data.json',content:JSON.stringify(DB,null,2)},{path:gh.histPath||'history.json',content:JSON.stringify(HISTORY,null,2)}];
     const treeItems=[]; for(const f of files){ const blob=await ghApi(base+'/git/blobs',{method:'POST',body:JSON.stringify({content:b64(f.content),encoding:'base64'})}); treeItems.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha}); }
     const tree=await ghApi(base+'/git/trees',{method:'POST',body:JSON.stringify({base_tree:baseTree,tree:treeItems})});
-    const commit=await ghApi(base+'/git/commits',{method:'POST',body:JSON.stringify({message:'Update prompt tool data ('+new Date().toISOString().slice(0,16).replace('T',' ')+')',tree:tree.sha,parents:[headSha]})});
+    const who=gh.uploader||'Prompt Builder'; const stamp=new Date().toISOString().slice(0,16).replace('T',' ');
+    const cbody={ message:'Update data by '+who+' ('+stamp+')', tree:tree.sha, parents:[headSha] };
+    if(gh.uploader){ const em=(gh.uploader.toLowerCase().replace(/[^\w]+/g,'.').replace(/^\.+|\.+$/g,'')||'user')+'@users.noreply.github.com'; cbody.author={name:gh.uploader, email:em}; cbody.committer={name:gh.uploader, email:em}; }
+    const commit=await ghApi(base+'/git/commits',{method:'POST',body:JSON.stringify(cbody)});
     await ghApi(base+'/git/refs/heads/'+gh.branch,{method:'PATCH',body:JSON.stringify({sha:commit.sha})});
     dirty=false; markClean(); renderStatus(); toast('Committed to '+gh.owner+'/'+gh.repo+'@'+gh.branch);
   }catch(e){ alert('GitHub commit failed:\n'+e.message); } finally{ btn.disabled=false; btn.textContent=old; }
 });
-$('#btnSettings').addEventListener('click', ()=>{ $('#ghOwner').value=gh.owner; $('#ghRepo').value=gh.repo; $('#ghBranch').value=gh.branch||'main'; $('#ghDataPath').value=gh.dataPath||'data.json'; $('#ghHistPath').value=gh.histPath||'history.json'; $('#ghToken').value=gh.token; showOverlay('settingsOverlay'); });
-$('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').value.trim(), repo:$('#ghRepo').value.trim(), branch:$('#ghBranch').value.trim()||'main', dataPath:$('#ghDataPath').value.trim()||'data.json', histPath:$('#ghHistPath').value.trim()||'history.json', token:$('#ghToken').value.trim() }; try{localStorage.setItem(LS_GH,JSON.stringify(gh));}catch(e){} hideOverlay('settingsOverlay'); toast('Settings saved.');
+$('#btnSettings').addEventListener('click', ()=>{ $('#ghOwner').value=gh.owner; $('#ghRepo').value=gh.repo; $('#ghBranch').value=gh.branch||'main'; $('#ghDataPath').value=gh.dataPath||'data.json'; $('#ghHistPath').value=gh.histPath||'history.json'; $('#ghUploader').value=gh.uploader||''; $('#ghToken').value=gh.token; showOverlay('settingsOverlay'); });
+$('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').value.trim(), repo:$('#ghRepo').value.trim(), branch:$('#ghBranch').value.trim()||'main', dataPath:$('#ghDataPath').value.trim()||'data.json', histPath:$('#ghHistPath').value.trim()||'history.json', uploader:$('#ghUploader').value.trim(), token:$('#ghToken').value.trim() }; try{localStorage.setItem(LS_GH,JSON.stringify(gh));}catch(e){} hideOverlay('settingsOverlay'); toast('Settings saved.');
   if(gh.owner&&gh.repo&&gh.token && confirm('Load data from '+gh.owner+'/'+gh.repo+' now? This discards any local unsaved changes.')){ try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadFromGitHub(false); }
 });
 
@@ -792,7 +804,7 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 function showOverlay(id){ $('#'+id).classList.add('show'); }
 function hideOverlay(id){ $('#'+id).classList.remove('show'); }
 $$('[data-close]').forEach(b=>b.addEventListener('click', e=>e.target.closest('.overlay').classList.remove('show')));
-$$('.overlay').forEach(o=>o.addEventListener('click', e=>{ if(e.target===o) o.classList.remove('show'); }));
+$$('.overlay').forEach(o=>{ o.addEventListener('mousedown', e=>{ o._downSelf=(e.target===o); }); o.addEventListener('click', e=>{ if(e.target===o && o._downSelf) o.classList.remove('show'); }); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show').forEach(o=>o.classList.remove('show')); });
 $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); }));
 $('#genRecipe').addEventListener('change', buildPicker);
