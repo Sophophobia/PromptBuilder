@@ -82,8 +82,14 @@
 
   .frow{display:grid; grid-template-columns:160px 1fr 130px 104px auto; gap:8px; align-items:center; margin-bottom:8px}
   @media(max-width:700px){.frow{grid-template-columns:1fr}}
-  .srow{display:grid; grid-template-columns:1fr 170px 120px auto; gap:8px; align-items:center; margin-bottom:8px}
+  .srow{display:grid; grid-template-columns:24px 1fr 160px 116px auto; gap:8px; align-items:center; margin-bottom:8px}
   @media(max-width:700px){.srow{grid-template-columns:1fr}}
+  .drag-h{cursor:grab; color:var(--ink-400); text-align:center; user-select:none; font-size:15px}
+  .drag-h:active{cursor:grabbing}
+  .schema-row.dragging{opacity:.4}
+  .schema-grp{margin:14px 0 8px; cursor:default}
+  .schema-grp.drop-hot{background:#fff3f2; outline:2px dashed var(--red-700); border-radius:8px}
+  .srow.drop-hot{outline:2px dashed var(--red-700); border-radius:8px}
   .grp-rename{width:auto; min-width:150px}
   .greorder-row{display:flex; align-items:center; gap:6px; margin-bottom:8px}
   .greorder-row input{flex:1}
@@ -214,7 +220,9 @@
   </section>
 
   <section class="view" id="view-recipes">
-    <div class="between" style="margin-bottom:14px"><h2>Recipes</h2><button class="bb p" id="btnAddRecipe">+ Add recipe</button></div>
+    <div class="between" style="margin-bottom:14px"><h2>Recipes</h2>
+      <div class="row"><button class="bb g" id="btnRecipeGroups">⚙ Groups</button><button class="bb p" id="btnAddRecipe">+ Add recipe</button></div>
+    </div>
     <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">A recipe = a prompt + which fields get appended under it + where the output is saved. Include an <b>output</b> field from an upstream recipe to chain steps.</div>
     <div class="stack" id="listRecipes"></div>
   </section>
@@ -276,7 +284,7 @@
 <script>
 /* ===================== state ===================== */
 const LS_DB='pb-db-v3', LS_HIST='pb-history-v3', LS_GH='pb-github-v1', LS_CLEAN='pb-clean-v1';
-let DB={ personFields:[], careerFields:[], people:[], careers:[], prompts:[], recipes:[] };
+let DB={ personFields:[], careerFields:[], personGroups:[], careerGroups:[], promptGroups:[], recipeGroups:[], people:[], careers:[], prompts:[], recipes:[] };
 let HISTORY=[]; let dirty=false;
 let gh={ owner:'', repo:'', branch:'main', dataPath:'data.json', histPath:'history.json', token:'', uploader:'' };
 
@@ -400,21 +408,23 @@ function normalizeDB(d){
   const pf=(d.personFields||[]).filter(f=>f.key&&f.key!=='name').map(normFieldDef);
   const cf=(d.careerFields||[]).filter(f=>f.key&&f.key!=='title').map(normFieldDef);
   const prompts=(d.prompts||[]).map(p=>({id:p.id||uid('pr'), title:p.title||'Untitled prompt', group:p.group||'General', body:p.body||''}));
+  const recipes=(d.recipes||[]).map(normRecipe);
   return {
     personFields:pf, careerFields:cf,
     personGroups:orderedGroups(d.personGroups, pf),
     careerGroups:orderedGroups(d.careerGroups, cf),
     promptGroups:orderedGroups(d.promptGroups, prompts),
+    recipeGroups:orderedGroups(d.recipeGroups, recipes),
     careers:(d.careers||[]).map(c=>({id:c.id||uid('c'), title:(c.title!=null?c.title:((c.values&&c.values.title)||'Untitled career')), values:valuesFor(cf,c.values)})),
     people:(d.people||[]).map(p=>({id:p.id||uid('p'), name:(p.name!=null?p.name:((p.values&&p.values.name)||'Untitled person')), careerId:p.careerId||'', values:valuesFor(pf,p.values)})),
     prompts:prompts,
-    recipes:(d.recipes||[]).map(normRecipe)
+    recipes:recipes
   };
 }
 function normRecipe(r){
   let personKeys=r.personKeys, careerKeys=r.careerKeys;
   if(r.mappings && !personKeys && !careerKeys){ const pk=new Set(),ck=new Set(); Object.values(r.mappings).forEach(m=>{ (m.keys||[]).forEach(k=>(m.src==='career'?ck:pk).add(k)); }); personKeys=[...pk]; careerKeys=[...ck]; }
-  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', promptId:r.promptId||'', subject:r.subject==='career'?'career':'person', personKeys:personKeys||[], careerKeys:careerKeys||[], outputTarget:r.outputTarget||'person', outputKey:r.outputKey||'' };
+  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', group:r.group||'General', promptId:r.promptId||'', subject:r.subject==='career'?'career':'person', personKeys:personKeys||[], careerKeys:careerKeys||[], outputTarget:r.outputTarget||'person', outputKey:r.outputKey||'' };
 }
 
 /* ===================== assembly ===================== */
@@ -529,7 +539,9 @@ function renderPrompts(){
 function renderRecipes(){
   const host=$('#listRecipes');
   if(!DB.recipes.length){ host.innerHTML='<div class="empty">No recipes yet.</div>'; return; }
-  host.innerHTML=DB.recipes.map(r=>{
+  const map={}; DB.recipes.forEach(r=>{ const g=r.group||'General'; (map[g]=map[g]||[]).push(r); });
+  const order=[],seen=new Set(); (DB.recipeGroups||[]).forEach(g=>{ if(map[g]){order.push(g);seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g))order.push(g); });
+  host.innerHTML=order.map(g=>`<div class="grp-head">${esc(g)}</div>`+map[g].map(r=>{
     const pr=promptById(r.promptId);
     return `<div class="litem">
       <div style="min-width:0">
@@ -539,7 +551,7 @@ function renderRecipes(){
       </div>
       <div class="row"><button class="bb n sm" onclick="openRecipe('${r.id}')">Edit</button><button class="bb danger sm" onclick="delRecipe('${r.id}')">Delete</button></div>
     </div>`;
-  }).join('');
+  }).join('')).join('');
 }
 
 /* ---- history ---- */
@@ -604,7 +616,7 @@ window.openPrompt=function(id){
   $('#editBody').innerHTML=`
     <div class="grid2">
       <div><label class="fld">Title</label><input class="inp" id="prTitle" value="${esc(p.title)}" placeholder="e.g. Milestone"></div>
-      <div><label class="fld">Group</label><select class="inp" id="prGroup">${pgroups.map(g=>`<option value="${esc(g)}" ${g===(p.group||'General')?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
+      <div><label class="fld">Group</label><select class="inp" id="prGroup" onchange="gSelNew(this)">${gOpts(DB.promptGroups, p.group||'General')}</select></div>
     </div>
     <div style="height:14px"></div>
     <label class="fld">Body</label>
@@ -620,7 +632,10 @@ window.openRecipe=function(id){
   editCtx={kind:'recipe', id, draft:{ promptId:r.promptId, subject:r.subject||'person', personKeys:[...(r.personKeys||[])], careerKeys:[...(r.careerKeys||[])], outputTarget:r.outputTarget, outputKey:r.outputKey } };
   $('#editModal').className='modal wide'; $('#editTitle').textContent=(id?'Edit ':'New ')+'recipe';
   $('#editBody').innerHTML=`
-    <label class="fld">Title</label><input class="inp" id="rcTitle" value="${esc(r.title)}" placeholder="e.g. Milestone">
+    <div class="grid2">
+      <div><label class="fld">Title</label><input class="inp" id="rcTitle" value="${esc(r.title)}" placeholder="e.g. Milestone"></div>
+      <div><label class="fld">Group</label><select class="inp" id="rcGroup" onchange="gSelNew(this)">${gOpts(DB.recipeGroups, r.group||'General')}</select></div>
+    </div>
     <div style="height:14px"></div>
     <label class="fld">Prompt</label>
     <select class="inp" id="rcPrompt"><option value="">— select prompt —</option>${DB.prompts.map(p=>`<option value="${p.id}">${esc(p.title)}</option>`).join('')}</select>
@@ -676,11 +691,14 @@ $('#editSave').addEventListener('click', ()=>{
     if(k==='people') upsert(DB.people,{id:editCtx.id||uid('p'), name:titleVal||'Untitled person', careerId:$('#entCareer').value||'', values});
     else upsert(DB.careers,{id:editCtx.id||uid('c'), title:titleVal||'Untitled career', values});
   } else if(k==='prompt'){
-    let g=$('#prGroup').value; if(!g||g==='__new__') g='General';
+    let g=$('#prGroup').value; if(!g||g==='__newg__') g='General';
+    if(DB.promptGroups.indexOf(g)<0) DB.promptGroups.push(g);
     upsert(DB.prompts,{id:editCtx.id||uid('pr'), title:$('#prTitle').value.trim()||'Untitled prompt', group:g, body:$('#prBody').value});
   } else if(k==='recipe'){
     const d=editCtx.draft; const subject=$('#rcSubject').value;
-    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', promptId:$('#rcPrompt').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
+    let g=$('#rcGroup').value; if(!g||g==='__newg__') g='General';
+    if(DB.recipeGroups.indexOf(g)<0) DB.recipeGroups.push(g);
+    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, promptId:$('#rcPrompt').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
   }
   hideOverlay('editOverlay'); markDirty(); renderAll();
 });
@@ -689,7 +707,9 @@ function upsert(arr,o){ const i=arr.findIndex(x=>x.id===o.id); if(i>=0)arr[i]=o;
 /* ===================== schema manager ===================== */
 let schemaCtx=null;
 function slugKey(label, taken){ let base=String(label||'field').toLowerCase().replace(/[^\w]+/g,'_').replace(/^_+|_+$/g,'')||'field'; if(base==='name'||base==='title') base+='_field'; let k=base,i=2; while(taken.has(k)){ k=base+'_'+i; i++; } return k; }
-function groupListFor(which){ return which==='person'?DB.personGroups:which==='career'?DB.careerGroups:DB.promptGroups; }
+function groupListFor(which){ return which==='person'?DB.personGroups:which==='career'?DB.careerGroups:which==='recipe'?DB.recipeGroups:DB.promptGroups; }
+function gOpts(list, cur){ const a=(list&&list.length?list.slice():['General']); if(cur&&a.indexOf(cur)<0)a.push(cur); return a.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__newg__">＋ New group…</option>`; }
+window.gSelNew=function(sel){ if(sel.value==='__newg__'){ const n=prompt('New group name:'); if(n&&n.trim()){ const o=document.createElement('option'); o.value=n.trim(); o.textContent=n.trim(); sel.insertBefore(o, sel.lastElementChild); sel.value=n.trim(); } else { sel.selectedIndex=0; } } };
 
 /* ---- groups popup (per type, ordered) ---- */
 let groupsCtx=null;
@@ -720,56 +740,75 @@ $('#groupsSave').addEventListener('click', ()=>{
   const finalSet=new Set(names);
   const apply=items=>items.forEach(it=>{ let g=it.group; if(renameMap[g]!==undefined) g=renameMap[g]; if(!finalSet.has(g)) g=names[0]; it.group=g; });
   if(which==='prompt'){ apply(DB.prompts); DB.promptGroups=names; }
+  else if(which==='recipe'){ apply(DB.recipes); DB.recipeGroups=names; }
   else if(which==='person'){ apply(DB.personFields); DB.personGroups=names; }
   else { apply(DB.careerFields); DB.careerGroups=names; }
   hideOverlay('groupsOverlay'); markDirty(); renderAll(); toast('Groups updated.');
 });
 
 /* ---- manage fields (group picked from the stored ordered list; order managed in Groups popup) ---- */
+let schemaDrag=null;
 window.openSchema=function(which){
   const isP=which==='person';
   const defs=which==='person'?DB.personFields:DB.careerFields;
-  schemaCtx={which, groups:(groupListFor(which)||[]).slice()};
-  if(!schemaCtx.groups.length) schemaCtx.groups=['General'];
+  let groups=(groupListFor(which)||[]).slice(); if(!groups.length) groups=['General'];
+  schemaCtx={which, groups, fields:defs.map(f=>({_id:uid('sf'), key:f.key, label:f.label, kind:f.kind, group:groups.indexOf(f.group)>=0?f.group:groups[0]}))};
   $('#schemaTitle').textContent='Manage '+which+' fields';
   $('#schemaBody').innerHTML=`
-    <p class="muted small" style="margin-top:0">Every ${which} shares these fields. The ${isP?'Name':'Title'} is built in. You set the <b>display label</b>; the key is generated for you. Manage groups and their order with <b>⚙ Groups</b> on the ${isP?'People':'Careers'} tab.</p>
-    <div class="srow" style="font-weight:700;color:var(--ink-600)"><div>Display label</div><div>Group</div><div>Kind</div><div></div></div>
-    <div id="schemaRows">${defs.map(f=>schemaRow(f)).join('')}</div>
+    <p class="muted small" style="margin-top:0">Every ${which} shares these fields. The ${isP?'Name':'Title'} is built in. You set the <b>display label</b>; the key is generated for you. Drag the ⠿ handle to reorder, or drop onto a group heading to move a field there. Reorder/rename groups with <b>⚙ Groups</b> on the ${isP?'People':'Careers'} tab.</p>
+    <div class="srow" style="font-weight:700;color:var(--ink-600)"><div></div><div>Display label</div><div>Group</div><div>Kind</div><div></div></div>
+    <div id="schemaRows"></div>
     <button class="bb n sm" type="button" onclick="addSchemaRow()" style="margin-top:6px">+ Add field</button>`;
-  showOverlay('schemaOverlay');
+  renderSchemaRows(); showOverlay('schemaOverlay');
 };
-function schemaRow(f){
-  const groups=(schemaCtx&&schemaCtx.groups.length?schemaCtx.groups:['General']);
-  f=f||{key:'',label:'',kind:'manual',group:groups[0]};
-  const cur=groups.indexOf(f.group)>=0?f.group:groups[0];
-  const opts=groups.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('');
-  return `<div class="srow schema-row" data-orig="${esc(f.key||'')}">
+function syncSchemaInputs(){ $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f){ f.label=r.querySelector('.labi').value; f.kind=r.querySelector('.kindi').value; } }); }
+function groupSelOpts(cur){ const a=schemaCtx.groups.slice(); if(cur&&a.indexOf(cur)<0)a.push(cur); return a.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__newg__">＋ New group…</option>`; }
+function schemaRowHTML(f){
+  return `<div class="srow schema-row" data-id="${f._id}" ondragover="schemaRowOver(event)" ondragleave="this.classList.remove('drop-hot')" ondrop="schemaDrop(event,'${f._id}')">
+    <div class="drag-h" draggable="true" ondragstart="schemaDragStart(event,'${f._id}')" ondragend="schemaDragEnd()">⠿</div>
     <input class="inp labi" value="${esc(f.label||'')}" placeholder="e.g. Age">
-    <select class="inp grpi">${opts}</select>
+    <select class="inp grpi" onchange="onSchemaGroupChange('${f._id}',this.value)">${groupSelOpts(f.group)}</select>
     <select class="inp kindi"><option value="manual" ${f.kind!=='output'?'selected':''}>manual</option><option value="output" ${f.kind==='output'?'selected':''}>output</option></select>
-    <button class="bb danger sm" type="button" onclick="this.closest('.schema-row').remove()">✕</button>
+    <button class="bb danger sm" type="button" onclick="removeSchemaField('${f._id}')">✕</button>
   </div>`;
 }
-window.addSchemaRow=function(){ const c=$('#schemaRows'); const d=document.createElement('div'); d.innerHTML=schemaRow(null); c.appendChild(d.firstElementChild); };
+function renderSchemaRows(){
+  const host=$('#schemaRows'); let html='';
+  schemaCtx.groups.forEach(g=>{
+    html+=`<div class="grp-head schema-grp" data-group="${esc(g)}" ondragover="schemaGrpOver(event,this)" ondragleave="this.classList.remove('drop-hot')" ondrop="schemaDropGroup(event,'${esc(g)}')">${esc(g)}</div>`;
+    const items=schemaCtx.fields.filter(f=>f.group===g);
+    if(items.length) items.forEach(f=> html+=schemaRowHTML(f));
+    else html+=`<div class="muted small" style="padding:2px 0 8px 6px" ondragover="event.preventDefault()" ondrop="schemaDropGroup(event,'${esc(g)}')">(empty — drag a field here)</div>`;
+  });
+  const known=new Set(schemaCtx.groups);
+  Array.from(new Set(schemaCtx.fields.map(f=>f.group).filter(g=>!known.has(g)))).forEach(g=>{ html+=`<div class="grp-head schema-grp">${esc(g)} <span class="muted small">(removed group)</span></div>`; schemaCtx.fields.filter(f=>f.group===g).forEach(f=>html+=schemaRowHTML(f)); });
+  host.innerHTML=html;
+}
+window.schemaDragStart=function(e,id){ schemaDrag=id; const row=e.target.closest('.schema-row'); if(row) row.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',id); };
+window.schemaDragEnd=function(){ schemaDrag=null; $$('#schemaRows .dragging').forEach(r=>r.classList.remove('dragging')); $$('#schemaRows .drop-hot').forEach(r=>r.classList.remove('drop-hot')); };
+window.schemaRowOver=function(e){ if(!schemaDrag) return; e.preventDefault(); e.currentTarget.classList.add('drop-hot'); };
+window.schemaGrpOver=function(e,el){ if(!schemaDrag) return; e.preventDefault(); el.classList.add('drop-hot'); };
+window.schemaDrop=function(e,id){ e.preventDefault(); $$('#schemaRows .drop-hot').forEach(x=>x.classList.remove('drop-hot')); if(!schemaDrag||schemaDrag===id) return; syncSchemaInputs(); const a=schemaCtx.fields; const di=a.findIndex(f=>f._id===schemaDrag); const target=a.find(f=>f._id===id); if(di<0||!target) return; const [d]=a.splice(di,1); d.group=target.group; const ti=a.findIndex(f=>f._id===id); a.splice(ti,0,d); renderSchemaRows(); };
+window.schemaDropGroup=function(e,g){ e.preventDefault(); $$('#schemaRows .drop-hot').forEach(x=>x.classList.remove('drop-hot')); if(!schemaDrag) return; syncSchemaInputs(); const a=schemaCtx.fields; const di=a.findIndex(f=>f._id===schemaDrag); if(di<0) return; const [d]=a.splice(di,1); d.group=g; let last=-1; a.forEach((f,i)=>{ if(f.group===g) last=i; }); a.splice(last+1,0,d); renderSchemaRows(); };
+window.onSchemaGroupChange=function(id,val){ syncSchemaInputs(); if(val==='__newg__'){ const n=prompt('New group name:'); if(n&&n.trim()){ if(schemaCtx.groups.indexOf(n.trim())<0) schemaCtx.groups.push(n.trim()); val=n.trim(); } else { renderSchemaRows(); return; } } const f=schemaCtx.fields.find(x=>x._id===id); if(f) f.group=val; renderSchemaRows(); };
+window.addSchemaRow=function(){ syncSchemaInputs(); schemaCtx.fields.push({_id:uid('sf'), key:'', label:'', kind:'manual', group:schemaCtx.groups[0]||'General'}); renderSchemaRows(); };
+window.removeSchemaField=function(id){ syncSchemaInputs(); schemaCtx.fields=schemaCtx.fields.filter(f=>f._id!==id); renderSchemaRows(); };
 $('#schemaSave').addEventListener('click', ()=>{
-  if(!schemaCtx)return; const which=schemaCtx.which;
-  const rows=$$('#schemaRows .schema-row'); const newDefs=[], seen=new Set();
-  const existingKeys=new Set(rows.map(r=>r.dataset.orig).filter(Boolean));
-  for(const r of rows){
-    const label=r.querySelector('.labi').value.trim();
+  if(!schemaCtx)return; syncSchemaInputs(); const which=schemaCtx.which;
+  const newDefs=[], seen=new Set();
+  const existingKeys=new Set(schemaCtx.fields.map(f=>f.key).filter(Boolean));
+  for(const f of schemaCtx.fields){
+    const label=(f.label||'').trim();
     if(!label){ alert('Display label cannot be empty.'); return; }
-    const kind=r.querySelector('.kindi').value;
-    const group=r.querySelector('.grpi').value||'General';
-    let key=r.dataset.orig; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
+    let key=f.key; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
-    seen.add(key); newDefs.push({key,label,kind,group});
+    seen.add(key); newDefs.push({key, label, kind:f.kind, group:f.group||'General'});
   }
   const newKeys=new Set(newDefs.map(f=>f.key));
   const entities=which==='person'?DB.people:DB.careers;
   entities.forEach(ent=>{ const nv={}; newDefs.forEach(f=>{ nv[f.key]=(ent.values[f.key]!=null?ent.values[f.key]:''); }); ent.values=nv; });
   DB.recipes.forEach(rc=>{ const arr=which==='person'?'personKeys':'careerKeys'; rc[arr]=(rc[arr]||[]).filter(k=>newKeys.has(k)); if(rc.outputTarget===which && !newKeys.has(rc.outputKey)) rc.outputKey=''; });
-  if(which==='person') DB.personFields=newDefs; else DB.careerFields=newDefs;
+  if(which==='person'){ DB.personFields=newDefs; DB.personGroups=schemaCtx.groups.slice(); } else { DB.careerFields=newDefs; DB.careerGroups=schemaCtx.groups.slice(); }
   hideOverlay('schemaOverlay'); markDirty(); renderAll(); toast('Fields updated.');
 });
 
@@ -847,6 +886,7 @@ $('#btnAddPrompt').addEventListener('click', ()=>openPrompt(null));
 $('#btnPromptGroups').addEventListener('click', ()=>openGroups('prompt'));
 $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
 $('#btnCareerGroups').addEventListener('click', ()=>openGroups('career'));
+$('#btnRecipeGroups').addEventListener('click', ()=>openGroups('recipe'));
 $('#btnAddRecipe').addEventListener('click', ()=>openRecipe(null));
 $('#btnPersonSchema').addEventListener('click', ()=>openSchema('person'));
 $('#btnCareerSchema').addEventListener('click', ()=>openSchema('career'));
