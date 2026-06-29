@@ -85,6 +85,8 @@
   .srow{display:grid; grid-template-columns:1fr 170px 120px auto; gap:8px; align-items:center; margin-bottom:8px}
   @media(max-width:700px){.srow{grid-template-columns:1fr}}
   .grp-rename{width:auto; min-width:150px}
+  .greorder-row{display:flex; align-items:center; gap:6px; margin-bottom:8px}
+  .greorder-row input{flex:1}
 
   .map-row{border:1px solid var(--ink-200); border-radius:10px; padding:11px; margin-bottom:10px; background:var(--surface-2)}
   .map-row .map-var{font-weight:700; font-family:ui-monospace,monospace; color:var(--red-800); margin-bottom:7px}
@@ -192,14 +194,14 @@
 
   <section class="view" id="view-people">
     <div class="between" style="margin-bottom:14px"><h2>People</h2>
-      <div class="row"><button class="bb g" id="btnPersonSchema">⚙ Manage fields</button><button class="bb p" id="btnAddPerson">+ Add person</button></div>
+      <div class="row"><button class="bb g" id="btnPersonGroups">⚙ Groups</button><button class="bb g" id="btnPersonSchema">⚙ Manage fields</button><button class="bb p" id="btnAddPerson">+ Add person</button></div>
     </div>
     <div class="stack" id="listPeople"></div>
   </section>
 
   <section class="view" id="view-careers">
     <div class="between" style="margin-bottom:14px"><h2>Careers</h2>
-      <div class="row"><button class="bb g" id="btnCareerSchema">⚙ Manage fields</button><button class="bb p" id="btnAddCareer">+ Add career</button></div>
+      <div class="row"><button class="bb g" id="btnCareerGroups">⚙ Groups</button><button class="bb g" id="btnCareerSchema">⚙ Manage fields</button><button class="bb p" id="btnAddCareer">+ Add career</button></div>
     </div>
     <div class="stack" id="listCareers"></div>
   </section>
@@ -241,6 +243,12 @@
   <div class="mhd"><h3 id="schemaTitle">Manage fields</h3><button class="xbtn" data-close>&times;</button></div>
   <div class="mbody" id="schemaBody"></div>
   <div class="mft"><button class="bb n" data-close>Cancel</button><button class="bb p" id="schemaSave">Save fields</button></div>
+</div></div>
+
+<div class="overlay" id="groupsOverlay"><div class="modal" style="max-width:560px">
+  <div class="mhd"><h3 id="groupsTitle">Manage groups</h3><button class="xbtn" data-close>&times;</button></div>
+  <div class="mbody" id="groupsBody"></div>
+  <div class="mft"><button class="bb n" data-close>Cancel</button><button class="bb p" id="groupsSave">Save groups</button></div>
 </div></div>
 
 <div class="overlay" id="settingsOverlay"><div class="modal" style="max-width:560px">
@@ -380,17 +388,26 @@ async function loadFromGitHub(silent){
   }catch(e){ renderStatus('GitHub load failed'); alert('GitHub load failed:\n'+e.message+'\n\nCheck owner / repo / branch / token in ⚙ Settings.'); }
 }
 function normFieldDef(f){ return { key:f.key, label:f.label||'', kind:(f.kind==='output'?'output':'manual'), group:f.group||'General' }; }
-function groupDefs(defs){ const order=[],map={}; defs.forEach(f=>{ const g=f.group||'General'; if(!map[g]){map[g]=[];order.push(g);} map[g].push(f); }); return order.map(g=>({group:g,items:map[g]})); }
+function groupDefs(defs, order){ const map={}; defs.forEach(f=>{ const g=f.group||'General'; (map[g]=map[g]||[]).push(f); }); const res=[],seen=new Set(); (order||[]).forEach(g=>{ if(map[g]){ res.push({group:g,items:map[g]}); seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g)) res.push({group:g,items:map[g]}); }); return res; }
 function valuesFor(defs,vals){ const v={}; (defs||[]).forEach(f=>{ v[f.key]=(vals&&vals[f.key]!=null)?vals[f.key]:''; }); return v; }
+function orderedGroups(stored, items){
+  if(Array.isArray(stored)&&stored.length) return stored.slice();
+  const out=[], s=new Set(); (items||[]).forEach(it=>{ const g=(it.group)||'General'; if(!s.has(g)){ s.add(g); out.push(g); } });
+  return out.length?out:['General'];
+}
 function normalizeDB(d){
   d=d||{};
   const pf=(d.personFields||[]).filter(f=>f.key&&f.key!=='name').map(normFieldDef);
   const cf=(d.careerFields||[]).filter(f=>f.key&&f.key!=='title').map(normFieldDef);
+  const prompts=(d.prompts||[]).map(p=>({id:p.id||uid('pr'), title:p.title||'Untitled prompt', group:p.group||'General', body:p.body||''}));
   return {
     personFields:pf, careerFields:cf,
+    personGroups:orderedGroups(d.personGroups, pf),
+    careerGroups:orderedGroups(d.careerGroups, cf),
+    promptGroups:orderedGroups(d.promptGroups, prompts),
     careers:(d.careers||[]).map(c=>({id:c.id||uid('c'), title:(c.title!=null?c.title:((c.values&&c.values.title)||'Untitled career')), values:valuesFor(cf,c.values)})),
     people:(d.people||[]).map(p=>({id:p.id||uid('p'), name:(p.name!=null?p.name:((p.values&&p.values.name)||'Untitled person')), careerId:p.careerId||'', values:valuesFor(pf,p.values)})),
-    prompts:(d.prompts||[]).map(p=>({id:p.id||uid('pr'), title:p.title||'Untitled prompt', group:p.group||'General', body:p.body||''})),
+    prompts:prompts,
     recipes:(d.recipes||[]).map(normRecipe)
   };
 }
@@ -497,7 +514,8 @@ function renderCareers(){ entityList('careers'); }
 function renderPrompts(){
   const host=$('#listPrompts');
   if(!DB.prompts.length){ host.innerHTML='<div class="empty">No prompts yet.</div>'; return; }
-  const order=[],map={}; DB.prompts.forEach(p=>{ const g=p.group||'General'; if(!map[g]){map[g]=[];order.push(g);} map[g].push(p); });
+  const map={}; DB.prompts.forEach(p=>{ const g=p.group||'General'; (map[g]=map[g]||[]).push(p); });
+  const order=[],seen=new Set(); (DB.promptGroups||[]).forEach(g=>{ if(map[g]){order.push(g);seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g)) order.push(g); });
   host.innerHTML=order.map(g=>`<div class="grp-head">${esc(g)}</div>`+map[g].map(p=>`<div class="litem">
       <div style="min-width:0">
         <div class="ttl">${esc(p.title)}</div>
@@ -550,9 +568,9 @@ function renderHistory(){
 
 /* ===================== editors ===================== */
 let editCtx=null;
-function valueInputs(defs, values){
+function valueInputs(defs, values, order){
   if(!defs.length) return '<div class="muted small">No fields defined. Use "Manage fields".</div>';
-  return groupDefs(defs).map(grp=>`<div class="grp-head">${esc(grp.group)}</div>`+grp.items.map(f=>`<div class="field-block">
+  return groupDefs(defs, order).map(grp=>`<div class="grp-head">${esc(grp.group)}</div>`+grp.items.map(f=>`<div class="field-block">
     <div class="fhd"><span class="badge ${f.kind==='output'?'out':'man'}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label></div>
     <textarea class="inp" data-key="${esc(f.key)}" style="min-height:${f.kind==='output'?'120':'54'}px">${esc(values[f.key]||'')}</textarea>
   </div>`).join('')).join('');
@@ -569,7 +587,7 @@ window.openEntity=function(which,id){
     (isP?`<label class="fld">Linked career (one)</label>
      <select class="inp" id="entCareer"><option value="">— none —</option>${DB.careers.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join('')}</select>
      <div style="height:16px"></div>`:'')+
-    `<label class="fld">Fields</label>${valueInputs(defs, o.values)}`;
+    `<label class="fld">Fields</label>${valueInputs(defs, o.values, isP?DB.personGroups:DB.careerGroups)}`;
   if(isP) $('#entCareer').value=o.careerId||'';
   showOverlay('editOverlay');
 };
@@ -581,25 +599,17 @@ window.delEntity=function(which,id){
 window.openPrompt=function(id){
   const p=id?promptById(id):{id:null,title:'',group:'',body:''};
   editCtx={kind:'prompt', id};
-  const pgroups=Array.from(new Set(DB.prompts.map(x=>x.group).filter(Boolean)));
+  const pgroups=(DB.promptGroups&&DB.promptGroups.length?DB.promptGroups:['General']);
   $('#editModal').className='modal wide'; $('#editTitle').textContent=(id?'Edit ':'New ')+'prompt';
   $('#editBody').innerHTML=`
     <div class="grid2">
       <div><label class="fld">Title</label><input class="inp" id="prTitle" value="${esc(p.title)}" placeholder="e.g. Milestone"></div>
-      <div><label class="fld">Group</label><select class="inp" id="prGroup" onchange="onGroupSelect(this)">${groupOptionsHTML(pgroups, p.group||'General')}</select></div>
+      <div><label class="fld">Group</label><select class="inp" id="prGroup">${pgroups.map(g=>`<option value="${esc(g)}" ${g===(p.group||'General')?'selected':''}>${esc(g)}</option>`).join('')}</select></div>
     </div>
     <div style="height:14px"></div>
     <label class="fld">Body</label>
     <div class="help-hint" style="margin-top:0">Write the prompt. Use <code class="tok">{{Variable}}</code> tokens where data should go; choose which fields to append in a Recipe.</div>
     <textarea class="inp" id="prBody" style="min-height:320px">${esc(p.body)}</textarea>`;
-  showOverlay('editOverlay');
-};
-window.openPromptGroups=function(){
-  editCtx={kind:'promptgroups'};
-  const groups=Array.from(new Set(DB.prompts.map(p=>p.group).filter(Boolean)));
-  $('#editModal').className='modal'; $('#editTitle').textContent='Prompt groups';
-  $('#editBody').innerHTML=`<p class="muted small" style="margin-top:0">Rename or remove a group; changes apply to every prompt in it. Removing moves its prompts to General. Add a group from a prompt’s editor.</p>
-    <div id="promptGroupRows" style="display:flex; flex-wrap:wrap; gap:10px">${groups.length?groups.map(g=>`<span class="grp-row" data-orig="${esc(g)}" style="display:inline-flex;align-items:center;gap:3px"><input class="inp" value="${esc(g)}" style="width:auto;min-width:140px"><button class="bb danger sm" type="button" onclick="this.closest('.grp-row').remove()">✕</button></span>`).join(''):'<span class="muted small">No groups yet. Set a prompt’s group in its editor.</span>'}</div>`;
   showOverlay('editOverlay');
 };
 window.delPrompt=function(id){ const used=DB.recipes.filter(r=>r.promptId===id).map(r=>r.title); if(used.length){ if(!confirm('Used by recipe(s): '+used.join(', ')+'. Delete anyway?'))return; } if(!confirm('Delete this prompt?'))return; DB.prompts=DB.prompts.filter(p=>p.id!==id); markDirty(); renderAll(); };
@@ -634,7 +644,7 @@ window.openRecipe=function(id){
     </div>`;
   $('#rcPrompt').value=r.promptId; $('#rcOutTarget').value=r.outputTarget; $('#rcSubject').value=editCtx.draft.subject;
   const applySubject=()=>{ $('#rcPersonBlock').style.display=editCtx.draft.subject==='career'?'none':''; };
-  $('#rcPrompt').addEventListener('change', ()=>{ editCtx.draft.promptId=$('#rcPrompt').value; });
+  $('#rcPrompt').addEventListener('change', ()=>{ editCtx.draft.promptId=$('#rcPrompt').value; const pr=promptById($('#rcPrompt').value); const t=$('#rcTitle'); if(pr && (!t.value.trim()||t.value.trim()==='Untitled recipe')) t.value=pr.title; });
   $('#rcSubject').addEventListener('change', ()=>{ editCtx.draft.subject=$('#rcSubject').value; applySubject(); });
   $('#rcOutTarget').addEventListener('change', ()=>{ editCtx.draft.outputTarget=$('#rcOutTarget').value; renderOutKey(); });
   renderRecipeFields('person'); renderRecipeFields('career'); renderOutKey(); $('#rcOutKey').value=r.outputKey; applySubject();
@@ -645,7 +655,7 @@ function renderRecipeFields(which){
   const defs=which==='person'?DB.personFields:DB.careerFields;
   const sel=which==='person'?editCtx.draft.personKeys:editCtx.draft.careerKeys;
   if(!defs.length){ host.innerHTML='<div class="muted small">No '+which+' fields.</div>'; return; }
-  host.innerHTML=groupDefs(defs).map(grp=>`<div class="grp-head">${esc(grp.group)}</div><div class="map-fields">`+grp.items.map(f=>`<label><input type="checkbox" value="${esc(f.key)}" ${sel.includes(f.key)?'checked':''} onchange="onRecipeField('${which}','${esc(f.key)}',this.checked)"><span class="badge ${f.kind==='output'?'out':'man'}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`).join('')+'</div>').join('');
+  host.innerHTML=groupDefs(defs, which==='person'?DB.personGroups:DB.careerGroups).map(grp=>`<div class="grp-head">${esc(grp.group)}</div><div class="map-fields">`+grp.items.map(f=>`<label><input type="checkbox" value="${esc(f.key)}" ${sel.includes(f.key)?'checked':''} onchange="onRecipeField('${which}','${esc(f.key)}',this.checked)"><span class="badge ${f.kind==='output'?'out':'man'}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`).join('')+'</div>').join('');
 }
 window.onRecipeField=function(which,key,on){ const arr=which==='person'?editCtx.draft.personKeys:editCtx.draft.careerKeys; const i=arr.indexOf(key); if(on){ if(i<0)arr.push(key);} else { if(i>=0)arr.splice(i,1);} };
 function renderOutKey(){
@@ -668,9 +678,6 @@ $('#editSave').addEventListener('click', ()=>{
   } else if(k==='prompt'){
     let g=$('#prGroup').value; if(!g||g==='__new__') g='General';
     upsert(DB.prompts,{id:editCtx.id||uid('pr'), title:$('#prTitle').value.trim()||'Untitled prompt', group:g, body:$('#prBody').value});
-  } else if(k==='promptgroups'){
-    const remaining={}; $$('#promptGroupRows .grp-row').forEach(row=>{ const o=row.dataset.orig; const n=row.querySelector('input').value.trim()||o; remaining[o]=n; });
-    DB.prompts.forEach(p=>{ if(p.group in remaining) p.group=remaining[p.group]; else if(p.group) p.group='General'; });
   } else if(k==='recipe'){
     const d=editCtx.draft; const subject=$('#rcSubject').value;
     upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', promptId:$('#rcPrompt').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
@@ -682,56 +689,78 @@ function upsert(arr,o){ const i=arr.findIndex(x=>x.id===o.id); if(i>=0)arr[i]=o;
 /* ===================== schema manager ===================== */
 let schemaCtx=null;
 function slugKey(label, taken){ let base=String(label||'field').toLowerCase().replace(/[^\w]+/g,'_').replace(/^_+|_+$/g,'')||'field'; if(base==='name'||base==='title') base+='_field'; let k=base,i=2; while(taken.has(k)){ k=base+'_'+i; i++; } return k; }
-function groupOptionsHTML(groups, cur){
-  const all=groups.slice(); if(cur && all.indexOf(cur)<0) all.push(cur); if(!all.length) all.push('General');
-  return all.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__new__">＋ New group…</option>`;
+function groupListFor(which){ return which==='person'?DB.personGroups:which==='career'?DB.careerGroups:DB.promptGroups; }
+
+/* ---- groups popup (per type, ordered) ---- */
+let groupsCtx=null;
+window.openGroups=function(which){
+  groupsCtx={which, groups:(groupListFor(which)||[]).map(g=>({name:g, orig:g}))};
+  $('#groupsTitle').textContent='Manage '+which+' groups';
+  $('#groupsBody').innerHTML=`<p class="muted small" style="margin-top:0">Reorder with the arrows (this is the order shown everywhere). Renaming applies to every item in the group; removing a group moves its items to the first group.</p><div id="greorderRows"></div><button class="bb n sm" type="button" onclick="addGroupRow()" style="margin-top:8px">+ Add group</button>`;
+  renderGroupReorder(); showOverlay('groupsOverlay');
+};
+function renderGroupReorder(){
+  const n=groupsCtx.groups.length;
+  $('#greorderRows').innerHTML=groupsCtx.groups.map((g,i)=>`<div class="greorder-row">
+    <button class="bb n sm" type="button" onclick="moveGroup(${i},-1)" ${i===0?'disabled':''}>▲</button>
+    <button class="bb n sm" type="button" onclick="moveGroup(${i},1)" ${i===n-1?'disabled':''}>▼</button>
+    <input class="inp" value="${esc(g.name)}" oninput="groupsCtx.groups[${i}].name=this.value">
+    <button class="bb danger sm" type="button" onclick="rmGroupRow(${i})">✕</button>
+  </div>`).join('')||'<span class="muted small">No groups. Add one below.</span>';
 }
-window.onGroupSelect=function(sel){ if(sel.value==='__new__'){ const n=prompt('New group name:'); if(n&&n.trim()){ const o=document.createElement('option'); o.value=n.trim(); o.textContent=n.trim(); sel.insertBefore(o, sel.lastElementChild); sel.value=n.trim(); } else { sel.selectedIndex=0; } } };
-window.onGroupRename=function(i,val){ schemaCtx.groups[i]=val; refreshGroupSelects(); };
-window.addGroup=function(){ schemaCtx.groups.push('New Group'); renderGroupRows(); refreshGroupSelects(); };
-window.delGroup=function(i){ if(schemaCtx.groups.length<=1){ alert('Keep at least one group.'); return; } schemaCtx.groups.splice(i,1); $$('#schemaRows .schema-row').forEach(r=>{ let gi=parseInt(r.dataset.gi||'0',10); if(gi===i) gi=0; else if(gi>i) gi--; r.dataset.gi=String(gi); }); renderGroupRows(); refreshGroupSelects(); };
-function renderGroupRows(){ $('#groupRows').innerHTML=schemaCtx.groups.map((g,i)=>`<span style="display:inline-flex;align-items:center;gap:3px"><input class="inp grp-rename" value="${esc(g)}" oninput="onGroupRename(${i}, this.value)" style="width:auto;min-width:140px"><button class="bb danger sm" type="button" title="Remove group" onclick="delGroup(${i})">✕</button></span>`).join(''); }
-function refreshGroupSelects(){ $$('#schemaRows .schema-row').forEach(r=>{ const sel=r.querySelector('.grpi'); let gi=parseInt(r.dataset.gi||'0',10); if(gi<0||gi>=schemaCtx.groups.length) gi=0; r.dataset.gi=String(gi); sel.innerHTML=schemaCtx.groups.map((g,i)=>`<option value="${i}" ${i===gi?'selected':''}>${esc(g)}</option>`).join(''); }); }
+window.moveGroup=function(i,d){ const a=groupsCtx.groups, j=i+d; if(j<0||j>=a.length)return; const t=a[i]; a[i]=a[j]; a[j]=t; renderGroupReorder(); };
+window.rmGroupRow=function(i){ groupsCtx.groups.splice(i,1); renderGroupReorder(); };
+window.addGroupRow=function(){ groupsCtx.groups.push({name:'New Group', orig:null}); renderGroupReorder(); };
+$('#groupsSave').addEventListener('click', ()=>{
+  if(!groupsCtx)return; const which=groupsCtx.which;
+  const rows=groupsCtx.groups.map(g=>({name:(g.name||'').trim(), orig:g.orig})).filter(r=>r.name);
+  if(!rows.length){ alert('Keep at least one group.'); return; }
+  const names=[]; rows.forEach(r=>{ if(names.indexOf(r.name)<0) names.push(r.name); });
+  const renameMap={}; rows.forEach(r=>{ if(r.orig) renameMap[r.orig]=r.name; });
+  const finalSet=new Set(names);
+  const apply=items=>items.forEach(it=>{ let g=it.group; if(renameMap[g]!==undefined) g=renameMap[g]; if(!finalSet.has(g)) g=names[0]; it.group=g; });
+  if(which==='prompt'){ apply(DB.prompts); DB.promptGroups=names; }
+  else if(which==='person'){ apply(DB.personFields); DB.personGroups=names; }
+  else { apply(DB.careerFields); DB.careerGroups=names; }
+  hideOverlay('groupsOverlay'); markDirty(); renderAll(); toast('Groups updated.');
+});
+
+/* ---- manage fields (group picked from the stored ordered list; order managed in Groups popup) ---- */
 window.openSchema=function(which){
   const isP=which==='person';
   const defs=which==='person'?DB.personFields:DB.careerFields;
-  let groups=Array.from(new Set(defs.map(f=>f.group||'General'))); if(!groups.length) groups=['General'];
-  schemaCtx={which, groups};
+  schemaCtx={which, groups:(groupListFor(which)||[]).slice()};
+  if(!schemaCtx.groups.length) schemaCtx.groups=['General'];
   $('#schemaTitle').textContent='Manage '+which+' fields';
   $('#schemaBody').innerHTML=`
-    <p class="muted small" style="margin-top:0">Every ${which} shares these fields. The ${isP?'Name':'Title'} is built in. You set the <b>display label</b>; the internal key is generated for you. <b>output</b> fields are filled by AI results (via Generate) and reused downstream; <b>manual</b> fields you type.</p>
-    <label class="fld">Groups</label>
-    <div class="help-hint" style="margin-top:0;margin-bottom:8px">Rename, add, or remove groups. Renaming applies to every field in the group; removing a group moves its fields to the first group.</div>
-    <div id="groupRows" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px"></div>
-    <button class="bb n sm" type="button" onclick="addGroup()" style="margin-bottom:18px">+ Add group</button>
+    <p class="muted small" style="margin-top:0">Every ${which} shares these fields. The ${isP?'Name':'Title'} is built in. You set the <b>display label</b>; the key is generated for you. Manage groups and their order with <b>⚙ Groups</b> on the ${isP?'People':'Careers'} tab.</p>
     <div class="srow" style="font-weight:700;color:var(--ink-600)"><div>Display label</div><div>Group</div><div>Kind</div><div></div></div>
     <div id="schemaRows">${defs.map(f=>schemaRow(f)).join('')}</div>
     <button class="bb n sm" type="button" onclick="addSchemaRow()" style="margin-top:6px">+ Add field</button>`;
-  renderGroupRows(); refreshGroupSelects();
   showOverlay('schemaOverlay');
 };
 function schemaRow(f){
-  f=f||{key:'',label:'',kind:'manual',group:(schemaCtx&&schemaCtx.groups[0])||'General'};
-  let gi=schemaCtx?schemaCtx.groups.indexOf(f.group):-1; if(gi<0) gi=0;
-  return `<div class="srow schema-row" data-orig="${esc(f.key||'')}" data-gi="${gi}">
+  const groups=(schemaCtx&&schemaCtx.groups.length?schemaCtx.groups:['General']);
+  f=f||{key:'',label:'',kind:'manual',group:groups[0]};
+  const cur=groups.indexOf(f.group)>=0?f.group:groups[0];
+  const opts=groups.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('');
+  return `<div class="srow schema-row" data-orig="${esc(f.key||'')}">
     <input class="inp labi" value="${esc(f.label||'')}" placeholder="e.g. Age">
-    <select class="inp grpi" onchange="this.closest('.schema-row').dataset.gi=this.value"></select>
+    <select class="inp grpi">${opts}</select>
     <select class="inp kindi"><option value="manual" ${f.kind!=='output'?'selected':''}>manual</option><option value="output" ${f.kind==='output'?'selected':''}>output</option></select>
     <button class="bb danger sm" type="button" onclick="this.closest('.schema-row').remove()">✕</button>
   </div>`;
 }
-window.addSchemaRow=function(){ const c=$('#schemaRows'); const d=document.createElement('div'); d.innerHTML=schemaRow(null); c.appendChild(d.firstElementChild); refreshGroupSelects(); };
+window.addSchemaRow=function(){ const c=$('#schemaRows'); const d=document.createElement('div'); d.innerHTML=schemaRow(null); c.appendChild(d.firstElementChild); };
 $('#schemaSave').addEventListener('click', ()=>{
   if(!schemaCtx)return; const which=schemaCtx.which;
-  const groups=schemaCtx.groups.map(g=>(g||'').trim()||'General');
   const rows=$$('#schemaRows .schema-row'); const newDefs=[], seen=new Set();
   const existingKeys=new Set(rows.map(r=>r.dataset.orig).filter(Boolean));
   for(const r of rows){
     const label=r.querySelector('.labi').value.trim();
     if(!label){ alert('Display label cannot be empty.'); return; }
     const kind=r.querySelector('.kindi').value;
-    let gi=parseInt(r.dataset.gi||'0',10); if(gi<0||gi>=groups.length) gi=0;
-    const group=groups[gi]||'General';
+    const group=r.querySelector('.grpi').value||'General';
     let key=r.dataset.orig; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
     seen.add(key); newDefs.push({key,label,kind,group});
@@ -815,7 +844,9 @@ $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='ren
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
 $('#btnAddPrompt').addEventListener('click', ()=>openPrompt(null));
-$('#btnPromptGroups').addEventListener('click', ()=>openPromptGroups());
+$('#btnPromptGroups').addEventListener('click', ()=>openGroups('prompt'));
+$('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
+$('#btnCareerGroups').addEventListener('click', ()=>openGroups('career'));
 $('#btnAddRecipe').addEventListener('click', ()=>openRecipe(null));
 $('#btnPersonSchema').addEventListener('click', ()=>openSchema('person'));
 $('#btnCareerSchema').addEventListener('click', ()=>openSchema('career'));
