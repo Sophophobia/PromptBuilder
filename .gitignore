@@ -1,0 +1,8 @@
+# Real data lives in the private companion repo, never here.
+data.json
+history.json
+
+# Local-only notes / scratch
+*.local
+*.local.md
+.DS_Store
