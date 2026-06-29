@@ -93,6 +93,8 @@
   .grp-rename{width:auto; min-width:150px}
   .greorder-row{display:flex; align-items:center; gap:6px; margin-bottom:8px}
   .greorder-row input{flex:1}
+  .greorder-row.dragging{opacity:.4}
+  .greorder-row.drop-hot{outline:2px dashed var(--red-700); border-radius:8px}
 
   .map-row{border:1px solid var(--ink-200); border-radius:10px; padding:11px; margin-bottom:10px; background:var(--surface-2)}
   .map-row .map-var{font-weight:700; font-family:ui-monospace,monospace; color:var(--red-800); margin-bottom:7px}
@@ -117,6 +119,9 @@
   .rendered th{background:var(--surface-2); font-weight:700}
   .rendered tr:nth-child(even) td{background:#fbfaf6}
   .warn{background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px; padding:10px 13px; font-size:13px; margin-bottom:12px}
+  .ok-banner{background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; border-radius:10px; padding:10px 13px; font-size:13px; margin-bottom:12px}
+  .cov-chip{cursor:pointer; font-size:12px; background:#fff; color:var(--red-800); border:1px solid #fcd5d3; border-radius:999px; padding:3px 10px; margin:2px 3px; display:inline-block}
+  .cov-chip:hover{background:#fef2f2}
 
   .overlay{position:fixed; inset:0; background:rgba(20,8,8,.5); display:none; align-items:flex-start; justify-content:center; padding:40px 16px; z-index:60; overflow:auto}
   .overlay.show{display:flex}
@@ -224,6 +229,7 @@
       <div class="row"><button class="bb g" id="btnRecipeGroups">⚙ Groups</button><button class="bb p" id="btnAddRecipe">+ Add recipe</button></div>
     </div>
     <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">A recipe = a prompt + which fields get appended under it + where the output is saved. Include an <b>output</b> field from an upstream recipe to chain steps.</div>
+    <div id="recipeCoverage"></div>
     <div class="stack" id="listRecipes"></div>
   </section>
 
@@ -536,7 +542,17 @@ function renderPrompts(){
 }
 
 /* ---- recipes ---- */
+function renderRecipeCoverage(){
+  const host=$('#recipeCoverage'); if(!host) return;
+  if(!DB.prompts.length){ host.innerHTML=''; return; }
+  const used=new Set(DB.recipes.map(r=>r.promptId).filter(Boolean));
+  const uncovered=DB.prompts.filter(p=>!used.has(p.id));
+  if(!uncovered.length){ host.innerHTML='<div class="ok-banner">✓ Every prompt has a recipe.</div>'; return; }
+  host.innerHTML='<div class="warn" style="display:block">Prompts without a recipe ('+uncovered.length+'/'+DB.prompts.length+') — click to create one: '+uncovered.map(p=>`<span class="cov-chip" onclick="newRecipeFor('${p.id}')">${esc(p.title)} +</span>`).join('')+'</div>';
+}
+window.newRecipeFor=function(pid){ openRecipe(null); const sel=$('#rcPrompt'); if(sel){ sel.value=pid; sel.dispatchEvent(new Event('change')); } };
 function renderRecipes(){
+  renderRecipeCoverage();
   const host=$('#listRecipes');
   if(!DB.recipes.length){ host.innerHTML='<div class="empty">No recipes yet.</div>'; return; }
   const map={}; DB.recipes.forEach(r=>{ const g=r.group||'General'; (map[g]=map[g]||[]).push(r); });
@@ -716,19 +732,21 @@ let groupsCtx=null;
 window.openGroups=function(which){
   groupsCtx={which, groups:(groupListFor(which)||[]).map(g=>({name:g, orig:g}))};
   $('#groupsTitle').textContent='Manage '+which+' groups';
-  $('#groupsBody').innerHTML=`<p class="muted small" style="margin-top:0">Reorder with the arrows (this is the order shown everywhere). Renaming applies to every item in the group; removing a group moves its items to the first group.</p><div id="greorderRows"></div><button class="bb n sm" type="button" onclick="addGroupRow()" style="margin-top:8px">+ Add group</button>`;
+  $('#groupsBody').innerHTML=`<p class="muted small" style="margin-top:0">Drag the ⠿ handle to reorder (this is the order shown everywhere). Renaming applies to every item in the group; removing a group moves its items to the first group.</p><div id="greorderRows"></div><button class="bb n sm" type="button" onclick="addGroupRow()" style="margin-top:8px">+ Add group</button>`;
   renderGroupReorder(); showOverlay('groupsOverlay');
 };
 function renderGroupReorder(){
-  const n=groupsCtx.groups.length;
-  $('#greorderRows').innerHTML=groupsCtx.groups.map((g,i)=>`<div class="greorder-row">
-    <button class="bb n sm" type="button" onclick="moveGroup(${i},-1)" ${i===0?'disabled':''}>▲</button>
-    <button class="bb n sm" type="button" onclick="moveGroup(${i},1)" ${i===n-1?'disabled':''}>▼</button>
+  $('#greorderRows').innerHTML=groupsCtx.groups.map((g,i)=>`<div class="greorder-row" ondragover="grpReOver(event,this)" ondragleave="this.classList.remove('drop-hot')" ondrop="grpReDrop(event,${i})">
+    <div class="drag-h" draggable="true" ondragstart="grpReStart(event,${i})" ondragend="grpReEnd()">⠿</div>
     <input class="inp" value="${esc(g.name)}" oninput="groupsCtx.groups[${i}].name=this.value">
     <button class="bb danger sm" type="button" onclick="rmGroupRow(${i})">✕</button>
   </div>`).join('')||'<span class="muted small">No groups. Add one below.</span>';
 }
-window.moveGroup=function(i,d){ const a=groupsCtx.groups, j=i+d; if(j<0||j>=a.length)return; const t=a[i]; a[i]=a[j]; a[j]=t; renderGroupReorder(); };
+let groupDrag=null;
+window.grpReStart=function(e,i){ groupDrag=i; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(i)); const row=e.target.closest('.greorder-row'); if(row) row.classList.add('dragging'); };
+window.grpReEnd=function(){ groupDrag=null; $$('#greorderRows .dragging').forEach(r=>r.classList.remove('dragging')); $$('#greorderRows .drop-hot').forEach(r=>r.classList.remove('drop-hot')); };
+window.grpReOver=function(e,el){ if(groupDrag===null) return; e.preventDefault(); el.classList.add('drop-hot'); };
+window.grpReDrop=function(e,i){ e.preventDefault(); $$('#greorderRows .drop-hot').forEach(x=>x.classList.remove('drop-hot')); if(groupDrag===null||groupDrag===i) return; const a=groupsCtx.groups; const [d]=a.splice(groupDrag,1); const ni=groupDrag<i?i-1:i; a.splice(ni,0,d); groupDrag=null; renderGroupReorder(); };
 window.rmGroupRow=function(i){ groupsCtx.groups.splice(i,1); renderGroupReorder(); };
 window.addGroupRow=function(){ groupsCtx.groups.push({name:'New Group', orig:null}); renderGroupReorder(); };
 $('#groupsSave').addEventListener('click', ()=>{
