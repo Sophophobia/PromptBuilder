@@ -159,6 +159,7 @@
   <button data-tab="people">People <span class="count" id="cntPeople">0</span></button>
   <button data-tab="careers">Careers <span class="count" id="cntCareers">0</span></button>
   <button data-tab="recipes">Recipes <span class="count" id="cntRecipes">0</span></button>
+  <button data-tab="pipelines">Pipelines <span class="count" id="cntPipelines">0</span></button>
   <button data-tab="history">History <span class="count" id="cntHistory">0</span></button>
 </nav>
 
@@ -167,7 +168,7 @@
     <div class="gen-grid">
       <div class="stack">
         <div class="card pad">
-          <div class="sec-title">1 · Pick a recipe</div>
+          <div class="sec-title">1 · Pick a recipe or pipeline</div>
           <select class="inp" id="genRecipe"></select>
           <div id="genRecipeNote" class="help-hint"></div>
         </div>
@@ -178,6 +179,7 @@
         </div>
         <div class="card pad">
           <div class="sec-title">3 · Paste output</div>
+          <div id="genStepBar" style="display:none;background:#eef6ff;border:1px solid #cfe0f5;color:#1e497e;border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:10px"></div>
           <div class="help-hint" id="genOutDest" style="margin-top:0;margin-bottom:8px"></div>
           <textarea class="inp" id="genOutput" placeholder="After you run the prompt in Claude / ChatGPT, paste the result here."></textarea>
           <div class="row" style="margin-top:10px">
@@ -222,6 +224,14 @@
     </div>
     <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">A recipe = a prompt body + which fields get appended under it + where the output is saved. Include an <b>output</b> field from an upstream recipe to chain steps.</div>
     <div class="stack" id="listRecipes"></div>
+  </section>
+
+  <section class="view" id="view-pipelines">
+    <div class="between" style="margin-bottom:14px"><h2>Pipelines</h2>
+      <div class="row"><button class="bb p" id="btnAddPipeline">+ Add pipeline</button></div>
+    </div>
+    <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">A pipeline is an ordered list of recipes. Pick a subject once on the Generate tab, then step through: copy each prompt, paste its output, <b>Save &amp; next</b>. Each step's output is saved before the next, so later steps automatically include earlier ones.</div>
+    <div class="stack" id="listPipelines"></div>
   </section>
 
   <section class="view" id="view-history">
@@ -281,7 +291,7 @@
 <script>
 /* ===================== state ===================== */
 const LS_DB='pb-db-v3', LS_HIST='pb-history-v3', LS_GH='pb-github-v1', LS_CLEAN='pb-clean-v1';
-let DB={ personFields:[], careerFields:[], personGroups:[], careerGroups:[], recipeGroups:[], people:[], careers:[], recipes:[] };
+let DB={ personFields:[], careerFields:[], personGroups:[], careerGroups:[], recipeGroups:[], people:[], careers:[], recipes:[], pipelines:[] };
 let HISTORY=[]; let dirty=false;
 let gh={ owner:'', repo:'', branch:'main', dataPath:'data.json', histPath:'history.json', token:'', uploader:'' };
 
@@ -417,6 +427,7 @@ function normalizeDB(d){
   const cf=(d.careerFields||[]).filter(f=>f.key&&f.key!=='title').map(normFieldDef);
   const promptMap={}; (d.prompts||[]).forEach(p=>{ if(p&&p.id) promptMap[p.id]=p.body||''; });
   const recipes=(d.recipes||[]).map(r=>normRecipe(r, promptMap));
+  const pipelines=(d.pipelines||[]).map(p=>({id:p.id||uid('pl'), title:p.title||'Untitled pipeline', subject:p.subject==='career'?'career':'person', recipeIds:Array.isArray(p.recipeIds)?p.recipeIds.filter(Boolean):[]}));
   return {
     personFields:pf, careerFields:cf,
     personGroups:orderedGroups(d.personGroups, pf),
@@ -424,7 +435,8 @@ function normalizeDB(d){
     recipeGroups:orderedGroups(d.recipeGroups, recipes),
     careers:(d.careers||[]).map(c=>({id:c.id||uid('c'), title:(c.title!=null?c.title:((c.values&&c.values.title)||'Untitled career')), values:valuesFor(cf,c.values)})),
     people:(d.people||[]).map(p=>({id:p.id||uid('p'), name:(p.name!=null?p.name:((p.values&&p.values.name)||'Untitled person')), careerId:p.careerId||'', values:valuesFor(pf,p.values)})),
-    recipes:recipes
+    recipes:recipes,
+    pipelines:pipelines
   };
 }
 function normRecipe(r, promptMap){
@@ -446,24 +458,35 @@ function assembleRecipe(recipe, person, career){
 }
 
 /* ===================== render ===================== */
-function renderAll(){ renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderRecipes(); renderHistory(); }
-function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCareers').textContent=DB.careers.length; $('#cntRecipes').textContent=DB.recipes.length; $('#cntHistory').textContent=HISTORY.length; }
+function renderAll(){ renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderRecipes(); renderPipelines(); renderHistory(); }
+function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCareers').textContent=DB.careers.length; $('#cntRecipes').textContent=DB.recipes.length; $('#cntPipelines').textContent=DB.pipelines.length; $('#cntHistory').textContent=HISTORY.length; }
 function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } if(storageFull){ el.textContent='⚠ storage full — Commit now'; el.className='status-pill dirty'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
 
 /* ---- generate ---- */
-let genState={recipeId:'', personId:'', careerId:''}; let genCurrent=null; let genRawText=''; let genViewMode='rendered';
+let genState={recipeId:'', personId:'', careerId:''}; let genPipe=null; let genCurrent=null; let genRawText=''; let genViewMode='rendered';
+function genPipeline(){ return genPipe?DB.pipelines.find(p=>p.id===genPipe.id):null; }
+function genActiveRecipe(){
+  if(genPipe){ const p=genPipeline(); if(!p||!p.recipeIds.length) return null; const rid=p.recipeIds[Math.min(genPipe.step,p.recipeIds.length-1)]; return DB.recipes.find(r=>r.id===rid)||null; }
+  return DB.recipes.find(r=>r.id===genState.recipeId)||null;
+}
+function genActiveSubject(){ if(genPipe){ const p=genPipeline(); return p?p.subject:'person'; } const r=genActiveRecipe(); return r?(r.subject||'person'):'person'; }
 function renderGenerate(){
-  const sel=$('#genRecipe'); const cur=sel.value||genState.recipeId;
-  sel.innerHTML='<option value="">— select recipe —</option>'+DB.recipes.map(r=>`<option value="${r.id}">${esc(r.title)}</option>`).join('');
-  if(DB.recipes.some(r=>r.id===cur)) sel.value=cur;
+  const sel=$('#genRecipe'); const cur=sel.value||(genPipe?('pipe:'+genPipe.id):genState.recipeId);
+  let html='<option value="">— select —</option>';
+  if(DB.recipes.length) html+='<optgroup label="Recipes">'+DB.recipes.map(r=>`<option value="${r.id}">${esc(r.title)}</option>`).join('')+'</optgroup>';
+  if(DB.pipelines.length) html+='<optgroup label="Pipelines">'+DB.pipelines.map(p=>`<option value="pipe:${p.id}">▶ ${esc(p.title)} (${p.recipeIds.length})</option>`).join('')+'</optgroup>';
+  sel.innerHTML=html;
+  if(cur && (DB.recipes.some(r=>r.id===cur) || DB.pipelines.some(p=>('pipe:'+p.id)===cur))) sel.value=cur;
   buildPicker();
 }
 function buildPicker(){
-  genState.recipeId=$('#genRecipe').value;
-  const recipe=DB.recipes.find(r=>r.id===genState.recipeId);
+  const v=$('#genRecipe').value;
+  if(v.indexOf('pipe:')===0){ const pid=v.slice(5); genPipe={id:pid, step:(genPipe&&genPipe.id===pid)?genPipe.step:0}; genState.recipeId=''; }
+  else { genPipe=null; genState.recipeId=v; }
+  const subject=genActiveSubject();
   const area=$('#genPickArea'); const title=$('#genPickTitle');
-  if(!recipe){ title.textContent='2 · Pick'; area.innerHTML='<div class="muted small">Pick a recipe first.</div>'; computeGen(); return; }
-  if(recipe.subject==='career'){
+  if(!v){ title.textContent='2 · Pick'; area.innerHTML='<div class="muted small">Pick a recipe or pipeline first.</div>'; computeGen(); return; }
+  if(subject==='career'){
     title.textContent='2 · Pick a career';
     area.innerHTML='<select class="inp" id="genCareerSel"><option value="">— select career —</option>'+DB.careers.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join('')+'</select>';
     const cs=$('#genCareerSel'); if(DB.careers.some(c=>c.id===genState.careerId)) cs.value=genState.careerId;
@@ -476,19 +499,32 @@ function buildPicker(){
   }
   computeGen();
 }
+function updateSaveLabel(){ const b=$('#btnSaveOutput'); if(b) b.textContent=genPipe?'Save & next ▶':'Save output'; }
+function renderStepBar(recipe){
+  const bar=$('#genStepBar'); if(!bar) return;
+  if(!genPipe){ bar.style.display='none'; bar.innerHTML=''; return; }
+  const p=genPipeline(); if(!p){ bar.style.display='none'; return; }
+  const n=p.recipeIds.length, i=Math.min(genPipe.step,Math.max(0,n-1));
+  bar.style.display='';
+  bar.innerHTML=`<div class="between"><span><b>${esc(p.title)}</b> — step ${n?i+1:0} / ${n}${recipe?' · '+esc(recipe.title):''}</span><span class="row"><button class="bb n sm" id="pipePrev" ${i<=0?'disabled':''}>◀ Back</button><button class="bb n sm" id="pipeSkip" ${i>=n-1?'disabled':''}>Skip ▶</button></span></div>`;
+  const pv=$('#pipePrev'); if(pv) pv.onclick=()=>{ if(genPipe.step>0){ genPipe.step--; computeGen(); } };
+  const sk=$('#pipeSkip'); if(sk) sk.onclick=()=>{ if(genPipe.step<n-1){ genPipe.step++; computeGen(); } };
+}
 function computeGen(){
-  const recipe=DB.recipes.find(r=>r.id===genState.recipeId);
+  const recipe=genActiveRecipe(); const subject=genActiveSubject();
   const note=$('#genRecipeNote'); const cn=$('#genCareerNote');
-  if(!recipe){ note.textContent=''; cn.textContent=''; genRawText=''; renderGenPreview('Pick a recipe to begin.'); $('#genWarn').innerHTML=''; $('#genOutDest').textContent=''; $('#saveHint').textContent=''; genCurrent=null; return; }
-  note.innerHTML='Subject: <b>'+esc(recipe.subject||'person')+'</b> · output → '+esc(recipe.outputTarget)+'.'+esc(recipe.outputKey||'(unset)');
+  renderStepBar(recipe); updateSaveLabel();
+  if(!recipe){ note.textContent=''; cn.textContent=''; genRawText=''; renderGenPreview(genPipe?'This pipeline has no steps.':'Pick a recipe to begin.'); $('#genWarn').innerHTML=''; $('#genOutDest').textContent=''; $('#saveHint').textContent=''; genCurrent=null; return; }
+  note.innerHTML='Subject: <b>'+esc(subject)+'</b> · output → '+esc(recipe.outputTarget)+'.'+esc(recipe.outputKey||'(unset)');
   let person=null, career=null;
-  if(recipe.subject==='career'){ career=careerById(genState.careerId); cn.textContent=''; }
+  if(subject==='career'){ career=careerById(genState.careerId); cn.textContent=''; }
   else { person=personById(genState.personId); career=person?careerById(person.careerId):null;
     cn.innerHTML = person ? (career?('Linked career: <b>'+esc(cName(career))+'</b>'):'<span style="color:#b91c1c">No linked career; career fields will be empty.</span>') : ''; }
   const {prompt:text, missing}=assembleRecipe(recipe, person, career);
   genRawText=text; renderGenPreview();
   let warn='';
-  if(recipe.subject==='career'){ if(!career) warn+='Pick a career. '; } else { if(!person) warn+='Pick a person. '; }
+  if(subject==='career'){ if(!career) warn+='Pick a career. '; } else { if(!person) warn+='Pick a person. '; }
+  if(recipe.outputTarget==='career' && !career) warn+='No career to save the output into. ';
   if(missing.length) warn+='Empty field(s): '+missing.join(', ')+'.';
   $('#genWarn').innerHTML=warn?`<div class="warn">⚠ ${esc(warn)}</div>`:'';
   const destEnt=recipe.outputTarget==='career'?career:person;
@@ -544,6 +580,23 @@ function renderRecipes(){
       <div class="row"><button class="bb n sm" onclick="openRecipe('${r.id}')">Edit</button><button class="bb danger sm" onclick="delRecipe('${r.id}')">Delete</button></div>
     </div>`;
   }).join('')).join('');
+}
+
+/* ---- pipelines ---- */
+function renderPipelines(){
+  const host=$('#listPipelines'); if(!host) return;
+  if(!DB.pipelines.length){ host.innerHTML='<div class="empty">No pipelines yet.</div>'; return; }
+  host.innerHTML=DB.pipelines.map(p=>{
+    const chain=p.recipeIds.map(id=>{ const r=DB.recipes.find(x=>x.id===id); return r?r.title:'(missing)'; }).join(' → ');
+    return `<div class="litem">
+      <div style="min-width:0">
+        <div class="ttl">${esc(p.title)}</div>
+        <div class="sub">pick: ${esc(p.subject||'person')} · ${p.recipeIds.length} steps</div>
+        <div class="sub mono" style="margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:640px">${chain?esc(chain):'<span class="muted">(empty)</span>'}</div>
+      </div>
+      <div class="row"><button class="bb n sm" onclick="openPipeline('${p.id}')">Edit</button><button class="bb danger sm" onclick="delPipeline('${p.id}')">Delete</button></div>
+    </div>`;
+  }).join('');
 }
 
 /* ---- history ---- */
@@ -655,6 +708,47 @@ function renderOutKey(){
 }
 window.delRecipe=function(id){ if(!confirm('Delete this recipe?'))return; DB.recipes=DB.recipes.filter(r=>r.id!==id); markDirty(); renderAll(); };
 
+/* pipeline editor */
+window.openPipeline=function(id){
+  const p=id?DB.pipelines.find(x=>x.id===id):{id:null,title:'',subject:'person',recipeIds:[]};
+  editCtx={kind:'pipeline', id, draft:{ subject:p.subject||'person', recipeIds:[...(p.recipeIds||[])] }};
+  $('#editModal').className='modal wide'; $('#editTitle').textContent=(id?'Edit ':'New ')+'pipeline';
+  $('#editBody').innerHTML=`
+    <div class="grid2">
+      <div><label class="fld">Title</label><input class="inp" id="plTitle" value="${esc(p.title)}" placeholder="e.g. Full career flow"></div>
+      <div><label class="fld">Pick once</label><select class="inp" id="plSubject"><option value="person">a person (steps run on them + their linked career)</option><option value="career">a career (occupation-level)</option></select></div>
+    </div>
+    <div class="help-hint">Steps run top to bottom. Each step's output is saved before the next, so later steps automatically include earlier outputs. Drag ⠿ to reorder.</div>
+    <div style="height:10px"></div>
+    <label class="fld">Steps</label>
+    <div id="plSteps"></div>
+    <div class="row" style="margin-top:8px"><select class="inp" id="plAdd" style="max-width:340px"></select><button class="bb n sm" type="button" id="plAddBtn">+ Add step</button></div>`;
+  $('#plSubject').value=editCtx.draft.subject;
+  $('#plSubject').addEventListener('change', ()=>{ editCtx.draft.subject=$('#plSubject').value; });
+  $('#plAddBtn').addEventListener('click', ()=>{ const v=$('#plAdd').value; if(v){ editCtx.draft.recipeIds.push(v); renderPlSteps(); } });
+  renderPlAdd(); renderPlSteps();
+  showOverlay('editOverlay');
+};
+function renderPlAdd(){ const sel=$('#plAdd'); if(!sel) return; sel.innerHTML='<option value="">— add a recipe step —</option>'+DB.recipes.map(r=>`<option value="${r.id}">${esc(r.title)} · ${esc(r.subject||'person')}</option>`).join(''); }
+function renderPlSteps(){
+  const host=$('#plSteps'); if(!host) return; const ids=editCtx.draft.recipeIds;
+  if(!ids.length){ host.innerHTML='<div class="muted small">No steps yet — add recipes below.</div>'; return; }
+  host.innerHTML=ids.map((rid,i)=>{ const r=DB.recipes.find(x=>x.id===rid);
+    return `<div class="greorder-row" ondragover="plOver(event,this)" ondragleave="this.classList.remove('drop-hot')" ondrop="plDrop(event,${i})">
+      <div class="drag-h" draggable="true" ondragstart="plStart(event,${i})" ondragend="plEnd()">⠿</div>
+      <span style="flex:1">${i+1}. <b>${esc(r?r.title:'(missing recipe)')}</b> <span class="muted small">${r?esc(r.subject||'person'):''}${r&&r.outputKey?' → '+esc(r.outputTarget)+'.'+esc(r.outputKey):''}</span></span>
+      <button class="bb danger sm" type="button" onclick="plRm(${i})">✕</button>
+    </div>`;
+  }).join('');
+}
+let plDrag=null;
+window.plStart=function(e,i){ plDrag=i; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(i)); const row=e.target.closest('.greorder-row'); if(row) row.classList.add('dragging'); };
+window.plEnd=function(){ plDrag=null; $$('#plSteps .dragging').forEach(r=>r.classList.remove('dragging')); $$('#plSteps .drop-hot').forEach(r=>r.classList.remove('drop-hot')); };
+window.plOver=function(e,el){ if(plDrag===null) return; e.preventDefault(); el.classList.add('drop-hot'); };
+window.plDrop=function(e,i){ e.preventDefault(); $$('#plSteps .drop-hot').forEach(x=>x.classList.remove('drop-hot')); if(plDrag===null||plDrag===i) return; const a=editCtx.draft.recipeIds; const [d]=a.splice(plDrag,1); const ni=plDrag<i?i-1:i; a.splice(ni,0,d); plDrag=null; renderPlSteps(); };
+window.plRm=function(i){ editCtx.draft.recipeIds.splice(i,1); renderPlSteps(); };
+window.delPipeline=function(id){ if(!confirm('Delete this pipeline?'))return; DB.pipelines=DB.pipelines.filter(p=>p.id!==id); markDirty(); renderAll(); };
+
 /* save (edit modal) */
 $('#editSave').addEventListener('click', ()=>{
   if(!editCtx) return; const k=editCtx.kind;
@@ -669,6 +763,8 @@ $('#editSave').addEventListener('click', ()=>{
     let g=$('#rcGroup').value; if(!g||g==='__newg__') g='General';
     if(DB.recipeGroups.indexOf(g)<0) DB.recipeGroups.push(g);
     upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, body:$('#rcBody').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
+  } else if(k==='pipeline'){
+    upsert(DB.pipelines,{id:editCtx.id||uid('pl'), title:$('#plTitle').value.trim()||'Untitled pipeline', subject:$('#plSubject').value, recipeIds:[...editCtx.draft.recipeIds]});
   }
   hideOverlay('editOverlay'); markDirty(); renderAll();
 });
@@ -799,7 +895,13 @@ $('#btnSaveOutput').addEventListener('click', ()=>{
   HISTORY.push({ id:uid('h'), createdAt:new Date().toISOString().slice(0,16).replace('T',' '), by:gh.uploader||'',
     recipeId:recipe.id, recipeTitle:recipe.title, personId:person&&person.id, personName:person?pName(person):'',
     careerId:career&&career.id, careerName:career?cName(career):'', prompt, output:out });
-  $('#genOutput').value=''; markDirty(); renderAll(); toast('Saved to '+recipe.outputTarget+'.'+recipe.outputKey+' + history.');
+  $('#genOutput').value=''; markDirty();
+  if(genPipe){ const p=genPipeline();
+    if(p && genPipe.step<p.recipeIds.length-1){ genPipe.step++; renderAll(); toast('Saved. → step '+(genPipe.step+1)+' / '+p.recipeIds.length); }
+    else { renderAll(); toast('Saved. Pipeline complete ✓'); }
+    return;
+  }
+  renderAll(); toast('Saved to '+recipe.outputTarget+'.'+recipe.outputKey+' + history.');
 });
 window.viewHistory=function(id){ const h=HISTORY.find(x=>x.id===id); if(!h)return;
   $('#viewModal').className='modal xwide';
@@ -859,6 +961,7 @@ $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
 $('#btnCareerGroups').addEventListener('click', ()=>openGroups('career'));
 $('#btnRecipeGroups').addEventListener('click', ()=>openGroups('recipe'));
 $('#btnAddRecipe').addEventListener('click', ()=>openRecipe(null));
+$('#btnAddPipeline').addEventListener('click', ()=>openPipeline(null));
 $('#btnPersonSchema').addEventListener('click', ()=>openSchema('person'));
 $('#btnCareerSchema').addEventListener('click', ()=>openSchema('career'));
 $('#btnReload').addEventListener('contextmenu', e=>{ e.preventDefault(); $('#filePicker').click(); });
