@@ -360,10 +360,22 @@ const careerById=id=>DB.careers.find(c=>c.id===id);
 const pName=p=>((p&&p.name)||'').trim()||'(unnamed)';
 const cName=c=>((c&&c.title)||'').trim()||'(untitled)';
 const promptById=id=>DB.prompts.find(p=>p.id===id);
-const parseVars=body=>{ const out=[],seen=new Set(); const re=/\{\{\s*([\w.]+)\s*\}\}/g; let m; while((m=re.exec(body||''))){ if(!seen.has(m[1])){ seen.add(m[1]); out.push(m[1]); } } return out; };
 
 /* ===================== persistence ===================== */
-function persistLocal(){ try{ localStorage.setItem(LS_DB,JSON.stringify(DB)); localStorage.setItem(LS_HIST,JSON.stringify(HISTORY)); }catch(e){} }
+let storageFull=false;
+function persistLocal(){
+  try{
+    localStorage.setItem(LS_DB,JSON.stringify(DB));
+    localStorage.setItem(LS_HIST,JSON.stringify(HISTORY));
+    if(storageFull){ storageFull=false; persistLocal._warned=false; renderStatus(); }
+    return true;
+  }catch(e){
+    storageFull=true; renderStatus();
+    if(!persistLocal._warned){ persistLocal._warned=true;
+      alert('⚠ Local autosave failed — this browser\'s storage is full.\n\nYour latest edits are NOT cached locally and will be lost if you reload this page.\n\nUse ⤴ Commit (or ⬇ Download) NOW to save them to your repo — the commit path has no size limit.'); }
+    return false;
+  }
+}
 function loadGH(){ try{ const s=JSON.parse(localStorage.getItem(LS_GH)); if(s) gh=Object.assign(gh,s); }catch(e){} }
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 async function fetchJSON(p){ const r=await fetch(p,{cache:'no-store'}); if(!r.ok) throw new Error(r.status+' '+p); return r.json(); }
@@ -447,7 +459,7 @@ function assembleRecipe(recipe, person, career){
 /* ===================== render ===================== */
 function renderAll(){ renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderPrompts(); renderRecipes(); renderHistory(); }
 function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCareers').textContent=DB.careers.length; $('#cntPrompts').textContent=DB.prompts.length; $('#cntRecipes').textContent=DB.recipes.length; $('#cntHistory').textContent=HISTORY.length; }
-function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
+function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } if(storageFull){ el.textContent='⚠ storage full — Commit now'; el.className='status-pill dirty'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
 
 /* ---- generate ---- */
 let genState={recipeId:'', personId:'', careerId:''}; let genCurrent=null; let genRawText=''; let genViewMode='rendered';
@@ -636,7 +648,7 @@ window.openPrompt=function(id){
     </div>
     <div style="height:14px"></div>
     <label class="fld">Body</label>
-    <div class="help-hint" style="margin-top:0">Write the prompt. Use <code class="tok">{{Variable}}</code> tokens where data should go; choose which fields to append in a Recipe.</div>
+    <div class="help-hint" style="margin-top:0">Write the prompt. Choose which data fields get appended below it in a Recipe.</div>
     <textarea class="inp" id="prBody" style="min-height:320px">${esc(p.body)}</textarea>`;
   showOverlay('editOverlay');
 };
@@ -839,6 +851,8 @@ $('#btnSaveOutput').addEventListener('click', ()=>{
   if(!recipe.outputKey){ toast('This recipe has no output field set.'); return; }
   const dest=recipe.outputTarget==='career'?career:person;
   if(!dest){ toast('No '+recipe.outputTarget+' to save into.'); return; }
+  const prevVal=dest.values[recipe.outputKey];
+  if(prevVal && String(prevVal).trim() && !confirm('"'+recipe.outputKey+'" on '+(recipe.outputTarget==='career'?cName(career):pName(person))+' already has a value.\n\nThe previous value is kept in History regardless. Overwrite the live field? (Downstream recipes will then use this new value.)')) return;
   dest.values[recipe.outputKey]=out;
   const {prompt}=assembleRecipe(recipe, person, career);
   HISTORY.push({ id:uid('h'), createdAt:new Date().toISOString().slice(0,16).replace('T',' '), by:gh.uploader||'',
