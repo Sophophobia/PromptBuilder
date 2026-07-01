@@ -127,8 +127,8 @@
   .overlay.show{display:flex}
   .modal{background:var(--surface); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); width:100%; max-width:760px}
   .modal.wide{max-width:920px}
-  .modal.xwide{max-width:1180px}
-  .hist-2col{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .modal.xwide{max-width:min(1680px,96vw)}
+  .hist-2col{display:grid; grid-template-columns:minmax(320px,0.7fr) 1.3fr; gap:16px}
   @media(max-width:760px){.hist-2col{grid-template-columns:1fr}}
   .modal .mhd{display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid var(--ink-200)}
   .modal .mbody{padding:22px}
