@@ -459,7 +459,11 @@ function assembleRecipe(recipe, person, career){
 }
 
 /* ===================== render ===================== */
-function renderAll(){ renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderRecipes(); renderPipelines(); renderHistory(); }
+function sortEntities(){
+  DB.people.sort((a,b)=>pName(a).localeCompare(pName(b),'en',{sensitivity:'base',numeric:true}));
+  DB.careers.sort((a,b)=>cName(a).localeCompare(cName(b),'en',{sensitivity:'base',numeric:true}));
+}
+function renderAll(){ sortEntities(); renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderRecipes(); renderPipelines(); renderHistory(); }
 function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCareers').textContent=DB.careers.length; $('#cntRecipes').textContent=DB.recipes.length; $('#cntPipelines').textContent=DB.pipelines.length; $('#cntHistory').textContent=HISTORY.length; }
 function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } if(storageFull){ el.textContent='⚠ storage full — Commit now'; el.className='status-pill dirty'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
 
