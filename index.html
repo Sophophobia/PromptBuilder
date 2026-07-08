@@ -237,7 +237,7 @@
 
   <section class="view" id="view-history">
     <div class="between" style="margin-bottom:14px"><h2>History</h2>
-      <div class="row"><select class="inp" id="histPersonFilter" style="width:auto"></select><select class="inp" id="histFilter" style="width:auto"></select></div>
+      <div class="row"><select class="inp" id="histPersonFilter" style="width:auto"></select><select class="inp" id="histCareerFilter" style="width:auto"></select><select class="inp" id="histFilter" style="width:auto"></select></div>
     </div>
     <div class="stack" id="listHistory"></div>
   </section>
@@ -613,10 +613,14 @@ function renderHistory(){
   const histPeople=Array.from(new Set(HISTORY.map(h=>h.personId).filter(Boolean)));
   pf.innerHTML='<option value="">All people</option>'+DB.people.filter(p=>histPeople.includes(p.id)||true).map(p=>`<option value="${p.id}">${esc(pName(p))}</option>`).join('');
   if(DB.people.some(p=>p.id===pcur)) pf.value=pcur;
+  const cf=$('#histCareerFilter'); const ccur=cf.value;
+  cf.innerHTML='<option value="">All careers</option>'+DB.careers.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join('');
+  if(DB.careers.some(c=>c.id===ccur)) cf.value=ccur;
   const host=$('#listHistory');
   let items=HISTORY.slice().reverse();
   if(f.value) items=items.filter(h=>h.recipeId===f.value);
   if(pf.value) items=items.filter(h=>h.personId===pf.value);
+  if(cf.value) items=items.filter(h=>h.careerId===cf.value);
   if(!items.length){ host.innerHTML='<div class="empty">No saved outputs yet.</div>'; return; }
   host.innerHTML=items.map(h=>`<div class="litem">
     <div style="min-width:0">
@@ -958,6 +962,7 @@ $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs 
 $('#genRecipe').addEventListener('change', buildPicker);
 $('#histFilter').addEventListener('change', renderHistory);
 $('#histPersonFilter').addEventListener('change', renderHistory);
+$('#histCareerFilter').addEventListener('change', renderHistory);
 $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRawText||'').then(()=>toast('Copied prompt (raw).')));
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
