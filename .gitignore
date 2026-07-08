@@ -6,3 +6,6 @@ history.json
 *.local
 *.local.md
 .DS_Store
+
+# Claude Code local settings (contains local machine paths — never commit to this public repo)
+.claude/settings.local.json
