@@ -912,16 +912,18 @@ $('#btnSaveOutput').addEventListener('click', ()=>{
   }
   renderAll(); toast('Saved to '+recipe.outputTarget+'.'+recipe.outputKey+' + history.');
 });
-window.viewHistory=function(id){ const h=HISTORY.find(x=>x.id===id); if(!h)return;
+let viewH=null;
+window.viewHistory=function(id){ const h=HISTORY.find(x=>x.id===id); if(!h)return; viewH=h;
   $('#viewModal').className='modal xwide';
   $('#viewTitle').textContent=h.recipeTitle||'';
   $('#viewBody').innerHTML=`<div class="muted small" style="margin-bottom:12px">${esc([h.personName,h.careerName].filter(Boolean).join(' · '))} — ${esc(h.createdAt||'')}${h.by?' · by '+esc(h.by):''}</div>
     <div class="hist-2col">
-      <div><label class="fld">Prompt used (snapshot)</label><div class="preview" style="max-height:64vh">${esc(h.prompt)}</div></div>
-      <div><label class="fld">Output</label><div class="rendered" style="max-height:64vh">${renderMarkdown(h.output)}</div></div>
+      <div><div class="between" style="margin-bottom:5px"><label class="fld" style="margin:0">Prompt used (snapshot)</label><button class="bb g sm" onclick="copyHist('prompt')">⧉ Copy</button></div><div class="preview" style="max-height:64vh">${esc(h.prompt)}</div></div>
+      <div><div class="between" style="margin-bottom:5px"><label class="fld" style="margin:0">Output</label><button class="bb g sm" onclick="copyHist('output')">⧉ Copy</button></div><div class="rendered" style="max-height:64vh">${renderMarkdown(h.output)}</div></div>
     </div>`;
   showOverlay('viewOverlay');
 };
+window.copyHist=function(which){ if(!viewH)return; const t=which==='output'?viewH.output:viewH.prompt; navigator.clipboard.writeText(t||'').then(()=>toast('Copied '+which+'.')); };
 window.delHistory=function(id){ if(!confirm('Delete this history entry?'))return; HISTORY=HISTORY.filter(h=>h.id!==id); markDirty(); renderAll(); };
 
 /* ===================== download / github ===================== */
