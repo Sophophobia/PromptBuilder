@@ -446,14 +446,33 @@ function normRecipe(r, promptMap){
   if(r.mappings && !personKeys && !careerKeys){ const pk=new Set(),ck=new Set(); Object.values(r.mappings).forEach(m=>{ (m.keys||[]).forEach(k=>(m.src==='career'?ck:pk).add(k)); }); personKeys=[...pk]; careerKeys=[...ck]; }
   let body=r.body;
   if(body==null && r.promptId!=null && promptMap[r.promptId]!=null) body=promptMap[r.promptId];
-  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', group:r.group||'General', body:body||'', subject:r.subject==='career'?'career':'person', personKeys:personKeys||[], careerKeys:careerKeys||[], outputTarget:r.outputTarget||'person', outputKey:r.outputKey||'' };
+  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', group:r.group||'General', body:body||'', subject:r.subject==='career'?'career':'person', personKeys:personKeys||[], careerKeys:careerKeys||[], outputTarget:r.outputTarget||'person', outputKey:r.outputKey||'', colSelect:(r.colSelect&&typeof r.colSelect==='object')?r.colSelect:{} };
+}
+
+/* ===================== markdown-table column helpers ===================== */
+function tblCells(line){ return line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim()); }
+function tblIsSep(line){ return line.indexOf('-')>=0 && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line); }
+function firstTableHeaders(text){ const lines=(text||'').split(/\r?\n/); for(let i=0;i<lines.length-1;i++){ if(lines[i].indexOf('|')>=0 && tblIsSep(lines[i+1])) return tblCells(lines[i]); } return []; }
+function filterTableColumns(text, keep){
+  const keepSet=new Set(keep); const lines=(text||'').split(/\r?\n/); const out=[]; let i=0;
+  while(i<lines.length){
+    if(i+1<lines.length && lines[i].indexOf('|')>=0 && tblIsSep(lines[i+1])){
+      const headers=tblCells(lines[i]); const idx=headers.map((h,j)=>keepSet.has(h)?j:-1).filter(j=>j>=0);
+      const emit=cells=>'| '+idx.map(j=>cells[j]!==undefined?cells[j]:'').join(' | ')+' |';
+      out.push(emit(headers)); out.push('| '+idx.map(()=>'---').join(' | ')+' |'); i+=2;
+      while(i<lines.length && lines[i].indexOf('|')>=0 && !tblIsSep(lines[i]) && lines[i].trim()!==''){ out.push(emit(tblCells(lines[i]))); i++; }
+    } else { out.push(lines[i]); i++; }
+  }
+  return out.join('\n');
 }
 
 /* ===================== assembly ===================== */
 function assembleRecipe(recipe, person, career){
   const body=recipe.body||''; const missing=[], blocks=[];
-  (recipe.personKeys||[]).forEach(k=>{ const val=person?person.values[k]:''; if(val==null||val==='') missing.push('person.'+k); blocks.push('## '+labelOf('person',k)+'\n\n'+((val==null||val==='')?'[MISSING]':val)); });
-  (recipe.careerKeys||[]).forEach(k=>{ const val=career?career.values[k]:''; if(val==null||val==='') missing.push('career.'+k); blocks.push('## '+labelOf('career',k)+'\n\n'+((val==null||val==='')?'[MISSING]':val)); });
+  const cs=recipe.colSelect||{};
+  const cell=(which,k,val)=>{ if(val==null||val===''){ missing.push(which+'.'+k); return '[MISSING]'; } const keep=cs[which+'.'+k]; return (keep&&keep.length)?filterTableColumns(val,keep):val; };
+  (recipe.personKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('person',k)+'\n\n'+cell('person',k, person?person.values[k]:'')); });
+  (recipe.careerKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('career',k)+'\n\n'+cell('career',k, career?career.values[k]:'')); });
   const out = blocks.length ? (body+'\n\n'+blocks.join('\n\n')) : body;
   return { prompt:out, missing:Array.from(new Set(missing)) };
 }
@@ -665,7 +684,7 @@ window.delEntity=function(which,id){
 /* recipe editor */
 window.openRecipe=function(id){
   const r=id?DB.recipes.find(x=>x.id===id):normRecipe({});
-  editCtx={kind:'recipe', id, draft:{ subject:r.subject||'person', personKeys:[...(r.personKeys||[])], careerKeys:[...(r.careerKeys||[])], outputTarget:r.outputTarget, outputKey:r.outputKey } };
+  editCtx={kind:'recipe', id, draft:{ subject:r.subject||'person', personKeys:[...(r.personKeys||[])], careerKeys:[...(r.careerKeys||[])], outputTarget:r.outputTarget, outputKey:r.outputKey, colSelect:JSON.parse(JSON.stringify(r.colSelect||{})) } };
   $('#editModal').className='modal wide'; $('#editTitle').textContent=(id?'Edit ':'New ')+'recipe';
   $('#editBody').innerHTML=`
     <div class="grid2">
@@ -688,6 +707,7 @@ window.openRecipe=function(id){
     </div>
     <label class="fld">Career fields to include</label>
     <div id="rcCareerFields"></div>
+    <div id="rcColSelect" style="margin-top:14px"></div>
     <div style="height:16px"></div>
     <label class="fld">Save output to</label>
     <div class="row">
@@ -696,10 +716,31 @@ window.openRecipe=function(id){
     </div>`;
   $('#rcOutTarget').value=r.outputTarget; $('#rcSubject').value=editCtx.draft.subject;
   const applySubject=()=>{ $('#rcPersonBlock').style.display=editCtx.draft.subject==='career'?'none':''; };
-  $('#rcSubject').addEventListener('change', ()=>{ editCtx.draft.subject=$('#rcSubject').value; applySubject(); });
+  $('#rcSubject').addEventListener('change', ()=>{ editCtx.draft.subject=$('#rcSubject').value; applySubject(); renderColSelect(); });
   $('#rcOutTarget').addEventListener('change', ()=>{ editCtx.draft.outputTarget=$('#rcOutTarget').value; renderOutKey(); });
-  renderRecipeFields('person'); renderRecipeFields('career'); renderOutKey(); $('#rcOutKey').value=r.outputKey; applySubject();
+  renderRecipeFields('person'); renderRecipeFields('career'); renderColSelect(); renderOutKey(); $('#rcOutKey').value=r.outputKey; applySubject();
   showOverlay('editOverlay');
+};
+function sampleFieldValue(which,key){ const arr=which==='person'?DB.people:DB.careers; for(const e of arr){ const v=e.values[key]; if(v&&String(v).trim()) return v; } return ''; }
+function fieldColumns(which,key){ return firstTableHeaders(sampleFieldValue(which,key)); }
+function renderColSelect(){
+  const host=$('#rcColSelect'); if(!host) return;
+  const d=editCtx.draft; const rows=[];
+  const groups=[['person', d.subject==='career'?[]:d.personKeys],['career', d.careerKeys]];
+  groups.forEach(([which,keys])=>{ (keys||[]).forEach(k=>{
+    const cols=fieldColumns(which,k); if(cols.length<2) return;
+    const csKey=which+'.'+k; const kept=d.colSelect[csKey];
+    rows.push(`<div class="map-row"><div class="map-var">${esc(which)}.${esc(k)}</div><div class="map-fields">`+
+      cols.map(c=>`<label><input type="checkbox" ${(!kept||kept.indexOf(c)>=0)?'checked':''} onchange="onRecipeCol('${which}','${esc(k)}',this.dataset.col,this.checked)" data-col="${esc(c)}">${esc(c)}</label>`).join('')+
+      `</div></div>`);
+  }); });
+  host.innerHTML = rows.length ? ('<label class="fld">Columns to pass downstream</label><div class="help-hint" style="margin-top:0;margin-bottom:8px">For included fields whose value is a table, uncheck any column you don\'t want sent to this recipe. Unlisted fields pass in full.</div>'+rows.join('')) : '';
+}
+window.onRecipeCol=function(which,key,col,on){
+  const d=editCtx.draft; const csKey=which+'.'+key;
+  if(!d.colSelect[csKey]) d.colSelect[csKey]=fieldColumns(which,key).slice();
+  const arr=d.colSelect[csKey]; const i=arr.indexOf(col);
+  if(on){ if(i<0)arr.push(col); } else { if(i>=0)arr.splice(i,1); }
 };
 function renderRecipeFields(which){
   const host=which==='person'?$('#rcPersonFields'):$('#rcCareerFields');
@@ -708,7 +749,7 @@ function renderRecipeFields(which){
   if(!defs.length){ host.innerHTML='<div class="muted small">No '+which+' fields.</div>'; return; }
   host.innerHTML=groupDefs(defs, which==='person'?DB.personGroups:DB.careerGroups).map(grp=>`<div class="grp-head">${esc(grp.group)}</div><div class="map-fields">`+grp.items.map(f=>`<label><input type="checkbox" value="${esc(f.key)}" ${sel.includes(f.key)?'checked':''} onchange="onRecipeField('${which}','${esc(f.key)}',this.checked)"><span class="badge ${f.kind==='output'?'out':'man'}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`).join('')+'</div>').join('');
 }
-window.onRecipeField=function(which,key,on){ const arr=which==='person'?editCtx.draft.personKeys:editCtx.draft.careerKeys; const i=arr.indexOf(key); if(on){ if(i<0)arr.push(key);} else { if(i>=0)arr.splice(i,1);} };
+window.onRecipeField=function(which,key,on){ const arr=which==='person'?editCtx.draft.personKeys:editCtx.draft.careerKeys; const i=arr.indexOf(key); if(on){ if(i<0)arr.push(key);} else { if(i>=0)arr.splice(i,1); delete editCtx.draft.colSelect[which+'.'+key]; } renderColSelect(); };
 function renderOutKey(){
   const defs=editCtx.draft.outputTarget==='career'?DB.careerFields:DB.personFields;
   const sel=$('#rcOutKey'); const cur=sel.value||editCtx.draft.outputKey;
@@ -771,7 +812,13 @@ $('#editSave').addEventListener('click', ()=>{
     const d=editCtx.draft; const subject=$('#rcSubject').value;
     let g=$('#rcGroup').value; if(!g||g==='__newg__') g='General';
     if(DB.recipeGroups.indexOf(g)<0) DB.recipeGroups.push(g);
-    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, body:$('#rcBody').value, subject, personKeys:subject==='career'?[]:d.personKeys, careerKeys:d.careerKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value});
+    const pKeys=subject==='career'?[]:d.personKeys, cKeys=d.careerKeys;
+    const colSel={};
+    Object.keys(d.colSelect||{}).forEach(csKey=>{ const dot=csKey.indexOf('.'); const w=csKey.slice(0,dot), fk=csKey.slice(dot+1);
+      const included=w==='person'?pKeys:cKeys; if(included.indexOf(fk)<0) return;
+      const all=fieldColumns(w,fk); const kept=(d.colSelect[csKey]||[]).filter(c=>all.indexOf(c)>=0);
+      if(kept.length && kept.length<all.length) colSel[csKey]=kept; });
+    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, body:$('#rcBody').value, subject, personKeys:pKeys, careerKeys:cKeys, outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value, colSelect:colSel});
   } else if(k==='pipeline'){
     upsert(DB.pipelines,{id:editCtx.id||uid('pl'), title:$('#plTitle').value.trim()||'Untitled pipeline', subject:$('#plSubject').value, recipeIds:[...editCtx.draft.recipeIds]});
   }
