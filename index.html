@@ -976,17 +976,24 @@ window.openSchema=function(which){
     <button class="bb n sm" type="button" onclick="addSchemaRow()" style="margin-top:6px">+ Add field</button>`;
   renderSchemaRows(); showOverlay('schemaOverlay');
 };
-function syncSchemaInputs(){ $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f){ f.label=r.querySelector('.labi').value; } });
-  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(!f) return; const chk=r.querySelector('.srcchk'); const v=(r.querySelector('.srci').value||'').trim(); if(chk&&chk.checked&&v) f.src=v; else delete f.src; }); }
+function syncSchemaInputs(){ const chkById={};
+  $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f) f.label=r.querySelector('.labi').value; const c=r.querySelector('.srcchk'); chkById[r.dataset.id]=!!(c&&c.checked); });
+  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(!f) return; const v=(r.querySelector('.srci').value||'').trim(); if(chkById[r.dataset.id]&&v) f.src=v; else delete f.src; }); }
 function groupSelOpts(cur){ const a=schemaCtx.groups.slice(); if(cur&&a.indexOf(cur)<0)a.push(cur); return a.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__newg__">＋ New group…</option>`; }
 function schemaRowHTML(f){
+  const isLib = schemaCtx.which==='library';
   const dk = f.src?'source':(DB.recipes.some(r=>r.outputTarget===schemaCtx.which && r.outputKey===f.key)?'output':'manual');
-  const srcLine = schemaCtx.which==='library' ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><label style="font-size:12px;display:inline-flex;gap:5px;align-items:center"><input type="checkbox" class="srcchk" ${f.src?'checked':''} onchange="onSrcChk('${f._id}',this.checked)">External source (fetch from a repo file)</label><input class="inp srci" value="${esc(f.src||'')}" placeholder="repo file path, e.g. table1_global.md" style="font-size:12px;margin-top:5px;${f.src?'':'display:none'}"></div>` : '';
+  const kindCell = isLib
+    ? `<label style="display:inline-flex;gap:5px;align-items:center;font-size:12px" title="Fetch this field's value from a repo file (kept out of data.json)"><input type="checkbox" class="srcchk" ${f.src?'checked':''} onchange="onSrcChk('${f._id}',this.checked)">source</label>`
+    : `<span class="badge ${bcls(dk)}" title="Auto: output if a recipe writes here, otherwise manual">${dk}</span>`;
+  const srcLine = isLib
+    ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><input class="inp srci" value="${esc(f.src||'')}" placeholder="repo file path, e.g. table1_global.md" style="font-size:12px;${f.src?'':'display:none'}"></div>`
+    : '';
   return `<div class="srow schema-row" data-id="${f._id}" ondragover="schemaRowOver(event)" ondragleave="this.classList.remove('drop-hot')" ondrop="schemaDrop(event,'${f._id}')">
     <div class="drag-h" draggable="true" ondragstart="schemaDragStart(event,'${f._id}')" ondragend="schemaDragEnd()">⠿</div>
     <input class="inp labi" value="${esc(f.label||'')}" placeholder="e.g. Age">
     <select class="inp grpi" onchange="onSchemaGroupChange('${f._id}',this.value)">${groupSelOpts(f.group)}</select>
-    <span class="badge ${bcls(dk)}" title="Auto: source if external, output if a recipe writes here, otherwise manual">${dk}</span>
+    ${kindCell}
     <button class="bb danger sm" type="button" onclick="removeSchemaField('${f._id}')">✕</button>
   </div>`+srcLine;
 }
