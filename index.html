@@ -222,7 +222,7 @@
 
   <section class="view" id="view-careers">
     <div class="between" style="margin-bottom:14px"><h2>Careers</h2>
-      <div class="row"><button class="bb g" id="btnCareerGroups">⚙ Groups</button><button class="bb g" id="btnCareerSchema">⚙ Manage fields</button><button class="bb p" id="btnAddCareer">+ Add career</button></div>
+      <div class="row"><button class="bb g" id="btnCareerGroups">⚙ Groups</button><button class="bb g" id="btnCareerSchema">⚙ Manage fields</button><button class="bb n" id="btnOnetImport">⬇ From O*NET</button><button class="bb p" id="btnAddCareer">+ Add career</button></div>
     </div>
     <div class="stack" id="listCareers"></div>
   </section>
@@ -263,6 +263,17 @@
   <div class="mhd"><h3 id="editTitle">Edit</h3><button class="xbtn" data-close>&times;</button></div>
   <div class="mbody" id="editBody"></div>
   <div class="mft"><button class="bb n" data-close>Cancel</button><button class="bb p" id="editSave">Save</button></div>
+</div></div>
+
+<div class="overlay" id="onetOverlay"><div class="modal wide" id="onetModal">
+  <div class="mhd"><h3>Import career from O*NET</h3><button class="xbtn" data-close>&times;</button></div>
+  <div class="mbody">
+    <p class="muted small" style="margin-top:0">Pick an occupation from the O*NET catalog (923 occupations, stored in your data repo under <b>onet/</b>). The selected occupation's fields are downloaded and added as a career — the full catalog never touches this browser's local storage.</p>
+    <input class="inp" id="onetSearch" placeholder="Search by title or SOC code…" autocomplete="off">
+    <div class="muted small" id="onetCount" style="margin:8px 2px"></div>
+    <div id="onetList" style="max-height:52vh;overflow:auto"></div>
+  </div>
+  <div class="mft"><button class="bb n" data-close>Close</button></div>
 </div></div>
 
 <div class="overlay" id="viewOverlay"><div class="modal" id="viewModal">
@@ -776,6 +787,49 @@ window.delEntity=function(which,id){
   else { if(!confirm('Delete this person?'))return; DB.people=DB.people.filter(p=>p.id!==id); }
   markDirty(); renderAll();
 };
+/* ---- O*NET catalog import ---- */
+let onetIndex=null;
+function onetCareerId(title,soc){ return 'c-'+String(title).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')+'-'+String(soc).replace(/\./g,'-'); }
+window.openOnetPicker=async function(){
+  if(!(gh.owner&&gh.repo&&gh.token)){ toast('Set GitHub owner / repo / token in ⚙ first.'); showOverlay('settingsOverlay'); return; }
+  showOverlay('onetOverlay');
+  const list=$('#onetList'), sb=$('#onetSearch'); sb.value='';
+  if(!onetIndex){
+    list.innerHTML='<div class="muted small" style="padding:12px">Loading catalog…</div>'; $('#onetCount').textContent='';
+    try{ const t=await ghReadFile('onet/index.json'); onetIndex=JSON.parse(t); }
+    catch(e){ list.innerHTML='<div class="muted small" style="padding:12px">Could not load <b>onet/index.json</b> from '+esc(gh.owner+'/'+gh.repo)+'. Make sure the catalog is committed there.<br>'+esc(e.message)+'</div>'; return; }
+  }
+  renderOnetList(''); sb.oninput=()=>renderOnetList(sb.value); sb.focus();
+};
+function renderOnetList(q){
+  const list=$('#onetList'), cnt=$('#onetCount'); q=(q||'').trim().toLowerCase();
+  const have=new Set(DB.careers.map(c=>c.id));
+  let rows=onetIndex||[];
+  if(q) rows=rows.filter(r=>r.title.toLowerCase().includes(q)||String(r.soc).toLowerCase().includes(q));
+  cnt.textContent=rows.length+' of '+(onetIndex?onetIndex.length:0)+' occupations'+(rows.length>300?' (showing first 300)':'');
+  list.innerHTML=rows.slice(0,300).map(r=>{
+    const added=have.has(onetCareerId(r.title,r.soc));
+    return `<div class="litem"><div style="min-width:0">
+      <div class="ttl">${esc(r.title)} ${added?'<span class="chip out">✓ added</span>':''}</div>
+      <div class="sub">${esc(r.soc)}${r.job_zone?(' · '+esc(r.job_zone)):''}</div>
+    </div><div class="row"><button class="bb ${added?'g':'p'} sm" onclick="importOnet('${esc(String(r.soc))}')">${added?'Re-import':'+ Add'}</button></div></div>`;
+  }).join('')||'<div class="muted small" style="padding:12px">No match.</div>';
+}
+window.importOnet=async function(soc){
+  const idx=(onetIndex||[]).find(r=>String(r.soc)===String(soc)); const cleanTitle=idx?idx.title:soc;
+  const id=onetCareerId(cleanTitle,soc);
+  try{
+    const t=await ghReadFile('onet/'+soc+'.json'); const rec=JSON.parse(t);
+    const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; });
+    const existing=DB.careers.find(c=>c.id===id);
+    if(existing){ existing.title=rec.career_title||cleanTitle; Object.assign(existing.values,vals); }
+    else { DB.careers.push({id, title:rec.career_title||cleanTitle, values:valuesFor(DB.careerFields,vals)}); }
+    markDirty(); renderAll();
+    toast((existing?'Updated ':'Added ')+(rec.career_title||cleanTitle));
+    renderOnetList($('#onetSearch').value);
+  }catch(e){ alert('Import failed for '+soc+':\n'+e.message); }
+};
+
 /* recipe editor */
 window.openRecipe=function(id){
   const r=id?DB.recipes.find(x=>x.id===id):normRecipe({});
@@ -1223,6 +1277,7 @@ $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRaw
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
+$('#btnOnetImport').addEventListener('click', ()=>openOnetPicker());
 $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
 $('#btnCareerGroups').addEventListener('click', ()=>openGroups('career'));
 $('#btnLibraryGroups').addEventListener('click', ()=>openGroups('library'));
