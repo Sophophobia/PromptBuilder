@@ -431,7 +431,7 @@ async function loadFromGitHub(silent){
     if(!silent) toast('Loaded from '+gh.owner+'/'+gh.repo);
   }catch(e){ renderStatus('GitHub load failed'); alert('GitHub load failed:\n'+e.message+'\n\nCheck owner / repo / branch / token in ⚙ Settings.'); }
 }
-function normFieldDef(f){ const o={ key:f.key, label:f.label||'', kind:(f.kind==='output'?'output':'manual'), group:f.group||'General' }; if(f.src) o.src=String(f.src); return o; }
+function normFieldDef(f){ const o={ key:f.key, label:f.label||'', kind:(f.kind==='output'?'output':'manual'), group:f.group||'General' }; if(f.src) o.src=String(f.src); if(f.sliceByDwa) o.sliceByDwa=true; return o; }
 function extLibKeys(){ return DB.libraryFields.filter(f=>f.src).map(f=>f.key); }
 function withExtStripped(fn){ const ext=extLibKeys(); if(!ext.length) return fn(); const lv=DB.library&&DB.library.values; if(!lv) return fn(); const saved={}; ext.forEach(k=>{ saved[k]=lv[k]; lv[k]=''; }); try{ return fn(); } finally{ ext.forEach(k=>{ lv[k]=saved[k]; }); } }
 function groupDefs(defs, order){ const map={}; defs.forEach(f=>{ const g=f.group||'General'; (map[g]=map[g]||[]).push(f); }); const res=[],seen=new Set(); (order||[]).forEach(g=>{ if(map[g]){ res.push({group:g,items:map[g]}); seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g)) res.push({group:g,items:map[g]}); }); return res; }
@@ -492,13 +492,37 @@ function filterTableColumns(text, keep){
 }
 
 /* ===================== assembly ===================== */
+function dwaIdsIn(text){ const s=new Set(); const re=/4\.A(?:\.[0-9A-Za-z]+)+/g; let m; while((m=re.exec(text||''))) s.add(m[0]); return s; }
+function careerDwaIds(career){ return career?dwaIdsIn((career.values&&career.values.detailed_work_activities)||''):new Set(); }
+function sliceLibByDwa(libText, dwaSet){
+  if(!dwaSet||!dwaSet.size) return null;
+  const lines=(libText||'').split(/\r?\n/); const out=[]; let i=0, sliced=false;
+  while(i<lines.length){
+    if(i+1<lines.length && lines[i].indexOf('|')>=0 && tblIsSep(lines[i+1])){
+      const headers=tblCells(lines[i]); let si=headers.findIndex(h=>h.trim().toLowerCase()==='source'); if(si<0) si=headers.length-1;
+      out.push(lines[i]); out.push(lines[i+1]); i+=2; sliced=true;
+      while(i<lines.length && lines[i].indexOf('|')>=0 && !tblIsSep(lines[i]) && lines[i].trim()!==''){ const cells=tblCells(lines[i]); const src=cells[si]||''; let keep=false; for(const dd of dwaSet){ if(src.indexOf(dd)>=0){ keep=true; break; } } if(keep) out.push(lines[i]); i++; }
+    } else { out.push(lines[i]); i++; }
+  }
+  return sliced?out.join('\n'):null;
+}
 function assembleRecipe(recipe, person, career){
   const body=recipe.body||''; const missing=[], blocks=[];
   const cs=recipe.colSelect||{};
   const cell=(which,k,val)=>{ if(val==null||val===''){ missing.push(which+'.'+k); return '[MISSING]'; } const keep=cs[which+'.'+k]; return (keep&&keep.length)?filterTableColumns(val,keep):val; };
   (recipe.personKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('person',k)+'\n\n'+cell('person',k, person?person.values[k]:'')); });
   (recipe.careerKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('career',k)+'\n\n'+cell('career',k, career?career.values[k]:'')); });
-  (recipe.libraryKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('library',k)+'\n\n'+cell('library',k, DB.library&&DB.library.values?DB.library.values[k]:'')); });
+  (recipe.libraryKeys||[]).forEach(k=>{
+    const fdef=DB.libraryFields.find(f=>f.key===k); let val=DB.library&&DB.library.values?DB.library.values[k]:'';
+    if(fdef&&fdef.sliceByDwa){
+      const ids=careerDwaIds(career);
+      if(!ids.size){ missing.push('slice.'+k+' (no career DWA ids)'); blocks.push('## '+labelOf('library',k)+'\n\n[MISSING — no DWA ids on the selected career to slice '+k+']'); return; }
+      const sl=sliceLibByDwa(val, ids); if(sl!=null) val=sl;
+      blocks.push('## '+labelOf('library',k)+'\n\n'+(val&&String(val).trim()?val:'[MISSING]'));
+      return;
+    }
+    blocks.push('## '+labelOf('library',k)+'\n\n'+cell('library',k, val));
+  });
   (recipe.aggregateInputs||[]).forEach(ag=>{
     const scope=ag.scope==='person'?'person':'career'; const arr=scope==='person'?DB.people:DB.careers;
     const lbl=labelOf(scope,ag.key); let n=0;
@@ -967,7 +991,7 @@ window.openSchema=function(which){
   const builtIn=which==='library'?'':`The ${isP?'Name':'Title'} is built in. `;
   const owns=which==='library'?'The library has these fields.':`Every ${which} shares these fields.`;
   let groups=(groupListFor(which)||[]).slice(); if(!groups.length) groups=['General'];
-  schemaCtx={which, groups, fields:defs.map(f=>({_id:uid('sf'), key:f.key, label:f.label, kind:f.kind, group:groups.indexOf(f.group)>=0?f.group:groups[0], src:f.src}))};
+  schemaCtx={which, groups, fields:defs.map(f=>({_id:uid('sf'), key:f.key, label:f.label, kind:f.kind, group:groups.indexOf(f.group)>=0?f.group:groups[0], src:f.src, sliceByDwa:f.sliceByDwa}))};
   $('#schemaTitle').textContent='Manage '+which+' fields';
   $('#schemaBody').innerHTML=`
     <p class="muted small" style="margin-top:0">${owns} ${builtIn}You set the <b>display label</b>; the key is generated for you. Drag the ⠿ handle to reorder, or drop onto a group heading to move a field there. Reorder/rename groups with <b>⚙ Groups</b> on the ${tabName} tab.${which==='library'?' A library field can declare an <b>external source</b> (a repo file path) in the box under its row — the tool fetches that file with your GitHub token and keeps its content out of data.json. Edit or clear it anytime.':''}</p>
@@ -978,7 +1002,7 @@ window.openSchema=function(which){
 };
 function syncSchemaInputs(){ const chkById={};
   $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f) f.label=r.querySelector('.labi').value; const c=r.querySelector('.srcchk'); chkById[r.dataset.id]=!!(c&&c.checked); });
-  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(!f) return; const v=(r.querySelector('.srci').value||'').trim(); if(chkById[r.dataset.id]&&v) f.src=v; else delete f.src; }); }
+  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(!f) return; const v=(r.querySelector('.srci').value||'').trim(); if(chkById[r.dataset.id]&&v) f.src=v; else delete f.src; const sc=r.querySelector('.slicechk'); if(sc&&sc.checked) f.sliceByDwa=true; else delete f.sliceByDwa; }); }
 function groupSelOpts(cur){ const a=schemaCtx.groups.slice(); if(cur&&a.indexOf(cur)<0)a.push(cur); return a.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__newg__">＋ New group…</option>`; }
 function schemaRowHTML(f){
   const isLib = schemaCtx.which==='library';
@@ -987,7 +1011,7 @@ function schemaRowHTML(f){
     ? `<label style="display:inline-flex;gap:5px;align-items:center;font-size:12px" title="Fetch this field's value from a repo file (kept out of data.json)"><input type="checkbox" class="srcchk" ${f.src?'checked':''} onchange="onSrcChk('${f._id}',this.checked)">source</label>`
     : `<span class="badge ${bcls(dk)}" title="Auto: output if a recipe writes here, otherwise manual">${dk}</span>`;
   const srcLine = isLib
-    ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><input class="inp srci" value="${esc(f.src||'')}" placeholder="repo file path, e.g. table1_global.md" style="font-size:12px;${f.src?'':'display:none'}"></div>`
+    ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><input class="inp srci" value="${esc(f.src||'')}" placeholder="repo file path, e.g. table1_global.md" style="font-size:12px;${f.src?'':'display:none'}"><label style="font-size:12px;display:inline-flex;gap:5px;align-items:center;margin-top:5px"><input type="checkbox" class="slicechk" ${f.sliceByDwa?'checked':''}>slice by the career's DWA ids when injected (for a big table like Table 1)</label></div>`
     : '';
   return `<div class="srow schema-row" data-id="${f._id}" ondragover="schemaRowOver(event)" ondragleave="this.classList.remove('drop-hot')" ondrop="schemaDrop(event,'${f._id}')">
     <div class="drag-h" draggable="true" ondragstart="schemaDragStart(event,'${f._id}')" ondragend="schemaDragEnd()">⠿</div>
@@ -1028,7 +1052,7 @@ $('#schemaSave').addEventListener('click', ()=>{
     if(!label){ alert('Display label cannot be empty.'); return; }
     let key=f.key; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
-    seen.add(key); newDefs.push(f.src?{key, label, kind:'source', group:f.group||'General', src:f.src}:{key, label, kind:'manual', group:f.group||'General'});
+    seen.add(key); { const nf={key, label, kind:f.src?'source':'manual', group:f.group||'General'}; if(f.src) nf.src=f.src; if(f.sliceByDwa) nf.sliceByDwa=true; newDefs.push(nf); }
   }
   const newKeys=new Set(newDefs.map(f=>f.key));
   const entities=which==='person'?DB.people:which==='library'?[DB.library]:DB.careers;
