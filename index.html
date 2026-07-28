@@ -79,6 +79,7 @@
   .badge{font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; padding:2px 7px; border-radius:999px}
   .badge.out{background:#eef6ff; color:#1e497e}
   .badge.man{background:var(--surface-2); color:var(--ink-500)}
+  .badge.src{background:#f3e8ff; color:#6b21a8}
 
   .frow{display:grid; grid-template-columns:160px 1fr 130px 104px auto; gap:8px; align-items:center; margin-bottom:8px}
   @media(max-width:700px){.frow{grid-template-columns:1fr}}
@@ -513,7 +514,13 @@ function sortEntities(){
   DB.people.sort((a,b)=>pName(a).localeCompare(pName(b),'en',{sensitivity:'base',numeric:true}));
   DB.careers.sort((a,b)=>cName(a).localeCompare(cName(b),'en',{sensitivity:'base',numeric:true}));
 }
-function renderAll(){ sortEntities(); renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderLibrary(); renderRecipes(); renderPipelines(); renderHistory(); }
+function bcls(k){ return k==='output'?'out':k==='source'?'src':'man'; }
+function recomputeKinds(){
+  const writes=(scope,key)=>DB.recipes.some(r=>r.outputTarget===scope && r.outputKey===key);
+  const pass=(fields,scope)=>{ (fields||[]).forEach(f=>{ f.kind = f.src?'source':(writes(scope,f.key)?'output':'manual'); }); };
+  pass(DB.personFields,'person'); pass(DB.careerFields,'career'); pass(DB.libraryFields,'library');
+}
+function renderAll(){ recomputeKinds(); sortEntities(); renderStatus(); renderCounts(); renderGenerate(); renderPeople(); renderCareers(); renderLibrary(); renderRecipes(); renderPipelines(); renderHistory(); }
 function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCareers').textContent=DB.careers.length; $('#cntLibrary').textContent=DB.libraryFields.length; $('#cntRecipes').textContent=DB.recipes.length; $('#cntPipelines').textContent=DB.pipelines.length; $('#cntHistory').textContent=HISTORY.length; }
 function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } if(storageFull){ el.textContent='⚠ storage full — Commit now'; el.className='status-pill dirty'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
 
@@ -629,7 +636,7 @@ function renderLibrary(){
   const vals=(DB.library&&DB.library.values)||{};
   host.innerHTML='<div class="card pad">'+groupDefs(defs, DB.libraryGroups).map(grp=>`<div class="grp-head">${esc(grp.group)}</div>`+grp.items.map(f=>{
     const val=vals[f.key]||'';
-    const head=`<div class="fhd"><span class="badge ${f.kind==='output'?'out':'man'}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label>${f.src?`<span class="chip out">external: ${esc(f.src)}</span>`:''}<button class="bb g sm" style="margin-left:auto" onclick="copyLib('${esc(f.key)}')">⧉ Copy</button></div>`;
+    const head=`<div class="fhd"><span class="badge ${bcls(f.kind)}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label>${f.src?`<span class="chip out">external: ${esc(f.src)}</span>`:''}<button class="bb g sm" style="margin-left:auto" onclick="copyLib('${esc(f.key)}')">⧉ Copy</button></div>`;
     if(f.src){ const n=val.length; return `<div class="field-block">${head}<div class="help-hint" style="margin-top:0">${n?('Loaded '+n.toLocaleString()+' chars from the repo file (kept out of data.json); injected in full wherever a recipe includes this field.'):('Not loaded — set ⚙ GitHub and ↻ Reload; content is fetched from '+esc(f.src)+'.')}</div><div class="preview" style="max-height:200px">${esc(val.slice(0,1200))}${val.length>1200?' …':''}</div></div>`; }
     return `<div class="field-block">${head}<div class="rendered" style="max-height:340px">${renderMarkdown(val)}</div></div>`;
   }).join('')).join('')+'</div>';
@@ -713,7 +720,7 @@ let editCtx=null;
 function valueInputs(defs, values, order){
   if(!defs.length) return '<div class="muted small">No fields defined. Use "Manage fields".</div>';
   return groupDefs(defs, order).map(grp=>`<div class="grp-head">${esc(grp.group)}</div>`+grp.items.map(f=>`<div class="field-block">
-    <div class="fhd"><span class="badge ${f.kind==='output'?'out':'man'}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label></div>
+    <div class="fhd"><span class="badge ${bcls(f.kind)}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label></div>
     <textarea class="inp" data-key="${esc(f.key)}" style="min-height:${f.kind==='output'?'120':'54'}px">${esc(values[f.key]||'')}</textarea>
   </div>`).join('')).join('');
 }
@@ -815,14 +822,14 @@ function renderRecipeFields(which){
   const host=recipeFieldHost(which); if(!host) return;
   const defs=defsFor(which); const sel=recipeFieldSel(which);
   if(!defs.length){ host.innerHTML='<div class="muted small">No '+which+' fields.</div>'; return; }
-  host.innerHTML=groupDefs(defs, recipeGroupsFor(which)).map(grp=>`<div class="grp-head">${esc(grp.group)}</div><div class="map-fields">`+grp.items.map(f=>`<label><input type="checkbox" value="${esc(f.key)}" ${sel.includes(f.key)?'checked':''} onchange="onRecipeField('${which}','${esc(f.key)}',this.checked)"><span class="badge ${f.kind==='output'?'out':'man'}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`).join('')+'</div>').join('');
+  host.innerHTML=groupDefs(defs, recipeGroupsFor(which)).map(grp=>`<div class="grp-head">${esc(grp.group)}</div><div class="map-fields">`+grp.items.map(f=>`<label><input type="checkbox" value="${esc(f.key)}" ${sel.includes(f.key)?'checked':''} onchange="onRecipeField('${which}','${esc(f.key)}',this.checked)"><span class="badge ${bcls(f.kind)}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`).join('')+'</div>').join('');
 }
 window.onRecipeField=function(which,key,on){ const arr=recipeFieldSel(which); const i=arr.indexOf(key); if(on){ if(i<0)arr.push(key);} else { if(i>=0)arr.splice(i,1); delete editCtx.draft.colSelect[which+'.'+key]; } renderColSelect(); };
 function renderAggFields(){
   const host=$('#rcAggFields'); if(!host) return; const d=editCtx.draft;
   const block=(scope,defs)=>{ if(!defs.length) return ''; return `<div class="grp-head">All ${scope}s</div><div class="map-fields">`+defs.map(f=>{
       const on=(d.aggregateInputs||[]).some(a=>a.scope===scope&&a.key===f.key);
-      return `<label><input type="checkbox" ${on?'checked':''} onchange="onAggField('${scope}','${esc(f.key)}',this.checked)"><span class="badge ${f.kind==='output'?'out':'man'}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`;
+      return `<label><input type="checkbox" ${on?'checked':''} onchange="onAggField('${scope}','${esc(f.key)}',this.checked)"><span class="badge ${bcls(f.kind)}" style="font-size:9px">${f.kind[0]}</span>${esc(f.label||f.key)}</label>`;
     }).join('')+'</div>'; };
   host.innerHTML=(block('career',DB.careerFields)+block('person',DB.personFields))||'<div class="muted small">No fields to aggregate.</div>';
 }
@@ -969,19 +976,21 @@ window.openSchema=function(which){
     <button class="bb n sm" type="button" onclick="addSchemaRow()" style="margin-top:6px">+ Add field</button>`;
   renderSchemaRows(); showOverlay('schemaOverlay');
 };
-function syncSchemaInputs(){ $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f){ f.label=r.querySelector('.labi').value; f.kind=r.querySelector('.kindi').value; } });
-  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f){ const v=(r.querySelector('.srci').value||'').trim(); if(v) f.src=v; else delete f.src; } }); }
+function syncSchemaInputs(){ $$('#schemaRows .schema-row').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(f){ f.label=r.querySelector('.labi').value; } });
+  $$('#schemaRows .srow-src').forEach(r=>{ const f=schemaCtx.fields.find(x=>x._id===r.dataset.id); if(!f) return; const chk=r.querySelector('.srcchk'); const v=(r.querySelector('.srci').value||'').trim(); if(chk&&chk.checked&&v) f.src=v; else delete f.src; }); }
 function groupSelOpts(cur){ const a=schemaCtx.groups.slice(); if(cur&&a.indexOf(cur)<0)a.push(cur); return a.map(g=>`<option value="${esc(g)}" ${g===cur?'selected':''}>${esc(g)}</option>`).join('')+`<option value="__newg__">＋ New group…</option>`; }
 function schemaRowHTML(f){
-  const srcLine = schemaCtx.which==='library' ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><input class="inp srci" value="${esc(f.src||'')}" placeholder="External source (optional): repo file path, e.g. table1_global.md — content is fetched from the file and kept out of data.json; blank = normal editable field" style="font-size:12px"></div>` : '';
+  const dk = f.src?'source':(DB.recipes.some(r=>r.outputTarget===schemaCtx.which && r.outputKey===f.key)?'output':'manual');
+  const srcLine = schemaCtx.which==='library' ? `<div class="srow-src" data-id="${f._id}" style="margin:-3px 0 11px 32px"><label style="font-size:12px;display:inline-flex;gap:5px;align-items:center"><input type="checkbox" class="srcchk" ${f.src?'checked':''} onchange="onSrcChk('${f._id}',this.checked)">External source (fetch from a repo file)</label><input class="inp srci" value="${esc(f.src||'')}" placeholder="repo file path, e.g. table1_global.md" style="font-size:12px;margin-top:5px;${f.src?'':'display:none'}"></div>` : '';
   return `<div class="srow schema-row" data-id="${f._id}" ondragover="schemaRowOver(event)" ondragleave="this.classList.remove('drop-hot')" ondrop="schemaDrop(event,'${f._id}')">
     <div class="drag-h" draggable="true" ondragstart="schemaDragStart(event,'${f._id}')" ondragend="schemaDragEnd()">⠿</div>
     <input class="inp labi" value="${esc(f.label||'')}" placeholder="e.g. Age">
     <select class="inp grpi" onchange="onSchemaGroupChange('${f._id}',this.value)">${groupSelOpts(f.group)}</select>
-    <select class="inp kindi"><option value="manual" ${f.kind!=='output'?'selected':''}>manual</option><option value="output" ${f.kind==='output'?'selected':''}>output</option></select>
+    <span class="badge ${bcls(dk)}" title="Auto: source if external, output if a recipe writes here, otherwise manual">${dk}</span>
     <button class="bb danger sm" type="button" onclick="removeSchemaField('${f._id}')">✕</button>
   </div>`+srcLine;
 }
+window.onSrcChk=function(id,on){ const row=$$('#schemaRows .srow-src').find(r=>r.dataset.id===id); if(!row) return; const inp=row.querySelector('.srci'); if(on){ inp.style.display=''; inp.focus(); } else { inp.style.display='none'; inp.value=''; } };
 function renderSchemaRows(){
   const host=$('#schemaRows'); let html='';
   schemaCtx.groups.forEach(g=>{
@@ -1012,7 +1021,7 @@ $('#schemaSave').addEventListener('click', ()=>{
     if(!label){ alert('Display label cannot be empty.'); return; }
     let key=f.key; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
-    seen.add(key); newDefs.push(f.src?{key, label, kind:f.kind, group:f.group||'General', src:f.src}:{key, label, kind:f.kind, group:f.group||'General'});
+    seen.add(key); newDefs.push(f.src?{key, label, kind:'source', group:f.group||'General', src:f.src}:{key, label, kind:'manual', group:f.group||'General'});
   }
   const newKeys=new Set(newDefs.map(f=>f.key));
   const entities=which==='person'?DB.people:which==='library'?[DB.library]:DB.careers;
