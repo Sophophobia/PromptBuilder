@@ -376,7 +376,7 @@ const cName=c=>((c&&c.title)||'').trim()||'(untitled)';
 let storageFull=false;
 function persistLocal(){
   try{
-    localStorage.setItem(LS_DB,JSON.stringify(DB));
+    localStorage.setItem(LS_DB,withExtStripped(()=>JSON.stringify(DB)));
     localStorage.setItem(LS_HIST,JSON.stringify(HISTORY));
     if(storageFull){ storageFull=false; persistLocal._warned=false; renderStatus(); }
     return true;
@@ -394,7 +394,7 @@ async function fetchJSON(p){ const r=await fetch(p,{cache:'no-store'}); if(!r.ok
 async function init(){
   loadGH();
   const ld=lsGet(LS_DB); const clean=lsGet(LS_CLEAN)==='1';
-  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; renderAll(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
+  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; renderAll(); hydrateLibrary(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
   await loadInitial(true);
 }
 async function loadInitial(silent){
@@ -405,7 +405,7 @@ async function reloadFromRepo(silent){
   try{
     const d=await fetchJSON('data.json').catch(()=>null);
     const h=await fetchJSON('history.json').catch(()=>[]);
-    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); if(!silent) toast('Reloaded from repo.'); return; }
+    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary(); if(!silent) toast('Reloaded from repo.'); return; }
     throw new Error('no data.json');
   }catch(e){ DB=normalizeDB(DB); HISTORY=[]; dirty=false; renderAll(); renderStatus('No data found. Set ⚙ GitHub (private data repo), or use ↻ to load files.'); }
 }
@@ -415,16 +415,24 @@ async function ghReadFile(path){
   if(!r.ok){ const t=await r.text(); throw new Error(r.status+' '+path+': '+t.slice(0,160)); }
   return r.text();
 }
+async function hydrateLibrary(){
+  if(!(gh.owner&&gh.repo&&gh.token)) return;
+  const ext=DB.libraryFields.filter(f=>f.src); if(!ext.length) return;
+  for(const f of ext){ try{ const t=await ghReadFile(f.src); if(t!=null && DB.library&&DB.library.values) DB.library.values[f.key]=t; }catch(e){} }
+  renderGenerate(); renderLibrary();
+}
 async function loadFromGitHub(silent){
   try{
     renderStatus('loading from GitHub…');
     const d=await ghReadFile(gh.dataPath||'data.json');
     const h=await ghReadFile(gh.histPath||'history.json');
-    DB=normalizeDB(d?JSON.parse(d):{}); HISTORY=h?JSON.parse(h):[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll();
+    DB=normalizeDB(d?JSON.parse(d):{}); HISTORY=h?JSON.parse(h):[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary();
     if(!silent) toast('Loaded from '+gh.owner+'/'+gh.repo);
   }catch(e){ renderStatus('GitHub load failed'); alert('GitHub load failed:\n'+e.message+'\n\nCheck owner / repo / branch / token in ⚙ Settings.'); }
 }
-function normFieldDef(f){ return { key:f.key, label:f.label||'', kind:(f.kind==='output'?'output':'manual'), group:f.group||'General' }; }
+function normFieldDef(f){ const o={ key:f.key, label:f.label||'', kind:(f.kind==='output'?'output':'manual'), group:f.group||'General' }; if(f.src) o.src=String(f.src); return o; }
+function extLibKeys(){ return DB.libraryFields.filter(f=>f.src).map(f=>f.key); }
+function withExtStripped(fn){ const ext=extLibKeys(); if(!ext.length) return fn(); const lv=DB.library&&DB.library.values; if(!lv) return fn(); const saved={}; ext.forEach(k=>{ saved[k]=lv[k]; lv[k]=''; }); try{ return fn(); } finally{ ext.forEach(k=>{ lv[k]=saved[k]; }); } }
 function groupDefs(defs, order){ const map={}; defs.forEach(f=>{ const g=f.group||'General'; (map[g]=map[g]||[]).push(f); }); const res=[],seen=new Set(); (order||[]).forEach(g=>{ if(map[g]){ res.push({group:g,items:map[g]}); seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g)) res.push({group:g,items:map[g]}); }); return res; }
 function valuesFor(defs,vals){ const v={}; (defs||[]).forEach(f=>{ v[f.key]=(vals&&vals[f.key]!=null)?vals[f.key]:''; }); return v; }
 function orderedGroups(stored, items){
@@ -584,6 +592,7 @@ function computeGen(){
 function renderGenPreview(placeholder){
   const el=$('#genPreview');
   if(placeholder){ el.className='preview'; el.textContent=placeholder; return; }
+  if(genRawText.length>150000){ el.className='preview'; el.textContent=genRawText.slice(0,4000)+'\n\n… ['+genRawText.length.toLocaleString()+' chars total — preview truncated to stay responsive; ⧉ Copy still copies the full prompt]'; return; }
   if(genViewMode==='rendered'){ el.className='rendered'; el.innerHTML=renderMarkdown(genRawText); }
   else { el.className='preview'; el.textContent=genRawText; }
 }
@@ -620,14 +629,17 @@ function renderLibrary(){
   const vals=(DB.library&&DB.library.values)||{};
   host.innerHTML='<div class="card pad">'+groupDefs(defs, DB.libraryGroups).map(grp=>`<div class="grp-head">${esc(grp.group)}</div>`+grp.items.map(f=>{
     const val=vals[f.key]||'';
-    return `<div class="field-block"><div class="fhd"><span class="badge ${f.kind==='output'?'out':'man'}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label></div><div class="rendered" style="max-height:340px">${renderMarkdown(val)}</div></div>`;
+    const head=`<div class="fhd"><span class="badge ${f.kind==='output'?'out':'man'}">${f.kind}</span><label class="fld" style="margin:0">${esc(f.label||prettify(f.key))} <span class="muted" style="text-transform:none">(${esc(f.key)})</span></label>${f.src?`<span class="chip out">external: ${esc(f.src)}</span>`:''}<button class="bb g sm" style="margin-left:auto" onclick="copyLib('${esc(f.key)}')">⧉ Copy</button></div>`;
+    if(f.src){ const n=val.length; return `<div class="field-block">${head}<div class="help-hint" style="margin-top:0">${n?('Loaded '+n.toLocaleString()+' chars from the repo file (kept out of data.json); injected in full wherever a recipe includes this field.'):('Not loaded — set ⚙ GitHub and ↻ Reload; content is fetched from '+esc(f.src)+'.')}</div><div class="preview" style="max-height:200px">${esc(val.slice(0,1200))}${val.length>1200?' …':''}</div></div>`; }
+    return `<div class="field-block">${head}<div class="rendered" style="max-height:340px">${renderMarkdown(val)}</div></div>`;
   }).join('')).join('')+'</div>';
 }
+window.copyLib=function(k){ const v=(DB.library&&DB.library.values&&DB.library.values[k])||''; if(!v){ toast('Nothing to copy yet.'); return; } navigator.clipboard.writeText(v).then(()=>toast('Copied '+k+' ('+v.length.toLocaleString()+' chars).')); };
 window.openLibrary=function(){
   if(!DB.libraryFields.length){ toast('Add a library field first (⚙ Manage fields).'); return; }
   editCtx={kind:'library', id:'library'};
   $('#editModal').className='modal wide'; $('#editTitle').textContent='Edit library values';
-  $('#editBody').innerHTML=`<label class="fld">Fields</label>${valueInputs(DB.libraryFields, (DB.library&&DB.library.values)||{}, DB.libraryGroups)}`;
+  $('#editBody').innerHTML=`<label class="fld">Fields</label>${valueInputs(DB.libraryFields.filter(f=>!f.src), (DB.library&&DB.library.values)||{}, DB.libraryGroups)}<div class="help-hint">External-source fields (loaded from a repo file) are not editable here.</div>`;
   showOverlay('editOverlay');
 };
 
@@ -948,7 +960,7 @@ window.openSchema=function(which){
   const builtIn=which==='library'?'':`The ${isP?'Name':'Title'} is built in. `;
   const owns=which==='library'?'The library has these fields.':`Every ${which} shares these fields.`;
   let groups=(groupListFor(which)||[]).slice(); if(!groups.length) groups=['General'];
-  schemaCtx={which, groups, fields:defs.map(f=>({_id:uid('sf'), key:f.key, label:f.label, kind:f.kind, group:groups.indexOf(f.group)>=0?f.group:groups[0]}))};
+  schemaCtx={which, groups, fields:defs.map(f=>({_id:uid('sf'), key:f.key, label:f.label, kind:f.kind, group:groups.indexOf(f.group)>=0?f.group:groups[0], src:f.src}))};
   $('#schemaTitle').textContent='Manage '+which+' fields';
   $('#schemaBody').innerHTML=`
     <p class="muted small" style="margin-top:0">${owns} ${builtIn}You set the <b>display label</b>; the key is generated for you. Drag the ⠿ handle to reorder, or drop onto a group heading to move a field there. Reorder/rename groups with <b>⚙ Groups</b> on the ${tabName} tab.</p>
@@ -998,7 +1010,7 @@ $('#schemaSave').addEventListener('click', ()=>{
     if(!label){ alert('Display label cannot be empty.'); return; }
     let key=f.key; if(!key) key=slugKey(label, new Set([...seen, ...existingKeys]));
     if(seen.has(key)){ alert('Two fields resolve to the same key ('+key+'). Use distinct labels.'); return; }
-    seen.add(key); newDefs.push({key, label, kind:f.kind, group:f.group||'General'});
+    seen.add(key); newDefs.push(f.src?{key, label, kind:f.kind, group:f.group||'General', src:f.src}:{key, label, kind:f.kind, group:f.group||'General'});
   }
   const newKeys=new Set(newDefs.map(f=>f.key));
   const entities=which==='person'?DB.people:which==='library'?[DB.library]:DB.careers;
@@ -1053,8 +1065,9 @@ window.copyHist=function(which){ if(!viewH)return; const t=which==='output'?view
 window.delHistory=function(id){ if(!confirm('Delete this history entry?'))return; HISTORY=HISTORY.filter(h=>h.id!==id); markDirty(); renderAll(); };
 
 /* ===================== download / github ===================== */
-function download(name,obj){ const b=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
-$('#btnDownload').addEventListener('click', ()=>{ download('data.json',DB); download('history.json',HISTORY); toast('Downloaded. Commit them to your repo.'); });
+function download(name,obj){ downloadText(name, JSON.stringify(obj,null,2)); }
+function downloadText(name,txt){ const b=new Blob([txt],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+$('#btnDownload').addEventListener('click', ()=>{ downloadText('data.json', withExtStripped(()=>JSON.stringify(DB,null,2))); download('history.json',HISTORY); toast('Downloaded. Commit them to your repo.'); });
 $('#btnReload').addEventListener('click', ()=>{ if(dirty&&!confirm('Discard local unsaved changes and reload the latest data?'))return; try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadInitial(false); });
 async function ghApi(path,opts){ const r=await fetch('https://api.github.com'+path, Object.assign({ headers:{'Authorization':'Bearer '+gh.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'} },opts)); if(!r.ok){ const t=await r.text(); throw new Error(r.status+': '+t.slice(0,200)); } return r.json(); }
 function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
@@ -1064,7 +1077,7 @@ $('#btnGit').addEventListener('click', async ()=>{
   try{
     const ref=await ghApi(base+'/git/ref/heads/'+gh.branch); const headSha=ref.object.sha;
     const headCommit=await ghApi(base+'/git/commits/'+headSha); const baseTree=headCommit.tree.sha;
-    const files=[{path:gh.dataPath||'data.json',content:JSON.stringify(DB,null,2)},{path:gh.histPath||'history.json',content:JSON.stringify(HISTORY,null,2)}];
+    const files=[{path:gh.dataPath||'data.json',content:withExtStripped(()=>JSON.stringify(DB,null,2))},{path:gh.histPath||'history.json',content:JSON.stringify(HISTORY,null,2)}];
     const treeItems=[]; for(const f of files){ const blob=await ghApi(base+'/git/blobs',{method:'POST',body:JSON.stringify({content:b64(f.content),encoding:'base64'})}); treeItems.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha}); }
     const tree=await ghApi(base+'/git/trees',{method:'POST',body:JSON.stringify({base_tree:baseTree,tree:treeItems})});
     const who=gh.uploader||'Prompt Builder'; const stamp=new Date().toISOString().slice(0,16).replace('T',' ');
