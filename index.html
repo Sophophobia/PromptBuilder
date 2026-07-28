@@ -577,7 +577,11 @@ function genActiveSubject(){ if(genPipe){ const p=genPipeline(); return p?p.subj
 function renderGenerate(){
   const sel=$('#genRecipe'); const cur=sel.value||(genPipe?('pipe:'+genPipe.id):genState.recipeId);
   let html='<option value="">— select —</option>';
-  if(DB.recipes.length) html+='<optgroup label="Recipes">'+DB.recipes.map(r=>`<option value="${r.id}">${esc(r.title)}</option>`).join('')+'</optgroup>';
+  if(DB.recipes.length){
+    const map={}; DB.recipes.forEach(r=>{ const g=r.group||'General'; (map[g]=map[g]||[]).push(r); });
+    const order=[],seen=new Set(); (DB.recipeGroups||[]).forEach(g=>{ if(map[g]){order.push(g);seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g))order.push(g); });
+    html+=order.map(g=>`<optgroup label="${esc(g)}">`+map[g].map(r=>`<option value="${r.id}">${esc(r.title)}</option>`).join('')+'</optgroup>').join('');
+  }
   if(DB.pipelines.length) html+='<optgroup label="Pipelines">'+DB.pipelines.map(p=>`<option value="pipe:${p.id}">▶ ${esc(p.title)} (${p.recipeIds.length})</option>`).join('')+'</optgroup>';
   sel.innerHTML=html;
   if(cur && (DB.recipes.some(r=>r.id===cur) || DB.pipelines.some(p=>('pipe:'+p.id)===cur))) sel.value=cur;
@@ -698,7 +702,7 @@ function renderRecipes(){
   if(!DB.recipes.length){ host.innerHTML='<div class="empty">No recipes yet.</div>'; return; }
   const map={}; DB.recipes.forEach(r=>{ const g=r.group||'General'; (map[g]=map[g]||[]).push(r); });
   const order=[],seen=new Set(); (DB.recipeGroups||[]).forEach(g=>{ if(map[g]){order.push(g);seen.add(g);} }); Object.keys(map).forEach(g=>{ if(!seen.has(g))order.push(g); });
-  host.innerHTML=order.map(g=>`<div class="grp-head">${esc(g)}</div>`+map[g].map(r=>{
+  host.innerHTML=order.map(g=>`<div class="grp-head">${esc(g)}</div>`+map[g].map((r,gi,gArr)=>{
     const snippet=(r.body||'').slice(0,140);
     return `<div class="litem">
       <div style="min-width:0">
@@ -707,10 +711,18 @@ function renderRecipes(){
         <div class="sub mono" style="margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:640px">${snippet?esc(snippet):'<span class="muted">(no prompt body)</span>'}</div>
         <div class="chips">${(r.personKeys||[]).map(k=>`<span class="chip">person.${esc(k)}</span>`).join('')}${(r.careerKeys||[]).map(k=>`<span class="chip career">career.${esc(k)}</span>`).join('')}${(r.libraryKeys||[]).map(k=>`<span class="chip out">library.${esc(k)}</span>`).join('')}${(r.aggregateInputs||[]).map(a=>`<span class="chip out">Σ all ${esc(a.scope)}s.${esc(a.key)}</span>`).join('')}${((r.personKeys||[]).length||(r.careerKeys||[]).length||(r.libraryKeys||[]).length||(r.aggregateInputs||[]).length)?'':'<span class="muted small">no fields selected</span>'}</div>
       </div>
-      <div class="row"><button class="bb n sm" onclick="openRecipe('${r.id}')">Edit</button><button class="bb danger sm" onclick="delRecipe('${r.id}')">Delete</button></div>
+      <div class="row"><button class="bb g sm" title="Move up in group" ${gi===0?'disabled':''} onclick="moveRecipe('${r.id}',-1)">▲</button><button class="bb g sm" title="Move down in group" ${gi===gArr.length-1?'disabled':''} onclick="moveRecipe('${r.id}',1)">▼</button><button class="bb n sm" onclick="openRecipe('${r.id}')">Edit</button><button class="bb danger sm" onclick="delRecipe('${r.id}')">Delete</button></div>
     </div>`;
   }).join('')).join('');
 }
+window.moveRecipe=function(id,dir){
+  const arr=DB.recipes; const i=arr.findIndex(r=>r.id===id); if(i<0) return;
+  const g=arr[i].group||'General';
+  let j=i+dir; while(j>=0&&j<arr.length&&(arr[j].group||'General')!==g) j+=dir;
+  if(j<0||j>=arr.length) return;
+  const t=arr[i]; arr[i]=arr[j]; arr[j]=t;
+  markDirty(); renderRecipes(); renderGenerate();
+};
 
 /* ---- pipelines ---- */
 function renderPipelines(){
