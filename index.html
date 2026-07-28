@@ -508,7 +508,7 @@ function sliceLibByDwa(libText, dwaSet){
     if(i+1<lines.length && lines[i].indexOf('|')>=0 && tblIsSep(lines[i+1])){
       const headers=tblCells(lines[i]); let si=headers.findIndex(h=>h.trim().toLowerCase()==='source'); if(si<0) si=headers.length-1;
       out.push(lines[i]); out.push(lines[i+1]); i+=2; sliced=true;
-      while(i<lines.length && lines[i].indexOf('|')>=0 && !tblIsSep(lines[i]) && lines[i].trim()!==''){ const cells=tblCells(lines[i]); const src=cells[si]||''; let keep=false; for(const dd of dwaSet){ if(src.indexOf(dd)>=0){ keep=true; break; } } if(keep) out.push(lines[i]); i++; }
+      while(i<lines.length && lines[i].indexOf('|')>=0 && !tblIsSep(lines[i]) && lines[i].trim()!==''){ const cells=tblCells(lines[i]); const srcIds=dwaIdsIn(cells[si]||''); let keep=false; for(const dd of dwaSet){ if(srcIds.has(dd)){ keep=true; break; } } if(keep) out.push(lines[i]); i++; }
     } else { out.push(lines[i]); i++; }
   }
   return sliced?out.join('\n'):null;
@@ -1118,7 +1118,7 @@ function download(name,obj){ downloadText(name, JSON.stringify(obj,null,2)); }
 function downloadText(name,txt){ const b=new Blob([txt],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
 $('#btnDownload').addEventListener('click', ()=>{ downloadText('data.json', withExtStripped(()=>JSON.stringify(DB,null,2))); download('history.json',HISTORY); toast('Downloaded. Commit them to your repo.'); });
 $('#btnReload').addEventListener('click', ()=>{ if(dirty&&!confirm('Discard local unsaved changes and reload the latest data?'))return; try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadInitial(false); });
-async function ghApi(path,opts){ const r=await fetch('https://api.github.com'+path, Object.assign({ headers:{'Authorization':'Bearer '+gh.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'} },opts)); if(!r.ok){ const t=await r.text(); throw new Error(r.status+': '+t.slice(0,200)); } return r.json(); }
+async function ghApi(path,opts){ const r=await fetch('https://api.github.com'+path, Object.assign({ cache:'no-store', headers:{'Authorization':'Bearer '+gh.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'} },opts)); if(!r.ok){ const t=await r.text(); throw new Error(r.status+': '+t.slice(0,200)); } return r.json(); }
 function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
 
 /* ===== 3-way merge so a partner's concurrent edits are never clobbered ===== */
@@ -1167,11 +1167,13 @@ function showRemoteBanner(){ const b=$('#remoteBanner'); if(b) b.style.display='
 function hideRemoteBanner(){ const b=$('#remoteBanner'); if(b) b.style.display='none'; }
 async function checkRemote(){ if(!(gh.owner&&gh.repo&&gh.token)||!loadedSha) return; try{ const sha=await ghHeadSha(); if(sha&&sha!==loadedSha) showRemoteBanner(); }catch(e){} }
 async function mergeInRemote(){ if(!(gh.owner&&gh.repo&&gh.token)){ toast('Set GitHub first.'); return; }
-  try{ const sha=await ghHeadSha(); const rd=await ghReadFile(gh.dataPath||'data.json'); const rh=await ghReadFile(gh.histPath||'history.json');
+  try{ const wasDirty=dirty; const sha=await ghHeadSha(); const rd=await ghReadFile(gh.dataPath||'data.json'); const rh=await ghReadFile(gh.histPath||'history.json');
     const remoteDB=rd?JSON.parse(rd):{}, remoteH=rh?JSON.parse(rh):[];
     const {data:merged, conflicts}=merge3(baseDB, DB, remoteDB); DB=merged; HISTORY=mergeHistory(HISTORY, remoteH);
     baseDB=deepCopy(remoteDB); baseHIST=deepCopy(remoteH); persistBase(sha);
-    dirty=true; persistLocal(); renderAll(); hydrateLibrary(); hideRemoteBanner();
+    dirty = wasDirty || conflicts.length>0;   // pulling remote doesn't create unpushed work unless you already had some
+    try{ localStorage.setItem(LS_CLEAN, dirty?'0':'1'); }catch(e){}
+    persistLocal(); renderAll(); hydrateLibrary(); hideRemoteBanner();
     toast(conflicts.length?('Merged remote — '+conflicts.length+' conflict(s), kept yours'):'Merged in remote changes.');
     if(conflicts.length) alert('Merged in remote changes.\nConflicts (kept your version):\n- '+conflicts.join('\n- '));
   }catch(e){ alert('Merge-in failed:\n'+e.message); }
@@ -1196,7 +1198,7 @@ $('#btnGit').addEventListener('click', async ()=>{
     if(gh.uploader){ const em=(gh.uploader.toLowerCase().replace(/[^\w]+/g,'.').replace(/^\.+|\.+$/g,'')||'user')+'@users.noreply.github.com'; cbody.author={name:gh.uploader, email:em}; cbody.committer={name:gh.uploader, email:em}; }
     const commit=await ghApi(base+'/git/commits',{method:'POST',body:JSON.stringify(cbody)});
     await ghApi(base+'/git/refs/heads/'+gh.branch,{method:'PATCH',body:JSON.stringify({sha:commit.sha})});
-    dirty=false; markClean(); setBaseFromDB(commit.sha); renderAll(); hideRemoteBanner();
+    dirty=false; setBaseFromDB(commit.sha); persistLocal(); markClean(); renderAll(); hideRemoteBanner();
     toast(conflicts.length?('Committed (merged; '+conflicts.length+' conflict(s) kept yours)'):('Committed to '+gh.owner+'/'+gh.repo+'@'+gh.branch));
     if(conflicts.length) alert('Committed after merging remote changes.\nConflicts (kept your version):\n- '+conflicts.join('\n- '));
   }catch(e){ alert('GitHub commit failed:\n'+e.message); } finally{ btn.disabled=false; btn.textContent=old; }
