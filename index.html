@@ -156,6 +156,12 @@
   <button class="hbtn" id="btnSettings" title="GitHub settings">⚙</button>
 </header>
 
+<div id="remoteBanner" style="display:none;align-items:center;gap:12px;justify-content:center;background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;padding:8px 14px;font-size:13px">
+  <span>⚠ The remote has newer changes (someone else committed).</span>
+  <button class="bb p sm" onclick="pbMergeIn()">⤵ Merge in (keep my edits)</button>
+  <button class="bb n sm" onclick="if(confirm('Discard your local unsaved changes and reload the latest from the repo?')){try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadInitial(false);}">↻ Reload (discard mine)</button>
+</div>
+
 <nav class="tabs">
   <button data-tab="generate" class="active">Generate</button>
   <button data-tab="people">People <span class="count" id="cntPeople">0</span></button>
@@ -301,9 +307,9 @@
 
 <script>
 /* ===================== state ===================== */
-const LS_DB='pb-db-v3', LS_HIST='pb-history-v3', LS_GH='pb-github-v1', LS_CLEAN='pb-clean-v1';
+const LS_DB='pb-db-v3', LS_HIST='pb-history-v3', LS_GH='pb-github-v1', LS_CLEAN='pb-clean-v1', LS_BASE='pb-base-v1', LS_BASEH='pb-baseh-v1', LS_SHA='pb-sha-v1';
 let DB={ personFields:[], careerFields:[], libraryFields:[], personGroups:[], careerGroups:[], libraryGroups:[], recipeGroups:[], people:[], careers:[], library:{values:{}}, recipes:[], pipelines:[] };
-let HISTORY=[]; let dirty=false;
+let HISTORY=[]; let dirty=false; let baseDB=null, baseHIST=null, loadedSha='';
 let gh={ owner:'', repo:'', branch:'main', dataPath:'data.json', histPath:'history.json', token:'', uploader:'' };
 
 const $=s=>document.querySelector(s); const $$=s=>Array.from(document.querySelectorAll(s));
@@ -395,7 +401,7 @@ async function fetchJSON(p){ const r=await fetch(p,{cache:'no-store'}); if(!r.ok
 async function init(){
   loadGH();
   const ld=lsGet(LS_DB); const clean=lsGet(LS_CLEAN)==='1';
-  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; renderAll(); hydrateLibrary(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
+  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; try{ const bs=lsGet(LS_BASE); if(bs) baseDB=JSON.parse(bs); const bh=lsGet(LS_BASEH); if(bh) baseHIST=JSON.parse(bh); loadedSha=lsGet(LS_SHA)||''; }catch(e){} renderAll(); hydrateLibrary(); checkRemote(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
   await loadInitial(true);
 }
 async function loadInitial(silent){
@@ -406,7 +412,7 @@ async function reloadFromRepo(silent){
   try{
     const d=await fetchJSON('data.json').catch(()=>null);
     const h=await fetchJSON('history.json').catch(()=>[]);
-    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary(); if(!silent) toast('Reloaded from repo.'); return; }
+    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; setBaseFromDB(); renderAll(); hydrateLibrary(); if(!silent) toast('Reloaded from repo.'); return; }
     throw new Error('no data.json');
   }catch(e){ DB=normalizeDB(DB); HISTORY=[]; dirty=false; renderAll(); renderStatus('No data found. Set ⚙ GitHub (private data repo), or use ↻ to load files.'); }
 }
@@ -428,6 +434,7 @@ async function loadFromGitHub(silent){
     const d=await ghReadFile(gh.dataPath||'data.json');
     const h=await ghReadFile(gh.histPath||'history.json');
     DB=normalizeDB(d?JSON.parse(d):{}); HISTORY=h?JSON.parse(h):[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary();
+    let sha=''; try{ sha=await ghHeadSha(); }catch(e){} setBaseFromDB(sha); hideRemoteBanner();
     if(!silent) toast('Loaded from '+gh.owner+'/'+gh.repo);
   }catch(e){ renderStatus('GitHub load failed'); alert('GitHub load failed:\n'+e.message+'\n\nCheck owner / repo / branch / token in ⚙ Settings.'); }
 }
@@ -1113,11 +1120,73 @@ $('#btnDownload').addEventListener('click', ()=>{ downloadText('data.json', with
 $('#btnReload').addEventListener('click', ()=>{ if(dirty&&!confirm('Discard local unsaved changes and reload the latest data?'))return; try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadInitial(false); });
 async function ghApi(path,opts){ const r=await fetch('https://api.github.com'+path, Object.assign({ headers:{'Authorization':'Bearer '+gh.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'} },opts)); if(!r.ok){ const t=await r.text(); throw new Error(r.status+': '+t.slice(0,200)); } return r.json(); }
 function b64(s){ return btoa(unescape(encodeURIComponent(s))); }
+
+/* ===== 3-way merge so a partner's concurrent edits are never clobbered ===== */
+function deepCopy(o){ return o==null?o:JSON.parse(JSON.stringify(o)); }
+function jeq(a,b){ return JSON.stringify(a)===JSON.stringify(b); }
+function mergeKeyed(baseA, localA, remoteA, kp, conflicts, label){
+  const B={},L={},R={}; (baseA||[]).forEach(x=>B[x[kp]]=x); (localA||[]).forEach(x=>L[x[kp]]=x); (remoteA||[]).forEach(x=>R[x[kp]]=x);
+  const order=[], seen=new Set();
+  (localA||[]).forEach(x=>{ const id=x[kp]; if(!seen.has(id)){seen.add(id);order.push(id);} });
+  (remoteA||[]).forEach(x=>{ const id=x[kp]; if(!seen.has(id)){seen.add(id);order.push(id);} });
+  const nm=id=>(L[id]&&(L[id].title||L[id].name))||(R[id]&&(R[id].title||R[id].name))||id;
+  const out=[];
+  order.forEach(id=>{ const inB=id in B, inL=id in L, inR=id in R;
+    if(inL&&inR){ const lc=inB?!jeq(L[id],B[id]):true, rc=inB?!jeq(R[id],B[id]):true;
+      if(lc&&rc&&!jeq(L[id],R[id])){ out.push(L[id]); conflicts.push(label+' "'+nm(id)+'": edited on both sides, kept yours'); }
+      else out.push(lc?L[id]:(rc?R[id]:L[id])); }
+    else if(inL&&!inR){ if(!inB) out.push(L[id]); else if(!jeq(L[id],B[id])){ out.push(L[id]); conflicts.push(label+' "'+nm(id)+'": you edited, partner deleted — kept yours'); } }
+    else if(!inL&&inR){ if(!inB) out.push(R[id]); }
+  });
+  return out;
+}
+function mergeVals(baseO, localO, remoteO, conflicts, label){
+  const B=baseO||{}, L=localO||{}, R=remoteO||{}, out={};
+  new Set([...Object.keys(L),...Object.keys(R)]).forEach(k=>{ const inB=k in B, inL=k in L, inR=k in R;
+    if(inL&&inR){ const lc=inB?L[k]!==B[k]:true, rc=inB?R[k]!==B[k]:true;
+      if(lc&&rc&&L[k]!==R[k]){ out[k]=L[k]; conflicts.push(label+'.'+k+': changed on both sides, kept yours'); } else out[k]=lc?L[k]:(rc?R[k]:L[k]); }
+    else if(inL&&!inR){ if(!inB||L[k]!==B[k]) out[k]=L[k]; }
+    else if(!inL&&inR){ if(!inB) out[k]=R[k]; }
+  });
+  return out;
+}
+function merge3scalar(b,l,r){ return jeq(l,b)?deepCopy(r):(jeq(r,b)?deepCopy(l):deepCopy(l)); }
+function merge3(base, local, remote){
+  base=base||{}; const c=[]; const m=deepCopy(local);
+  ['people','careers','recipes','pipelines'].forEach(k=>{ m[k]=mergeKeyed(base[k],local[k],remote[k],'id',c,k); });
+  ['personFields','careerFields','libraryFields'].forEach(k=>{ m[k]=mergeKeyed(base[k],local[k],remote[k],'key',c,k); });
+  ['personGroups','careerGroups','libraryGroups','recipeGroups'].forEach(k=>{ m[k]=merge3scalar(base[k],local[k],remote[k]); });
+  m.library={values: mergeVals(base.library&&base.library.values, local.library&&local.library.values, remote.library&&remote.library.values, c, 'library')};
+  return {data:m, conflicts:c};
+}
+function mergeHistory(localH, remoteH){ const out=[], seen=new Set(); (remoteH||[]).concat(localH||[]).forEach(h=>{ if(h&&h.id&&!seen.has(h.id)){seen.add(h.id); out.push(h);} }); return out; }
+function persistBase(sha){ try{ if(baseDB) localStorage.setItem(LS_BASE,JSON.stringify(baseDB)); if(baseHIST) localStorage.setItem(LS_BASEH,JSON.stringify(baseHIST)); if(sha!=null){ loadedSha=sha; localStorage.setItem(LS_SHA,sha); } }catch(e){} }
+function setBaseFromDB(sha){ try{ baseDB=JSON.parse(withExtStripped(()=>JSON.stringify(DB))); baseHIST=deepCopy(HISTORY); persistBase(sha); }catch(e){} }
+async function ghHeadSha(){ const ref=await ghApi('/repos/'+gh.owner+'/'+gh.repo+'/git/ref/heads/'+(gh.branch||'main')); return ref.object.sha; }
+function showRemoteBanner(){ const b=$('#remoteBanner'); if(b) b.style.display='flex'; }
+function hideRemoteBanner(){ const b=$('#remoteBanner'); if(b) b.style.display='none'; }
+async function checkRemote(){ if(!(gh.owner&&gh.repo&&gh.token)||!loadedSha) return; try{ const sha=await ghHeadSha(); if(sha&&sha!==loadedSha) showRemoteBanner(); }catch(e){} }
+async function mergeInRemote(){ if(!(gh.owner&&gh.repo&&gh.token)){ toast('Set GitHub first.'); return; }
+  try{ const sha=await ghHeadSha(); const rd=await ghReadFile(gh.dataPath||'data.json'); const rh=await ghReadFile(gh.histPath||'history.json');
+    const remoteDB=rd?JSON.parse(rd):{}, remoteH=rh?JSON.parse(rh):[];
+    const {data:merged, conflicts}=merge3(baseDB, DB, remoteDB); DB=merged; HISTORY=mergeHistory(HISTORY, remoteH);
+    baseDB=deepCopy(remoteDB); baseHIST=deepCopy(remoteH); persistBase(sha);
+    dirty=true; persistLocal(); renderAll(); hydrateLibrary(); hideRemoteBanner();
+    toast(conflicts.length?('Merged remote — '+conflicts.length+' conflict(s), kept yours'):'Merged in remote changes.');
+    if(conflicts.length) alert('Merged in remote changes.\nConflicts (kept your version):\n- '+conflicts.join('\n- '));
+  }catch(e){ alert('Merge-in failed:\n'+e.message); }
+}
+window.pbMergeIn=mergeInRemote;
 $('#btnGit').addEventListener('click', async ()=>{
   if(!gh.owner||!gh.repo||!gh.token){ toast('Set GitHub owner / repo / token in ⚙ first.'); showOverlay('settingsOverlay'); return; }
   const base='/repos/'+gh.owner+'/'+gh.repo; const btn=$('#btnGit'); btn.disabled=true; const old=btn.textContent; btn.textContent='Committing…';
   try{
     const ref=await ghApi(base+'/git/ref/heads/'+gh.branch); const headSha=ref.object.sha;
+    // 3-way merge with the latest remote so we never overwrite a partner's concurrent changes
+    let conflicts=[];
+    const rd=await ghReadFile(gh.dataPath||'data.json'); const rh=await ghReadFile(gh.histPath||'history.json');
+    const remoteDB=rd?JSON.parse(rd):{}, remoteH=rh?JSON.parse(rh):[];
+    const mg=merge3(baseDB, DB, remoteDB); DB=mg.data; HISTORY=mergeHistory(HISTORY, remoteH); conflicts=mg.conflicts;
     const headCommit=await ghApi(base+'/git/commits/'+headSha); const baseTree=headCommit.tree.sha;
     const files=[{path:gh.dataPath||'data.json',content:withExtStripped(()=>JSON.stringify(DB,null,2))},{path:gh.histPath||'history.json',content:JSON.stringify(HISTORY,null,2)}];
     const treeItems=[]; for(const f of files){ const blob=await ghApi(base+'/git/blobs',{method:'POST',body:JSON.stringify({content:b64(f.content),encoding:'base64'})}); treeItems.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha}); }
@@ -1127,7 +1196,9 @@ $('#btnGit').addEventListener('click', async ()=>{
     if(gh.uploader){ const em=(gh.uploader.toLowerCase().replace(/[^\w]+/g,'.').replace(/^\.+|\.+$/g,'')||'user')+'@users.noreply.github.com'; cbody.author={name:gh.uploader, email:em}; cbody.committer={name:gh.uploader, email:em}; }
     const commit=await ghApi(base+'/git/commits',{method:'POST',body:JSON.stringify(cbody)});
     await ghApi(base+'/git/refs/heads/'+gh.branch,{method:'PATCH',body:JSON.stringify({sha:commit.sha})});
-    dirty=false; markClean(); renderStatus(); toast('Committed to '+gh.owner+'/'+gh.repo+'@'+gh.branch);
+    dirty=false; markClean(); setBaseFromDB(commit.sha); renderAll(); hideRemoteBanner();
+    toast(conflicts.length?('Committed (merged; '+conflicts.length+' conflict(s) kept yours)'):('Committed to '+gh.owner+'/'+gh.repo+'@'+gh.branch));
+    if(conflicts.length) alert('Committed after merging remote changes.\nConflicts (kept your version):\n- '+conflicts.join('\n- '));
   }catch(e){ alert('GitHub commit failed:\n'+e.message); } finally{ btn.disabled=false; btn.textContent=old; }
 });
 $('#btnSettings').addEventListener('click', ()=>{ $('#ghOwner').value=gh.owner; $('#ghRepo').value=gh.repo; $('#ghBranch').value=gh.branch||'main'; $('#ghDataPath').value=gh.dataPath||'data.json'; $('#ghHistPath').value=gh.histPath||'history.json'; $('#ghUploader').value=gh.uploader||''; $('#ghToken').value=gh.token; showOverlay('settingsOverlay'); });
@@ -1164,4 +1235,6 @@ $('#btnReload').addEventListener('contextmenu', e=>{ e.preventDefault(); $('#fil
 $('#filePicker').addEventListener('change', async e=>{ for(const f of e.target.files){ const txt=await f.text(); try{ const j=JSON.parse(txt); if(/hist/i.test(f.name)||Array.isArray(j)) HISTORY=Array.isArray(j)?j:HISTORY; else DB=normalizeDB(j); }catch(err){ alert('Could not parse '+f.name); } } dirty=true; persistLocal(); renderAll(); toast('Loaded from file(s).'); });
 
 init();
+setInterval(checkRemote, 45000);
+window.addEventListener('focus', ()=>{ checkRemote(); });
 </script>
