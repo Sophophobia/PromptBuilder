@@ -24,6 +24,9 @@
   .bb.g{background:transparent; color:var(--red-700); border-color:var(--red-700)} .bb.g:hover{background:rgba(164,30,26,.06)}
   .bb.n{background:var(--surface); color:var(--ink-700); border-color:var(--ink-200)} .bb.n:hover{background:var(--surface-2)}
   .bb.sm{padding:5px 10px; font-size:12px; border-radius:8px}
+  .starbtn{font-size:16px; line-height:1; padding:3px 9px; color:var(--ink-200); border-color:var(--ink-200)}
+  .starbtn:hover{color:#e0a415; border-color:#e0a415; background:rgba(224,164,21,.08)}
+  .starbtn.on{color:#f5a623; border-color:#f5a623; background:rgba(245,166,35,.12)}
   .bb.danger{background:transparent; color:#b91c1c; border-color:#fca5a5} .bb.danger:hover{background:#fef2f2}
   .bb:disabled{opacity:.45; cursor:not-allowed}
 
@@ -670,7 +673,7 @@ function entityList(which){
         <div class="sub">${filled}/${defs.length} fields filled${isP?(' · career: '+esc(car?cName(car):'none')):(' · linked to '+DB.people.filter(p=>p.careerId===o.id).length+' people')}</div>
       </div>
       <div class="row">
-        ${isP?'':`<button class="bb g sm" title="${o.starred?'Unstar':'Star (pins it in the Generate picker)'}" onclick="toggleStar('${o.id}')">${o.starred?'★':'☆'}</button>`}
+        ${isP?'':`<button class="bb sm starbtn${o.starred?' on':''}" title="${o.starred?'Unstar':'Star (pins it in the Generate picker)'}" onclick="toggleStar('${o.id}')">${o.starred?'★':'☆'}</button>`}
         <button class="bb n sm" onclick="openEntity('${which}','${o.id}')">Edit</button>
         <button class="bb danger sm" onclick="delEntity('${which}','${o.id}')">Delete</button>
       </div>
