@@ -473,7 +473,7 @@ function normalizeDB(d){
     careerGroups:orderedGroups(d.careerGroups, cf),
     libraryGroups:orderedGroups(d.libraryGroups, lf),
     recipeGroups:orderedGroups(d.recipeGroups, recipes),
-    careers:(d.careers||[]).map(c=>({id:c.id||uid('c'), title:(c.title!=null?c.title:((c.values&&c.values.title)||'Untitled career')), values:valuesFor(cf,c.values)})),
+    careers:(d.careers||[]).map(c=>({id:c.id||uid('c'), title:(c.title!=null?c.title:((c.values&&c.values.title)||'Untitled career')), starred:!!c.starred, values:valuesFor(cf,c.values)})),
     people:(d.people||[]).map(p=>({id:p.id||uid('p'), name:(p.name!=null?p.name:((p.values&&p.values.name)||'Untitled person')), careerId:p.careerId||'', values:valuesFor(pf,p.values)})),
     library:{values:valuesFor(lf, (d.library&&d.library.values)||{})},
     recipes:recipes,
@@ -597,7 +597,12 @@ function buildPicker(){
   if(subject==='library'){ title.textContent='2 · Library recipe'; area.innerHTML='<div class="muted small">This recipe runs on the whole library — it aggregates across every career/person and writes to the global library. Nothing to pick here.</div>'; computeGen(); return; }
   if(subject==='career'){
     title.textContent='2 · Pick a career';
-    area.innerHTML='<select class="inp" id="genCareerSel"><option value="">— select career —</option>'+DB.careers.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join('')+'</select>';
+    const cOpt=c=>`<option value="${c.id}">${c.starred?'★ ':''}${esc(cName(c))}</option>`;
+    const starred=DB.careers.filter(c=>c.starred), rest=DB.careers.filter(c=>!c.starred);
+    let cOpts='<option value="">— select career —</option>';
+    if(starred.length) cOpts+='<optgroup label="★ Starred">'+starred.map(cOpt).join('')+'</optgroup><optgroup label="All careers">'+rest.map(cOpt).join('')+'</optgroup>';
+    else cOpts+=DB.careers.map(cOpt).join('');
+    area.innerHTML='<select class="inp" id="genCareerSel">'+cOpts+'</select>';
     const cs=$('#genCareerSel'); if(DB.careers.some(c=>c.id===genState.careerId)) cs.value=genState.careerId;
     cs.addEventListener('change',()=>{ genState.careerId=cs.value; computeGen(); });
   } else {
@@ -665,6 +670,7 @@ function entityList(which){
         <div class="sub">${filled}/${defs.length} fields filled${isP?(' · career: '+esc(car?cName(car):'none')):(' · linked to '+DB.people.filter(p=>p.careerId===o.id).length+' people')}</div>
       </div>
       <div class="row">
+        ${isP?'':`<button class="bb g sm" title="${o.starred?'Unstar':'Star (pins it in the Generate picker)'}" onclick="toggleStar('${o.id}')">${o.starred?'★':'☆'}</button>`}
         <button class="bb n sm" onclick="openEntity('${which}','${o.id}')">Edit</button>
         <button class="bb danger sm" onclick="delEntity('${which}','${o.id}')">Delete</button>
       </div>
@@ -673,6 +679,7 @@ function entityList(which){
 }
 function renderPeople(){ entityList('people'); }
 function renderCareers(){ entityList('careers'); }
+window.toggleStar=function(id){ const c=careerById(id); if(!c) return; c.starred=!c.starred; markDirty(); renderAll(); };
 
 /* ---- library (single global object) ---- */
 function renderLibrary(){
