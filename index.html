@@ -273,7 +273,7 @@
     <div class="muted small" id="onetCount" style="margin:8px 2px"></div>
     <div id="onetList" style="max-height:52vh;overflow:auto"></div>
   </div>
-  <div class="mft"><button class="bb n" data-close>Close</button></div>
+  <div class="mft"><button class="bb g" id="onetBackfill" onclick="backfillOnet()" title="Re-download every already-added occupation to refresh O*NET fields">↻ Backfill added</button><button class="bb n" data-close>Close</button></div>
 </div></div>
 
 <div class="overlay" id="viewOverlay"><div class="modal" id="viewModal">
@@ -826,6 +826,8 @@ function renderOnetList(q){
       <div class="sub">${esc(r.soc)}${r.job_zone?(' · '+esc(r.job_zone)):''}</div>
     </div><div class="row"><button class="bb ${added?'g':'p'} sm" onclick="importOnet('${esc(String(r.soc))}')">${added?'Re-import':'+ Add'}</button></div></div>`;
   }).join('')||'<div class="muted small" style="padding:12px">No match.</div>';
+  const addedN=(onetIndex||[]).filter(r=>have.has(onetCareerId(r.title,r.soc))).length;
+  const bf=$('#onetBackfill'); if(bf){ bf.textContent='↻ Backfill added ('+addedN+')'; bf.disabled=!addedN; }
 }
 window.importOnet=async function(soc){
   const idx=(onetIndex||[]).find(r=>String(r.soc)===String(soc)); const cleanTitle=idx?idx.title:soc;
@@ -840,6 +842,26 @@ window.importOnet=async function(soc){
     toast((existing?'Updated ':'Added ')+(rec.career_title||cleanTitle));
     renderOnetList($('#onetSearch').value);
   }catch(e){ alert('Import failed for '+soc+':\n'+e.message); }
+};
+window.backfillOnet=async function(){
+  if(!onetIndex){ toast('Open the catalog first.'); return; }
+  const have=new Set(DB.careers.map(c=>c.id));
+  const targets=(onetIndex||[]).filter(r=>have.has(onetCareerId(r.title,r.soc)));
+  if(!targets.length){ toast('No catalog-linked careers to backfill.'); return; }
+  if(!confirm('Re-download and refresh '+targets.length+' already-added occupation(s) from O*NET?\n\nO*NET fields are overwritten with the latest catalog data; any non-O*NET fields (canon, milestone, …) are kept.')) return;
+  const bf=$('#onetBackfill'); if(bf) bf.disabled=true;
+  let ok=0,fail=0;
+  for(const r of targets){
+    try{
+      const t=await ghReadFile('onet/'+r.soc+'.json'); const rec=JSON.parse(t);
+      const c=DB.careers.find(x=>x.id===onetCareerId(r.title,r.soc)); if(!c){ continue; }
+      const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; });
+      c.title=rec.career_title||c.title; Object.assign(c.values,vals); ok++;
+      if(bf) bf.textContent='Backfilling… '+ok+'/'+targets.length;
+    }catch(e){ fail++; }
+  }
+  markDirty(); renderAll(); renderOnetList($('#onetSearch').value);
+  toast('Backfilled '+ok+' career(s)'+(fail?(', '+fail+' failed'):'')+'. Commit to save.');
 };
 
 /* recipe editor */
