@@ -32,6 +32,11 @@
   .intake-toc a{display:block; padding:6px 8px; border-radius:8px; font-size:13px; color:var(--ink-600); text-decoration:none; line-height:1.25}
   .intake-toc a:hover{background:rgba(164,30,26,.07); color:var(--red-700)}
   @media(max-width:1200px){ .intake-toc{display:none} }
+  .combo{position:relative}
+  .combo-list{position:absolute; z-index:50; left:0; right:0; margin-top:4px; max-height:280px; overflow:auto; background:var(--surface); border:1px solid var(--ink-200); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.12)}
+  .combo-item{padding:8px 11px; cursor:pointer; font-size:13px; line-height:1.3}
+  .combo-item:hover{background:rgba(164,30,26,.07)}
+  .combo-item.muted{cursor:default}
   .bb.danger{background:transparent; color:#b91c1c; border-color:#fca5a5} .bb.danger:hover{background:#fef2f2}
   .bb:disabled{opacity:.45; cursor:not-allowed}
 
@@ -1448,14 +1453,32 @@ function intakeTop3HTML(){
   if(!(gh.owner&&gh.repo&&gh.token)) return '<div class="muted small">Set ⚙ GitHub to load the O*NET occupation catalog.</div>';
   if(!onetIndex){ ensureOnetIndex(); return '<div class="muted small">Loading occupation catalog…</div>'; }
   const t3=intakeState.top3||['','',''];
-  const optsFor=cur=>'<option value="">— select occupation —</option>'+onetIndex.map(r=>`<option value="${esc(r.soc)}" ${cur===r.soc?'selected':''}>${esc(r.title)} (${esc(r.soc)})</option>`).join('');
-  let h='<div class="help-hint" style="margin-top:0">Pick up to three O*NET occupations the person is aiming for. The <b>1st is required</b>; 2nd and 3rd are optional. On <b>Save</b> they are written to the <code class="tok">top_3_choices</code> field and downloaded into <b>Careers</b> from the O*NET catalog.</div>';
+  const titleFor=soc=>{ const r=onetIndex.find(x=>String(x.soc)===String(soc)); return r?(r.title+' ('+soc+')'):(soc||''); };
+  let h='<div class="help-hint" style="margin-top:0">Pick up to three O*NET occupations the person is aiming for. The <b>1st is required</b>; 2nd and 3rd are optional. Type a few letters to search. On <b>Save</b> they are written to the <code class="tok">top_3_choices</code> field and downloaded into <b>Careers</b> from the O*NET catalog.</div>';
   ['1st choice (required)','2nd choice (optional)','3rd choice (optional)'].forEach((lab,i)=>{
-    h+=`<div class="field-block"><label class="fld">${lab}</label><select class="inp" onchange="intakeTop3Sel(${i},this.value)" style="max-width:560px">${optsFor(t3[i]||'')}</select></div>`;
+    const cur=t3[i]||'';
+    h+=`<div class="field-block"><label class="fld">${lab}</label>
+      <div class="combo" style="max-width:560px">
+        <div style="display:flex;gap:6px">
+          <input class="inp" id="ikt3-in-${i}" autocomplete="off" placeholder="Type to search 923 occupations…" value="${esc(cur?titleFor(cur):'')}" oninput="intakeTop3Filter(${i},this.value)" onfocus="intakeTop3Filter(${i},this.value)" onblur="intakeTop3Blur(${i})" style="flex:1">
+          ${cur?`<button class="bb g sm" title="Clear" onclick="intakeTop3Clear(${i})">✕</button>`:''}
+        </div>
+        <div id="ikt3-list-${i}" class="combo-list" style="display:none"></div>
+      </div></div>`;
   });
   return h;
 }
-window.intakeTop3Sel=function(i,v){ const a=(intakeState.top3||['','','']).slice(); a[i]=v; intakeState.top3=a; };
+window.intakeTop3Filter=function(i,q){
+  const list=document.getElementById('ikt3-list-'+i); if(!list||!onetIndex) return;
+  q=(q||'').trim().toLowerCase();
+  let rows=q?onetIndex.filter(r=>r.title.toLowerCase().includes(q)||String(r.soc).toLowerCase().includes(q)):onetIndex;
+  const shown=rows.slice(0,40);
+  list.innerHTML=shown.map(r=>`<div class="combo-item" onmousedown="intakeTop3Pick(${i},'${esc(String(r.soc))}')">${esc(r.title)} <span class="muted">(${esc(r.soc)})</span></div>`).join('')+(rows.length>40?`<div class="combo-item muted">${rows.length-40} more — keep typing…</div>`:'')||'<div class="combo-item muted">No match</div>';
+  list.style.display='block';
+};
+window.intakeTop3Blur=function(i){ setTimeout(()=>{ const l=document.getElementById('ikt3-list-'+i); if(l) l.style.display='none'; },160); };
+window.intakeTop3Pick=function(i,soc){ const a=(intakeState.top3||['','','']).slice(); a[i]=soc; intakeState.top3=a; renderIntake(); };
+window.intakeTop3Clear=function(i){ const a=(intakeState.top3||['','','']).slice(); a[i]=''; intakeState.top3=a; renderIntake(); };
 async function intakeImportTop3(socs){
   let ok=0;
   for(const soc of socs){ try{ const t=await ghReadFile('onet/'+soc+'.json'); const rec=JSON.parse(t); const idx=(onetIndex||[]).find(r=>r.soc===soc); const cleanTitle=idx?idx.title:soc; const id=onetCareerId(cleanTitle,soc); const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; }); const ex=DB.careers.find(c=>c.id===id); if(ex){ ex.title=rec.career_title||cleanTitle; Object.assign(ex.values,vals); } else DB.careers.push({id, title:rec.career_title||cleanTitle, starred:false, values:valuesFor(DB.careerFields,vals)}); ok++; }catch(e){} }
