@@ -37,6 +37,7 @@
   .combo-item{padding:8px 11px; cursor:pointer; font-size:13px; line-height:1.3}
   .combo-item:hover{background:rgba(164,30,26,.07)}
   .combo-item.muted{cursor:default}
+  .pf-scope-h{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-600); margin:2px 0 6px}
   .bb.danger{background:transparent; color:#b91c1c; border-color:#fca5a5} .bb.danger:hover{background:#fef2f2}
   .bb:disabled{opacity:.45; cursor:not-allowed}
 
@@ -1343,8 +1344,9 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 /* ===================== intake (guided assessment) ===================== */
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 let INTAKE=null; let intakeState=null;
-function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''] }; }
-const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices']];
+function pfBlank(){ return {topic:'',pain:'',success:'',inScope:[''],outScope:[],stages:[{name:'',detail:'',covers:[]}]}; }
+function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
+const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices'],['sec-preflight','7 · Project Blueprint']];
 window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
 let onetIndexLoading=false;
 async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(gh.owner&&gh.repo&&gh.token)) return; onetIndexLoading=true; try{ const t=await ghReadFile('onet/index.json'); onetIndex=JSON.parse(t); renderIntake(); }catch(e){} finally{ onetIndexLoading=false; } }
@@ -1484,6 +1486,47 @@ async function intakeImportTop3(socs){
   for(const soc of socs){ try{ const t=await ghReadFile('onet/'+soc+'.json'); const rec=JSON.parse(t); const idx=(onetIndex||[]).find(r=>r.soc===soc); const cleanTitle=idx?idx.title:soc; const id=onetCareerId(cleanTitle,soc); const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; }); const ex=DB.careers.find(c=>c.id===id); if(ex){ ex.title=rec.career_title||cleanTitle; Object.assign(ex.values,vals); } else DB.careers.push({id, title:rec.career_title||cleanTitle, starred:false, values:valuesFor(DB.careerFields,vals)}); ok++; }catch(e){} }
   if(ok){ markDirty(); renderAll(); toast('Downloaded '+ok+' O*NET career(s) into Careers.'); }
 }
+function pfObj(){ return intakeState.pf||(intakeState.pf=pfBlank()); }
+function intakePreflightHTML(){
+  const p=pfObj();
+  const ta=(key,q,ph)=>`<div class="field-block"><label class="fld">${q}</label><textarea class="inp" oninput="intakePfText('${key}',this.value)" placeholder="${esc(ph)}">${esc(p[key]||'')}</textarea></div>`;
+  let h='<div class="help-hint" style="margin-top:0">The project preflight (Blueprint) questions. On <b>Save</b> they are serialized into the <code class="tok">preflight_answer</code> field, which feeds the Project Scope / Preflight Check / Course recipes.</div>';
+  h+=ta('topic','A · Topic — What is your project topic, and how does it connect to a real need in your target industry?','Describe your project and its industry connection…');
+  h+=ta('pain','B · Pain point — What is the key pain point this project solves? Describe it from the person experiencing it.','Describe the problem from the user\'s perspective…');
+  h+=ta('success','C · Success — How will you know the project succeeded? What can you measure or verify before and after?','Describe measurable success criteria…');
+  const mkList=(which,ph)=>(p[which]||[]).map((it,i)=>`<div class="row" style="gap:6px;margin-bottom:6px"><input class="inp" value="${esc(it)}" placeholder="${ph}" oninput="intakePfItem('${which}',${i},this.value)" style="flex:1"><button class="bb g sm" onclick="intakePfRmItem('${which}',${i})">✕</button></div>`).join('');
+  h+=`<div class="field-block"><label class="fld">D · Scope — What is clearly in scope? What are you explicitly leaving out?</label>
+    <div class="grid2">
+      <div><div class="pf-scope-h">✓ In scope</div>${mkList('inScope','In-scope item')}<button class="bb n sm" onclick="intakePfAddItem('inScope')">+ Add in-scope item</button></div>
+      <div><div class="pf-scope-h">✕ Out of scope</div>${mkList('outScope','Out-of-scope item')}<button class="bb n sm" onclick="intakePfAddItem('outScope')">+ Add out-of-scope item</button></div>
+    </div></div>`;
+  const items=(p.inScope||[]).map(s=>(s||'').trim()).filter(Boolean);
+  const stagesH=(p.stages||[]).map((st,i)=>{
+    const cov=items.length?('<div class="pf-scope-h" style="margin-top:8px">Scope items covered</div><div class="map-fields">'+items.map(it=>`<label><input type="checkbox" ${(st.covers||[]).indexOf(it)>=0?'checked':''} onchange="intakePfCover(${i},${esc(JSON.stringify(it))},this.checked)"> ${esc(it)}</label>`).join('')+'</div>'):'';
+    return `<div class="card pad" style="margin-bottom:8px;box-shadow:none"><div class="row" style="gap:6px"><span class="chip">Stage ${i+1}</span><input class="inp" value="${esc(st.name||'')}" placeholder="Name this stage" oninput="intakePfStage(${i},'name',this.value)" style="flex:1"><button class="bb g sm" onclick="intakePfRmStage(${i})">✕</button></div><textarea class="inp" style="margin-top:6px" placeholder="What this stage does…" oninput="intakePfStage(${i},'detail',this.value)">${esc(st.detail||'')}</textarea>${cov}</div>`;
+  }).join('');
+  h+=`<div class="field-block"><label class="fld">E · Sequential stages — Name each sequential stage and what you'd do in it.</label>${stagesH}<button class="bb n sm" onclick="intakePfAddStage()">+ Add stage</button></div>`;
+  return h;
+}
+window.intakePfText=function(k,v){ pfObj()[k]=v; };
+window.intakePfItem=function(which,i,v){ const a=pfObj()[which]||[]; a[i]=v; pfObj()[which]=a; };
+window.intakePfAddItem=function(which){ const p=pfObj(); p[which]=(p[which]||[]).concat(['']); renderIntake(); };
+window.intakePfRmItem=function(which,i){ (pfObj()[which]||[]).splice(i,1); renderIntake(); };
+window.intakePfStage=function(i,f,v){ const st=(pfObj().stages||[])[i]; if(st) st[f]=v; };
+window.intakePfAddStage=function(){ pfObj().stages=(pfObj().stages||[]).concat([{name:'',detail:'',covers:[]}]); renderIntake(); };
+window.intakePfRmStage=function(i){ (pfObj().stages||[]).splice(i,1); renderIntake(); };
+window.intakePfCover=function(i,it,on){ const st=(pfObj().stages||[])[i]; if(!st) return; let c=Array.isArray(st.covers)?st.covers.slice():[]; const x=c.indexOf(it); if(on){ if(x<0)c.push(it);} else if(x>=0)c.splice(x,1); st.covers=c; };
+function intakeSerializePreflight(){
+  const p=pfObj(); const parts=[];
+  if((p.topic||'').trim()) parts.push('**A. Topic:** '+p.topic.trim());
+  if((p.pain||'').trim()) parts.push('**B. Pain point:** '+p.pain.trim());
+  if((p.success||'').trim()) parts.push('**C. Success:** '+p.success.trim());
+  const inS=(p.inScope||[]).map(s=>(s||'').trim()).filter(Boolean), outS=(p.outScope||[]).map(s=>(s||'').trim()).filter(Boolean);
+  if(inS.length||outS.length){ let s='**D. Scope:**'; if(inS.length) s+='\nIn scope:\n'+inS.map(x=>'- '+x).join('\n'); if(outS.length) s+='\nOut of scope:\n'+outS.map(x=>'- '+x).join('\n'); parts.push(s); }
+  const stages=(p.stages||[]).filter(st=>(st.name||'').trim()||(st.detail||'').trim());
+  if(stages.length){ let s='**E. Sequential stages:**'; stages.forEach((st,i)=>{ let line='\n'+(i+1)+'. '+((st.name||'').trim()||'(unnamed)'); if((st.detail||'').trim()) line+=' — '+st.detail.trim(); const cov=(st.covers||[]).filter(Boolean); if(cov.length) line+=' (covers: '+cov.join(', ')+')'; s+=line; }); parts.push(s); }
+  return parts.join('\n\n');
+}
 function intakeCard(title,inner,id){ return `<div class="card pad" id="${id||''}" style="margin-bottom:16px;scroll-margin-top:72px"><div class="sec-title">${esc(title)}</div>${inner}</div>`; }
 function renderIntake(){
   const host=$('#intakeBody'); if(!host) return;
@@ -1498,7 +1541,8 @@ function renderIntake(){
     intakeCard('3 · Skills & Experience', intakeSkillsHTML(), 'sec-skills') +
     intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true), 'sec-life') +
     intakeCard('5 · Career Barriers', intakeBarriersHTML(), 'sec-barriers') +
-    intakeCard('6 · Top 3 Career Choices', intakeTop3HTML(), 'sec-top3');
+    intakeCard('6 · Top 3 Career Choices', intakeTop3HTML(), 'sec-top3') +
+    intakeCard('7 · Project Blueprint (Preflight)', intakePreflightHTML(), 'sec-preflight');
   const toc=$('#intakeToc'); if(toc) toc.innerHTML='<div class="toc-h">Sections</div>'+INTAKE_SECTIONS.map(s=>`<a href="#${s[0]}" onclick="intakeGoto('${s[0]}');return false">${esc(s[1])}</a>`).join('');
 }
 function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
@@ -1524,8 +1568,9 @@ function intakeDoSave(){
   if(t3bad) toast('Top 3: 1st choice is required — skipped. Pick a 1st choice to save it.');
   const t3f=(t3bad?[]:t3).filter(Boolean);
   if(t3f.length){ const labels=t3f.map(soc=>{ const r=(onetIndex||[]).find(x=>x.soc===soc); return r?(r.title+' ('+soc+')'):soc; }); setF('top_3_choices', labels.map((l,i)=>(i+1)+'. '+l).join('\n')); }
+  setF('preflight_answer', intakeSerializePreflight());
   if(!written.length){ toast('Nothing filled in yet.'); return; }
-  updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc});
+  updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc,top3:intakeState.top3,pf:intakeState.pf});
   let person;
   if(intakeState.personId){ person=DB.people.find(p=>p.id===intakeState.personId); if(!person){ toast('Person not found.'); return; } }
   else { const nm=((b.name||'').trim()); if(!nm){ toast('Enter a Name in Basic info to create a new person.'); return; } person={id:uid('p'), name:nm, careerId:'', values:{}}; DB.personFields.forEach(f=>person.values[f.key]=''); }
@@ -1552,7 +1597,7 @@ $('#histCareerFilter').addEventListener('change', renderHistory);
 $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRawText||'').then(()=>toast('Copied prompt (raw).')));
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
-$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=raw.life||{}; intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } renderIntake(); });
+$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=raw.life||{}; intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } renderIntake(); });
 $('#intakeCareer').addEventListener('change', function(){ intakeState.careerId=this.value; });
 $('#intakeSave').addEventListener('click', intakeDoSave);
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
