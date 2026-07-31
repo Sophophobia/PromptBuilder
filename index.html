@@ -27,6 +27,11 @@
   .starbtn{font-size:16px; line-height:1; padding:3px 9px; color:var(--ink-200); border-color:var(--ink-200)}
   .starbtn:hover{color:#e0a415; border-color:#e0a415; background:rgba(224,164,21,.08)}
   .starbtn.on{color:#f5a623; border-color:#f5a623; background:rgba(245,166,35,.12)}
+  .intake-toc{position:fixed; top:120px; left:16px; width:184px; z-index:40; background:var(--surface); border:1px solid var(--ink-200); border-radius:12px; padding:10px 8px; box-shadow:0 4px 18px rgba(0,0,0,.06)}
+  .intake-toc .toc-h{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-600); padding:2px 8px 6px}
+  .intake-toc a{display:block; padding:6px 8px; border-radius:8px; font-size:13px; color:var(--ink-600); text-decoration:none; line-height:1.25}
+  .intake-toc a:hover{background:rgba(164,30,26,.07); color:var(--red-700)}
+  @media(max-width:1200px){ .intake-toc{display:none} }
   .bb.danger{background:transparent; color:#b91c1c; border-color:#fca5a5} .bb.danger:hover{background:#fef2f2}
   .bb:disabled{opacity:.45; cursor:not-allowed}
 
@@ -241,6 +246,7 @@
       </div>
     </div>
     <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Fill a person's assessment in one guided form instead of typing raw fields. Questions load privately from your data repo (<b>intake_schema.json</b>) — set ⚙ GitHub and ↻ Reload if they're missing. <b>Save</b> writes the answers into that person's fields; only the sections you actually fill are overwritten.</div>
+    <nav id="intakeToc" class="intake-toc"></nav>
     <div id="intakeBody"></div>
     <div class="row" style="margin-top:16px"><button class="bb p" id="intakeSave">💾 Save to person</button><span class="muted small" id="intakeHint"></span></div>
   </section>
@@ -1332,7 +1338,11 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 /* ===================== intake (guided assessment) ===================== */
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 let INTAKE=null; let intakeState=null;
-function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{} }; }
+function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''] }; }
+const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices']];
+window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
+let onetIndexLoading=false;
+async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(gh.owner&&gh.repo&&gh.token)) return; onetIndexLoading=true; try{ const t=await ghReadFile('onet/index.json'); onetIndex=JSON.parse(t); renderIntake(); }catch(e){} finally{ onetIndexLoading=false; } }
 async function hydrateIntake(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('intake_schema.json'); if(t){ INTAKE=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 function parseAllTables(text){
@@ -1434,7 +1444,24 @@ function intakeBarriersHTML(){
 window.intakeBarrier=function(it,on){ if(on) intakeState.barriers[it]=true; else delete intakeState.barriers[it]; };
 window.intakeBarrierComment=function(v){ intakeState.barrierComment=v; };
 
-function intakeCard(title,inner){ return `<div class="card pad" style="margin-bottom:16px"><div class="sec-title">${esc(title)}</div>${inner}</div>`; }
+function intakeTop3HTML(){
+  if(!(gh.owner&&gh.repo&&gh.token)) return '<div class="muted small">Set ⚙ GitHub to load the O*NET occupation catalog.</div>';
+  if(!onetIndex){ ensureOnetIndex(); return '<div class="muted small">Loading occupation catalog…</div>'; }
+  const t3=intakeState.top3||['','',''];
+  const optsFor=cur=>'<option value="">— select occupation —</option>'+onetIndex.map(r=>`<option value="${esc(r.soc)}" ${cur===r.soc?'selected':''}>${esc(r.title)} (${esc(r.soc)})</option>`).join('');
+  let h='<div class="help-hint" style="margin-top:0">Pick up to three O*NET occupations the person is aiming for. The <b>1st is required</b>; 2nd and 3rd are optional. On <b>Save</b> they are written to the <code class="tok">top_3_choices</code> field and downloaded into <b>Careers</b> from the O*NET catalog.</div>';
+  ['1st choice (required)','2nd choice (optional)','3rd choice (optional)'].forEach((lab,i)=>{
+    h+=`<div class="field-block"><label class="fld">${lab}</label><select class="inp" onchange="intakeTop3Sel(${i},this.value)" style="max-width:560px">${optsFor(t3[i]||'')}</select></div>`;
+  });
+  return h;
+}
+window.intakeTop3Sel=function(i,v){ const a=(intakeState.top3||['','','']).slice(); a[i]=v; intakeState.top3=a; };
+async function intakeImportTop3(socs){
+  let ok=0;
+  for(const soc of socs){ try{ const t=await ghReadFile('onet/'+soc+'.json'); const rec=JSON.parse(t); const idx=(onetIndex||[]).find(r=>r.soc===soc); const cleanTitle=idx?idx.title:soc; const id=onetCareerId(cleanTitle,soc); const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; }); const ex=DB.careers.find(c=>c.id===id); if(ex){ ex.title=rec.career_title||cleanTitle; Object.assign(ex.values,vals); } else DB.careers.push({id, title:rec.career_title||cleanTitle, starred:false, values:valuesFor(DB.careerFields,vals)}); ok++; }catch(e){} }
+  if(ok){ markDirty(); renderAll(); toast('Downloaded '+ok+' O*NET career(s) into Careers.'); }
+}
+function intakeCard(title,inner,id){ return `<div class="card pad" id="${id||''}" style="margin-bottom:16px;scroll-margin-top:72px"><div class="sec-title">${esc(title)}</div>${inner}</div>`; }
 function renderIntake(){
   const host=$('#intakeBody'); if(!host) return;
   if(!intakeState) intakeState=intakeBlank();
@@ -1443,11 +1470,13 @@ function renderIntake(){
   const csel=$('#intakeCareer'); if(csel){ const cc=intakeState.careerId; csel.innerHTML='<option value="">— link a career (optional) —</option>'+DB.careers.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join(''); csel.value=DB.careers.some(c=>c.id===cc)?cc:''; }
   if(!INTAKE){ host.innerHTML='<div class="empty">Questionnaire not loaded. Set ⚙ GitHub (private data repo) and ↻ Reload — content comes from <b>intake_schema.json</b> in your repo.</div>'; return; }
   host.innerHTML =
-    intakeCard('1 · Basic info', intakeFieldsHTML(INTAKE.basicInfo||[],'basic')) +
-    intakeCard('2 · Interest Profile (RIASEC)', intakeRiasecHTML()) +
-    intakeCard('3 · Skills & Experience', intakeSkillsHTML()) +
-    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true)) +
-    intakeCard('5 · Career Barriers', intakeBarriersHTML());
+    intakeCard('1 · Basic info', intakeFieldsHTML(INTAKE.basicInfo||[],'basic'), 'sec-basic') +
+    intakeCard('2 · Interest Profile (RIASEC)', intakeRiasecHTML(), 'sec-riasec') +
+    intakeCard('3 · Skills & Experience', intakeSkillsHTML(), 'sec-skills') +
+    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true), 'sec-life') +
+    intakeCard('5 · Career Barriers', intakeBarriersHTML(), 'sec-barriers') +
+    intakeCard('6 · Top 3 Career Choices', intakeTop3HTML(), 'sec-top3');
+  const toc=$('#intakeToc'); if(toc) toc.innerHTML='<div class="toc-h">Sections</div>'+INTAKE_SECTIONS.map(s=>`<a href="#${s[0]}" onclick="intakeGoto('${s[0]}');return false">${esc(s[1])}</a>`).join('');
 }
 function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
 function intakeSerializeBarriers(){ const secs=(INTAKE.barriers&&INTAKE.barriers.sections)||[]; const blocks=[]; secs.forEach(sec=>{ const items=(sec.items||[]).filter(it=>intakeState.barriers[it]); if(items.length) blocks.push('**'+sec.name+'**\n'+items.map(x=>'- '+x).join('\n')); }); const cm=(intakeState.barrierComment||'').trim(); if(!blocks.length && !cm) return ''; let out=blocks.length?blocks.join('\n\n'):'No barriers selected'; if(cm) out+='\n\nComments: '+cm; return out; }
@@ -1467,6 +1496,11 @@ function intakeDoSave(){
   setF('lifestyle', intakeSerializeFields(INTAKE.lifestyle||[],'life'));
   setF('career_barriers', intakeSerializeBarriers());
   setF('existing_skills', intakeSerializeSkills());
+  const t3=(intakeState.top3||['','','']).map(s=>s||'');
+  const t3bad=(t3[1]||t3[2])&&!t3[0];
+  if(t3bad) toast('Top 3: 1st choice is required — skipped. Pick a 1st choice to save it.');
+  const t3f=(t3bad?[]:t3).filter(Boolean);
+  if(t3f.length){ const labels=t3f.map(soc=>{ const r=(onetIndex||[]).find(x=>x.soc===soc); return r?(r.title+' ('+soc+')'):soc; }); setF('top_3_choices', labels.map((l,i)=>(i+1)+'. '+l).join('\n')); }
   if(!written.length){ toast('Nothing filled in yet.'); return; }
   updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc});
   let person;
@@ -1479,6 +1513,7 @@ function intakeDoSave(){
   markDirty(); renderAll();
   const hint=$('#intakeHint'); if(hint) hint.textContent='Saved to '+pName(person)+' → '+written.join(', ');
   toast('Saved to '+pName(person)+' ('+written.length+' fields).');
+  if(t3f.length) intakeImportTop3(t3f);
 }
 
 function showOverlay(id){ $('#'+id).classList.add('show'); }
