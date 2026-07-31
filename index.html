@@ -83,10 +83,11 @@
   .badge.out{background:#eef6ff; color:#1e497e}
   .badge.man{background:var(--surface-2); color:var(--ink-500)}
   .badge.src{background:#f3e8ff; color:#6b21a8}
-  .ik-q{display:grid; grid-template-columns:30px 1fr auto; gap:10px; align-items:center; padding:7px 0; border-bottom:1px solid var(--ink-200)}
+  .ik-q{display:grid; grid-template-columns:30px 1fr auto; gap:10px 26px; align-items:center; padding:7px 0; border-bottom:1px solid var(--ink-200)}
   .ik-num{color:var(--ink-400); font-size:12px; text-align:right}
-  .ik-rate{display:flex; gap:4px}
-  .ik-btn{width:30px; height:30px; border:1px solid var(--ink-200); background:var(--surface); border-radius:8px; font-weight:700; color:var(--ink-600)}
+  .ik-rate{display:flex; gap:7px}
+  .ik-btn{width:40px; height:36px; border:1px solid var(--ink-200); background:var(--surface); border-radius:9px; font-weight:700; color:var(--ink-600)}
+  .ik-scores{display:flex; gap:14px; flex-wrap:wrap; font-weight:800; color:var(--red-700); background:var(--surface-2); border:1px solid var(--ink-200); border-radius:9px; padding:8px 12px; margin-bottom:10px}
   .ik-btn.sel{background:var(--red-700); color:#fff; border-color:var(--red-700)}
   .ik-btn:hover{border-color:var(--red-700)}
   .aqopt{display:flex; gap:7px; align-items:center; cursor:pointer; font-size:13.5px}
@@ -1363,11 +1364,13 @@ function intakeCoreSkills(){ const seen=new Set(), out=[]; intakeState.exp.forEa
 
 const RIASEC_MAP={realistic:'R',investigative:'I',artistic:'A',social:'S',enterprising:'E',conventional:'C'};
 function riasecScores(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return null; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length) return null; if(qs.filter(q=>ans[q.index]!=null).length<qs.length) return null; const s={R:0,I:0,A:0,S:0,E:0,C:0}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c!=null&&ans[q.index]!=null) s[c]+=(ans[q.index]-1); }); return s; }
+function riasecScoresLive(set){ const s={R:0,I:0,A:0,S:0,E:0,C:0}; const r=INTAKE&&INTAKE.riasec; if(!r) return s; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c!=null&&ans[q.index]!=null) s[c]+=(ans[q.index]-1); }); return s; }
 function riasecArr(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return ''; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length||!qs.some(q=>ans[q.index]!=null)) return ''; return qs.map(q=>ans[q.index]!=null?ans[q.index]:'').join(','); }
 function parseRiasecAns(str,set){ const out={}; if(!str) return out; const r=INTAKE&&INTAKE.riasec; const qs=r?((r.sets&&r.sets[set]&&r.sets[set].questions)||[]):[]; const parts=String(str).split(','); qs.forEach((q,i)=>{ const v=parseInt(parts[i],10); if(!isNaN(v)) out[q.index]=v; }); return out; }
 
 function intakeVal(ns,k){ return (intakeState[ns]||{})[k]; }
-function intakeShow(ns,f){ if(!f.showIf) return true; return intakeVal(ns,f.showIf.key)===f.showIf.equals; }
+function intakeCond(ns,c){ const v=intakeVal(ns,c.key); if('notEquals' in c) return v!==c.notEquals; return v===c.equals; }
+function intakeShow(ns,f){ if(!f.showIf) return true; const cs=Array.isArray(f.showIf)?f.showIf:[f.showIf]; return cs.every(c=>intakeCond(ns,c)); }
 function intakeFieldHTML(f,ns){
   const v=intakeVal(ns,f.key); const lab=`<label class="fld">${esc(f.label)}${f.required?' <span style="color:#b91c1c">*</span>':''}</label>`; const t=f.type;
   const optList=o=>(typeof o==='object')?[o.value,o.label]:[o,o];
@@ -1394,11 +1397,11 @@ function intakeRiasecHTML(){
   const tabs=`<div class="row" style="margin-bottom:10px"><button class="bb ${set==='onet'?'p':'n'} sm" onclick="intakeQuizSet('onet')">${esc((sets.onet&&sets.onet.label)||'O*NET')}</button><button class="bb ${set==='custom'?'p':'n'} sm" ${hasCustom?'':'disabled'} onclick="intakeQuizSet('custom')">${esc((sets.custom&&sets.custom.label)||'Custom')}</button></div>`;
   if(!qs.length) return tabs+'<div class="muted small">This set has no questions yet — add them to intake_schema.json.</div>';
   const rows=qs.map(q=>{ const a=ans[q.index]; return `<div class="ik-q"><span class="ik-num">${q.index}.</span><span>${esc(q.text)}</span><div class="ik-rate">`+opts.map(o=>`<button class="ik-btn${a===o.value?' sel':''}" title="${esc(o.label)}" onclick="intakeQuiz('${set}',${q.index},${o.value})">${o.value}</button>`).join('')+`</div></div>`; }).join('');
-  const answered=qs.filter(q=>ans[q.index]!=null).length; const sc=riasecScores(set);
-  const scoreStr=sc?(' · scores R '+sc.R+' I '+sc.I+' A '+sc.A+' S '+sc.S+' E '+sc.E+' C '+sc.C):'';
+  const answered=qs.filter(q=>ans[q.index]!=null).length; const live=riasecScoresLive(set);
+  const scoreRow=`<div class="ik-scores"><span>R: ${live.R}</span><span>I: ${live.I}</span><span>A: ${live.A}</span><span>S: ${live.S}</span><span>E: ${live.E}</span><span>C: ${live.C}</span></div>`;
   const both=riasecScores('onet')&&hasCustom&&riasecScores('custom');
   const chooser=both?`<div class="help-hint" style="margin-top:10px">Both sets complete — which drives the person's <code class="tok">riasec</code>? <label style="margin-left:8px"><input type="radio" name="ik-src" ${intakeState.scoreSrc!=='custom'?'checked':''} onchange="intakeScoreSrc('onet')"> O*NET</label> <label style="margin-left:10px"><input type="radio" name="ik-src" ${intakeState.scoreSrc==='custom'?'checked':''} onchange="intakeScoreSrc('custom')"> Custom</label></div>`:'';
-  return tabs+`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered${scoreStr}</div>`+rows+chooser;
+  return tabs+`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered</div>`+scoreRow+rows+chooser;
 }
 window.intakeQuizSet=function(s){ intakeState.riasecSet=s; renderIntake(); };
 window.intakeQuiz=function(set,idx,val){ (intakeState.quiz[set]=intakeState.quiz[set]||{})[idx]=val; renderIntake(); };
@@ -1459,12 +1462,13 @@ function intakeDoSave(){
   const b=intakeState.basic||{};
   { const p=[]; if(b.name)p.push('- **Name:** '+b.name); if(b.age)p.push('- **Age:** '+b.age); if(b.education)p.push('- **Education Level:** '+b.education); if(p.length) setF('demographic',p.join('\n')); }
   { const p=[]; if(b.primary_language)p.push('- **Primary Language:** '+b.primary_language); if(b.need_translate)p.push('- **Need Translate:** '+(b.need_translate==='yes'?'Yes':'No')); if(p.length) setF('language',p.join('\n')); }
-  { const p=[]; if(b.preferred_industry)p.push('- **Preferred Industry:** '+b.preferred_industry); if(b.naics_code)p.push('- **NAICS Code:** '+b.naics_code); if(p.length) setF('naics_code',p.join('\n')); }
+  if(b.naics_sector) setF('naics_code', b.naics_sector);
   if(b.target_stage) setF('target_stage',b.target_stage);
   setF('lifestyle', intakeSerializeFields(INTAKE.lifestyle||[],'life'));
   setF('career_barriers', intakeSerializeBarriers());
   setF('existing_skills', intakeSerializeSkills());
   if(!written.length){ toast('Nothing filled in yet.'); return; }
+  updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc});
   let person;
   if(intakeState.personId){ person=DB.people.find(p=>p.id===intakeState.personId); if(!person){ toast('Person not found.'); return; } }
   else { const nm=((b.name||'').trim()); if(!nm){ toast('Enter a Name in Basic info to create a new person.'); return; } person={id:uid('p'), name:nm, careerId:'', values:{}}; DB.personFields.forEach(f=>person.values[f.key]=''); }
@@ -1490,7 +1494,7 @@ $('#histCareerFilter').addEventListener('change', renderHistory);
 $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRawText||'').then(()=>toast('Copied prompt (raw).')));
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
-$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } renderIntake(); });
+$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=raw.life||{}; intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } renderIntake(); });
 $('#intakeCareer').addEventListener('change', function(){ intakeState.careerId=this.value; });
 $('#intakeSave').addEventListener('click', intakeDoSave);
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
