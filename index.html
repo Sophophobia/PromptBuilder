@@ -1371,8 +1371,8 @@ function parseRiasecAns(str,set){ const out={}; if(!str) return out; const r=INT
 function intakeVal(ns,k){ return (intakeState[ns]||{})[k]; }
 function intakeCond(ns,c){ const v=intakeVal(ns,c.key); if('notEquals' in c) return v!==c.notEquals; return v===c.equals; }
 function intakeShow(ns,f){ if(!f.showIf) return true; const cs=Array.isArray(f.showIf)?f.showIf:[f.showIf]; return cs.every(c=>intakeCond(ns,c)); }
-function intakeFieldHTML(f,ns){
-  const v=intakeVal(ns,f.key); const lab=`<label class="fld">${esc(f.label)}${f.required?' <span style="color:#b91c1c">*</span>':''}</label>`; const t=f.type;
+function intakeFieldHTML(f,ns,num){
+  const v=intakeVal(ns,f.key); const lab=`<label class="fld">${num?num+'. ':''}${esc(f.label)}${f.required?' <span style="color:#b91c1c">*</span>':''}</label>`; const t=f.type;
   const optList=o=>(typeof o==='object')?[o.value,o.label]:[o,o];
   if(t==='textarea') return lab+`<textarea class="inp" oninput="intakeText('${ns}','${f.key}',this.value)" placeholder="${esc(f.placeholder||'')}">${esc(v||'')}</textarea>`;
   if(t==='number') return lab+`<input class="inp" type="number" value="${esc(v==null?'':v)}" oninput="intakeText('${ns}','${f.key}',this.value)" placeholder="${esc(f.placeholder||'')}" style="max-width:220px">`;
@@ -1383,7 +1383,7 @@ function intakeFieldHTML(f,ns){
   if(t==='states'){ const arr=Array.isArray(v)?v:[]; const max=f.max||3; let h=lab+'<div class="stack" style="gap:6px">'; for(let i=0;i<max;i++){ h+=`<select class="inp" onchange="intakeStateSel('${ns}','${f.key}',${i},this.value)" style="max-width:340px"><option value="">${i===0?'— select state —':'Optional'}</option>`+US_STATES.map(s=>`<option value="${esc(s)}" ${arr[i]===s?'selected':''}>${esc(s)}</option>`).join('')+'</select>'; } return h+'</div>'; }
   return lab+`<input class="inp" value="${esc(v||'')}" oninput="intakeText('${ns}','${f.key}',this.value)">`;
 }
-function intakeFieldsHTML(fields,ns){ return (fields||[]).map(f=>intakeShow(ns,f)?`<div class="field-block">${intakeFieldHTML(f,ns)}</div>`:'').join(''); }
+function intakeFieldsHTML(fields,ns,numbered){ let n=0; return (fields||[]).map(f=>{ if(!intakeShow(ns,f)) return ''; n++; return `<div class="field-block">${intakeFieldHTML(f,ns,numbered?n:0)}</div>`; }).join(''); }
 window.intakeText=function(ns,k,v){ (intakeState[ns]=intakeState[ns]||{})[k]=v; };
 window.intakeSet=function(ns,k,v){ (intakeState[ns]=intakeState[ns]||{})[k]=v; renderIntake(); };
 window.intakeToggle=function(ns,k,v,on){ const o=(intakeState[ns]=intakeState[ns]||{}); let a=Array.isArray(o[k])?o[k].slice():[]; const i=a.indexOf(v); if(on){ if(i<0)a.push(v);} else if(i>=0)a.splice(i,1); if(k==='lp_debts'){ if(v==='None'&&on) a=['None']; else if(on) a=a.filter(x=>x!=='None'); } o[k]=a; renderIntake(); };
@@ -1446,7 +1446,7 @@ function renderIntake(){
     intakeCard('1 · Basic info', intakeFieldsHTML(INTAKE.basicInfo||[],'basic')) +
     intakeCard('2 · Interest Profile (RIASEC)', intakeRiasecHTML()) +
     intakeCard('3 · Skills & Experience', intakeSkillsHTML()) +
-    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life')) +
+    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true)) +
     intakeCard('5 · Career Barriers', intakeBarriersHTML());
 }
 function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
