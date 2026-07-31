@@ -1378,8 +1378,8 @@ function intakeFieldHTML(f,ns,num){
   if(t==='number') return lab+`<input class="inp" type="number" value="${esc(v==null?'':v)}" oninput="intakeText('${ns}','${f.key}',this.value)" placeholder="${esc(f.placeholder||'')}" style="max-width:220px">`;
   if(t==='text') return lab+`<input class="inp" value="${esc(v==null?(f.default||''):v)}" oninput="intakeText('${ns}','${f.key}',this.value)" placeholder="${esc(f.placeholder||'')}">`;
   if(t==='select'){ return lab+`<select class="inp" onchange="intakeSet('${ns}','${f.key}',this.value)" style="max-width:340px"><option value="">— select —</option>`+(f.options||[]).map(o=>{ const [val,txt]=optList(o); return `<option value="${esc(val)}" ${v===val?'selected':''}>${esc(txt)}</option>`; }).join('')+`</select>`; }
-  if(t==='radio'){ return lab+`<div class="stack" style="gap:6px">`+(f.options||[]).map(o=>{ const [val,txt]=optList(o); return `<label class="aqopt"><input type="radio" name="ik-${ns}-${f.key}" ${v===val?'checked':''} onchange="intakeSet('${ns}','${f.key}',${JSON.stringify(val)})"> ${esc(txt)}</label>`; }).join('')+`</div>`; }
-  if(t==='checkbox'){ const arr=Array.isArray(v)?v:[]; return lab+`<div class="map-fields">`+(f.options||[]).map(o=>{ const [val,txt]=optList(o); return `<label><input type="checkbox" ${arr.indexOf(val)>=0?'checked':''} onchange="intakeToggle('${ns}','${f.key}',${JSON.stringify(val)},this.checked)"> ${esc(txt)}</label>`; }).join('')+`</div>`; }
+  if(t==='radio'){ return lab+`<div class="stack" style="gap:6px">`+(f.options||[]).map(o=>{ const [val,txt]=optList(o); return `<label class="aqopt"><input type="radio" name="ik-${ns}-${f.key}" ${v===val?'checked':''} onchange="intakeSet('${ns}','${f.key}',${esc(JSON.stringify(val))})"> ${esc(txt)}</label>`; }).join('')+`</div>`; }
+  if(t==='checkbox'){ const arr=Array.isArray(v)?v:[]; return lab+`<div class="map-fields">`+(f.options||[]).map(o=>{ const [val,txt]=optList(o); return `<label><input type="checkbox" ${arr.indexOf(val)>=0?'checked':''} onchange="intakeToggle('${ns}','${f.key}',${esc(JSON.stringify(val))},this.checked)"> ${esc(txt)}</label>`; }).join('')+`</div>`; }
   if(t==='states'){ const arr=Array.isArray(v)?v:[]; const max=f.max||3; let h=lab+'<div class="stack" style="gap:6px">'; for(let i=0;i<max;i++){ h+=`<select class="inp" onchange="intakeStateSel('${ns}','${f.key}',${i},this.value)" style="max-width:340px"><option value="">${i===0?'— select state —':'Optional'}</option>`+US_STATES.map(s=>`<option value="${esc(s)}" ${arr[i]===s?'selected':''}>${esc(s)}</option>`).join('')+'</select>'; } return h+'</div>'; }
   return lab+`<input class="inp" value="${esc(v||'')}" oninput="intakeText('${ns}','${f.key}',this.value)">`;
 }
@@ -1416,7 +1416,7 @@ function intakeSkillsHTML(){
   const skills=intakeCoreSkills();
   if(skills.length){
     h+=`<div style="margin-top:12px;overflow-x:auto"><div class="srow" style="grid-template-columns:1fr repeat(${lvls.length},92px);font-weight:700;color:var(--ink-600)"><div>Skill</div>`+lvls.map(l=>`<div style="text-align:center">${esc(l)}</div>`).join('')+`</div>`;
-    h+=skills.map(sk=>{ const cur=intakeState.skillLv[sk]||''; const nm=sk.replace(/[^a-z0-9]/gi,''); return `<div class="srow" style="grid-template-columns:1fr repeat(${lvls.length},92px)"><div>${esc(sk)}</div>`+lvls.map(l=>`<div style="text-align:center"><input type="radio" name="iksk-${nm}" ${cur===l?'checked':''} onchange="intakeSkillLv(${JSON.stringify(sk)},${JSON.stringify(l)})"></div>`).join('')+`</div>`; }).join('');
+    h+=skills.map(sk=>{ const cur=intakeState.skillLv[sk]||''; const nm=sk.replace(/[^a-z0-9]/gi,''); return `<div class="srow" style="grid-template-columns:1fr repeat(${lvls.length},92px)"><div>${esc(sk)}</div>`+lvls.map(l=>`<div style="text-align:center"><input type="radio" name="iksk-${nm}" ${cur===l?'checked':''} onchange="intakeSkillLv(${esc(JSON.stringify(sk))},${esc(JSON.stringify(l))})"></div>`).join('')+`</div>`; }).join('');
     h+='</div>';
   } else if(intakeState.exp.length){ h+='<div class="muted small" style="margin-top:8px">No core skills found in the selected occupation(s) canon.</div>'; }
   return h;
@@ -1427,7 +1427,7 @@ window.intakeSkillLv=function(sk,l){ intakeState.skillLv[sk]=l; };
 
 function intakeBarriersHTML(){
   const b=INTAKE.barriers||{}; let h=b.intro?`<div class="help-hint" style="margin-top:0">${esc(b.intro)}</div>`:'';
-  (b.sections||[]).forEach(sec=>{ h+=`<div class="grp-head">${esc(sec.name)}</div><div class="map-fields">`+(sec.items||[]).map(it=>`<label><input type="checkbox" ${intakeState.barriers[it]?'checked':''} onchange="intakeBarrier(${JSON.stringify(it)},this.checked)"> ${esc(it)}</label>`).join('')+`</div>`; });
+  (b.sections||[]).forEach(sec=>{ h+=`<div class="grp-head">${esc(sec.name)}</div><div class="map-fields">`+(sec.items||[]).map(it=>`<label><input type="checkbox" ${intakeState.barriers[it]?'checked':''} onchange="intakeBarrier(${esc(JSON.stringify(it))},this.checked)"> ${esc(it)}</label>`).join('')+`</div>`; });
   h+=`<div class="field-block" style="margin-top:10px"><label class="fld">${esc(b.commentLabel||'Additional Comments')}</label><textarea class="inp" oninput="intakeBarrierComment(this.value)" placeholder="Optional details…">${esc(intakeState.barrierComment||'')}</textarea></div>`;
   return h;
 }
