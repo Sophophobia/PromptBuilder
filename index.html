@@ -1345,7 +1345,7 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 let INTAKE=null; let intakeState=null;
 function pfBlank(){ return {topic:'',pain:'',success:'',inScope:[''],outScope:[],stages:[{name:'',detail:'',covers:[]}]}; }
-function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', riasecCat:'realistic', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
+function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'custom', riasecCat:'realistic', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
 const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices'],['sec-preflight','7 · Project Blueprint']];
 window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
 let onetIndexLoading=false;
@@ -1382,6 +1382,9 @@ function intakeCoreSkills(){ const seen=new Set(), out=[]; intakeState.exp.forEa
 const RIASEC_MAP={realistic:'R',investigative:'I',artistic:'A',social:'S',enterprising:'E',conventional:'C'};
 function riasecScores(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return null; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length) return null; if(qs.filter(q=>ans[q.index]!=null).length<qs.length) return null; const s={R:0,I:0,A:0,S:0,E:0,C:0}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c!=null&&ans[q.index]!=null) s[c]+=(ans[q.index]-1); }); return s; }
 function riasecScoresLive(set){ const s={R:0,I:0,A:0,S:0,E:0,C:0}; const r=INTAKE&&INTAKE.riasec; if(!r) return s; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c!=null&&ans[q.index]!=null) s[c]+=(ans[q.index]-1); }); return s; }
+// Peak scoring (custom): base from the top answer (5->16, 4->12, else 0), then each
+// remaining answer 5:+2 4:+1 3:0 2:-1 1:-2; clamped to [0,20]. Per area, over answered items.
+function riasecScoresPeak(set){ const s={R:0,I:0,A:0,S:0,E:0,C:0}; const r=INTAKE&&INTAKE.riasec; if(!r) return s; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; const inc={5:2,4:1,3:0,2:-1,1:-2}; const byArea={}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c==null) return; const v=ans[q.index]; if(v==null) return; (byArea[c]=byArea[c]||[]).push(v); }); Object.keys(byArea).forEach(c=>{ const vals=byArea[c].slice(); const mx=Math.max.apply(null,vals); const base=mx===5?16:(mx===4?12:0); vals.splice(vals.indexOf(mx),1); let sc=base; vals.forEach(v=>{ sc+=(inc[v]||0); }); s[c]=Math.max(0,Math.min(20,sc)); }); return s; }
 function riasecArr(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return ''; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length||!qs.some(q=>ans[q.index]!=null)) return ''; return qs.map(q=>ans[q.index]!=null?ans[q.index]:'').join(','); }
 function parseRiasecAns(str,set){ const out={}; if(!str) return out; const r=INTAKE&&INTAKE.riasec; const qs=r?((r.sets&&r.sets[set]&&r.sets[set].questions)||[]):[]; const parts=String(str).split(','); qs.forEach((q,i)=>{ const v=parseInt(parts[i],10); if(!isNaN(v)) out[q.index]=v; }); return out; }
 
@@ -1413,10 +1416,11 @@ function intakeRiasecHTML(){
   const hasCustom=!!(sets.custom&&(sets.custom.questions||[]).length);
   const set=(intakeState.riasecSet==='custom'&&hasCustom)?'custom':'onet';
   const sdef=sets[set]||{}; const qs=sdef.questions||[]; const ans=intakeState.quiz[set]||{};
-  const tabs=`<div class="row" style="margin-bottom:10px"><button class="bb ${set==='onet'?'p':'n'} sm" onclick="intakeQuizSet('onet')">${esc((sets.onet&&sets.onet.label)||'O*NET')}</button><button class="bb ${set==='custom'?'p':'n'} sm" ${hasCustom?'':'disabled'} onclick="intakeQuizSet('custom')">${esc((sets.custom&&sets.custom.label)||'Custom')}</button></div>`;
+  const tabs=`<div class="row" style="margin-bottom:10px"><button class="bb ${set==='custom'?'p':'n'} sm" ${hasCustom?'':'disabled'} onclick="intakeQuizSet('custom')">${esc((sets.custom&&sets.custom.label)||'Custom')}</button><button class="bb ${set==='onet'?'p':'n'} sm" onclick="intakeQuizSet('onet')">${esc((sets.onet&&sets.onet.label)||'O*NET')}</button></div>`;
   if(!qs.length) return tabs+'<div class="muted small">This set has no questions yet — add them to intake_schema.json.</div>';
   const answered=qs.filter(q=>ans[q.index]!=null).length; const live=riasecScoresLive(set);
-  const scoreRow=`<div class="ik-scores"><span>R: ${live.R}</span><span>I: ${live.I}</span><span>A: ${live.A}</span><span>S: ${live.S}</span><span>E: ${live.E}</span><span>C: ${live.C}</span></div>`;
+  const mkScore=(lbl,s)=>`<div class="ik-scores">${lbl?`<span style="color:var(--ink-500);font-weight:700">${lbl}</span>`:''}<span>R: ${s.R}</span><span>I: ${s.I}</span><span>A: ${s.A}</span><span>S: ${s.S}</span><span>E: ${s.E}</span><span>C: ${s.C}</span></div>`;
+  const scoreRow = set==='custom' ? (mkScore('Linear',live)+mkScore('Peak',riasecScoresPeak(set))) : mkScore('',live);
   const both=riasecScores('onet')&&hasCustom&&riasecScores('custom');
   const chooser=both?`<div class="help-hint" style="margin-top:10px">Both sets complete — which drives the person's <code class="tok">riasec</code>? <label style="margin-left:8px"><input type="radio" name="ik-src" ${intakeState.scoreSrc!=='custom'?'checked':''} onchange="intakeScoreSrc('onet')"> O*NET</label> <label style="margin-left:10px"><input type="radio" name="ik-src" ${intakeState.scoreSrc==='custom'?'checked':''} onchange="intakeScoreSrc('custom')"> Custom</label></div>`:'';
   const progress=`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered</div>`;
@@ -1566,7 +1570,7 @@ function intakeDoSave(){
   const updates={}, written=[]; const setF=(k,v)=>{ if(v!=null && String(v).trim()!==''){ updates[k]=v; written.push(k); } };
   const onetArr=riasecArr('onet'), custArr=riasecArr('custom'); if(onetArr) setF('riasec_answers_onet',onetArr); if(custArr) setF('riasec_answers_custom',custArr);
   const sO=riasecScores('onet'), sC=riasecScores('custom'); const fmt=s=>[s.R,s.I,s.A,s.S,s.E,s.C].join(', ');
-  if(sC) setF('riasec_custom',fmt(sC));
+  if(sC){ setF('riasec_custom',fmt(sC)); setF('riasec_custom_peak',fmt(riasecScoresPeak('custom'))); }
   const main=(sO&&sC)?((intakeState.scoreSrc==='custom')?sC:sO):(sO||sC); if(main) setF('riasec',fmt(main));
   const b=intakeState.basic||{};
   { const p=[]; if(b.name)p.push('- **Name:** '+b.name); if(b.age)p.push('- **Age:** '+b.age); if(b.education)p.push('- **Education Level:** '+b.education); if(p.length) setF('demographic',p.join('\n')); }
