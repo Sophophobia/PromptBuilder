@@ -1345,7 +1345,7 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 let INTAKE=null; let intakeState=null;
 function pfBlank(){ return {topic:'',pain:'',success:'',inScope:[''],outScope:[],stages:[{name:'',detail:'',covers:[]}]}; }
-function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
+function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'onet', riasecCat:'realistic', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
 const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices'],['sec-preflight','7 · Project Blueprint']];
 window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
 let onetIndexLoading=false;
@@ -1406,21 +1406,34 @@ window.intakeSet=function(ns,k,v){ (intakeState[ns]=intakeState[ns]||{})[k]=v; r
 window.intakeToggle=function(ns,k,v,on){ const o=(intakeState[ns]=intakeState[ns]||{}); let a=Array.isArray(o[k])?o[k].slice():[]; const i=a.indexOf(v); if(on){ if(i<0)a.push(v);} else if(i>=0)a.splice(i,1); if(k==='lp_debts'){ if(v==='None'&&on) a=['None']; else if(on) a=a.filter(x=>x!=='None'); } o[k]=a; renderIntake(); };
 window.intakeStateSel=function(ns,k,i,v){ const o=(intakeState[ns]=intakeState[ns]||{}); const a=Array.isArray(o[k])?o[k].slice():[]; a[i]=v; o[k]=a.filter(Boolean); };
 
+function intakeRow(set,q,opts,ans){ const a=ans[q.index]; return `<div class="ik-q"><span class="ik-num">${q.index}.</span><span>${esc(q.text)}${q.example?`<div class="muted" style="font-size:12px;margin-top:3px">e.g. ${esc(q.example)}</div>`:''}</span><div class="ik-rate">`+opts.map(o=>`<button class="ik-btn${a===o.value?' sel':''}" title="${esc(o.label)}" onclick="intakeQuiz('${set}',${q.index},${o.value})">${o.value}</button>`).join('')+`</div></div>`; }
+function intakeScaleLegend(opts){ return `<div class="help-hint" style="margin:0 0 8px">Scale: `+opts.map(o=>`<b>${o.value}</b> ${esc(o.label)}`).join(' · ')+`</div>`; }
 function intakeRiasecHTML(){
   const r=INTAKE.riasec||{}; const sets=r.sets||{}; const opts=r.options||[];
   const hasCustom=!!(sets.custom&&(sets.custom.questions||[]).length);
   const set=(intakeState.riasecSet==='custom'&&hasCustom)?'custom':'onet';
-  const qs=(sets[set]&&sets[set].questions)||[]; const ans=intakeState.quiz[set]||{};
+  const sdef=sets[set]||{}; const qs=sdef.questions||[]; const ans=intakeState.quiz[set]||{};
   const tabs=`<div class="row" style="margin-bottom:10px"><button class="bb ${set==='onet'?'p':'n'} sm" onclick="intakeQuizSet('onet')">${esc((sets.onet&&sets.onet.label)||'O*NET')}</button><button class="bb ${set==='custom'?'p':'n'} sm" ${hasCustom?'':'disabled'} onclick="intakeQuizSet('custom')">${esc((sets.custom&&sets.custom.label)||'Custom')}</button></div>`;
   if(!qs.length) return tabs+'<div class="muted small">This set has no questions yet — add them to intake_schema.json.</div>';
-  const rows=qs.map(q=>{ const a=ans[q.index]; return `<div class="ik-q"><span class="ik-num">${q.index}.</span><span>${esc(q.text)}${q.example?`<div class="muted" style="font-size:12px;margin-top:3px">e.g. ${esc(q.example)}</div>`:''}</span><div class="ik-rate">`+opts.map(o=>`<button class="ik-btn${a===o.value?' sel':''}" title="${esc(o.label)}" onclick="intakeQuiz('${set}',${q.index},${o.value})">${o.value}</button>`).join('')+`</div></div>`; }).join('');
   const answered=qs.filter(q=>ans[q.index]!=null).length; const live=riasecScoresLive(set);
   const scoreRow=`<div class="ik-scores"><span>R: ${live.R}</span><span>I: ${live.I}</span><span>A: ${live.A}</span><span>S: ${live.S}</span><span>E: ${live.E}</span><span>C: ${live.C}</span></div>`;
   const both=riasecScores('onet')&&hasCustom&&riasecScores('custom');
   const chooser=both?`<div class="help-hint" style="margin-top:10px">Both sets complete — which drives the person's <code class="tok">riasec</code>? <label style="margin-left:8px"><input type="radio" name="ik-src" ${intakeState.scoreSrc!=='custom'?'checked':''} onchange="intakeScoreSrc('onet')"> O*NET</label> <label style="margin-left:10px"><input type="radio" name="ik-src" ${intakeState.scoreSrc==='custom'?'checked':''} onchange="intakeScoreSrc('custom')"> Custom</label></div>`:'';
-  return tabs+`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered</div>`+scoreRow+rows+chooser;
+  const progress=`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered</div>`;
+  let body;
+  if(sdef.byCategory){
+    const cats=r.categories||{}; const order=(r.areaOrder||['realistic','investigative','artistic','social','enterprising','conventional']).filter(a=>qs.some(q=>q.area===a));
+    const cur=order.indexOf(intakeState.riasecCat)>=0?intakeState.riasecCat:order[0];
+    const catTabs=`<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:12px">`+order.map(a=>{ const c=cats[a]||{}; const n=qs.filter(q=>q.area===a).length; const done=qs.filter(q=>q.area===a&&ans[q.index]!=null).length; return `<button class="bb ${a===cur?'p':'n'} sm" onclick="intakeQuizCat('${a}')">${esc(c.name||a)} <span class="count">${done}/${n}</span></button>`; }).join('')+`</div>`;
+    const c=cats[cur]||{}; const catHead=`<div class="sec-title" style="margin:2px 0 4px">${esc(c.name||cur)}</div>`+(c.intro?`<div class="help-hint" style="margin-top:0;margin-bottom:10px">${esc(c.intro)}</div>`:'');
+    body=catTabs+catHead+intakeScaleLegend(opts)+qs.filter(q=>q.area===cur).map(q=>intakeRow(set,q,opts,ans)).join('');
+  } else {
+    body=intakeScaleLegend(opts)+qs.map(q=>intakeRow(set,q,opts,ans)).join('');
+  }
+  return tabs+progress+scoreRow+body+chooser;
 }
 window.intakeQuizSet=function(s){ intakeState.riasecSet=s; renderIntake(); };
+window.intakeQuizCat=function(a){ intakeState.riasecCat=a; renderIntake(); };
 window.intakeQuiz=function(set,idx,val){ (intakeState.quiz[set]=intakeState.quiz[set]||{})[idx]=val; renderIntake(); };
 window.intakeScoreSrc=function(s){ intakeState.scoreSrc=s; };
 
