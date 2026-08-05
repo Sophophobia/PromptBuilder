@@ -1420,7 +1420,7 @@ function intakeRiasecHTML(){
   if(!qs.length) return tabs+'<div class="muted small">This set has no questions yet — add them to intake_schema.json.</div>';
   const answered=qs.filter(q=>ans[q.index]!=null).length; const live=riasecScoresLive(set);
   const mkScore=(lbl,s)=>`<div class="ik-scores">${lbl?`<span style="color:var(--ink-500);font-weight:700">${lbl}</span>`:''}<span>R: ${s.R}</span><span>I: ${s.I}</span><span>A: ${s.A}</span><span>S: ${s.S}</span><span>E: ${s.E}</span><span>C: ${s.C}</span></div>`;
-  const scoreRow = set==='custom' ? (mkScore('Linear',live)+mkScore('Peak',riasecScoresPeak(set))) : mkScore('',live);
+  const scoreRow = mkScore('Linear',live)+mkScore('Peak',riasecScoresPeak(set));
   const both=riasecScores('onet')&&hasCustom&&riasecScores('custom');
   const chooser=both?`<div class="help-hint" style="margin-top:10px">Both sets complete — which drives the person's <code class="tok">riasec</code>? <label style="margin-left:8px"><input type="radio" name="ik-src" ${intakeState.scoreSrc!=='custom'?'checked':''} onchange="intakeScoreSrc('onet')"> O*NET</label> <label style="margin-left:10px"><input type="radio" name="ik-src" ${intakeState.scoreSrc==='custom'?'checked':''} onchange="intakeScoreSrc('custom')"> Custom</label></div>`:'';
   const progress=`<div class="help-hint" style="margin-top:0;margin-bottom:6px">${answered}/${qs.length} answered</div>`;
@@ -1570,6 +1570,7 @@ function intakeDoSave(){
   const updates={}, written=[]; const setF=(k,v)=>{ if(v!=null && String(v).trim()!==''){ updates[k]=v; written.push(k); } };
   const onetArr=riasecArr('onet'), custArr=riasecArr('custom'); if(onetArr) setF('riasec_answers_onet',onetArr); if(custArr) setF('riasec_answers_custom',custArr);
   const sO=riasecScores('onet'), sC=riasecScores('custom'); const fmt=s=>[s.R,s.I,s.A,s.S,s.E,s.C].join(', ');
+  if(sO){ setF('riasec_onet',fmt(sO)); setF('riasec_onet_peak',fmt(riasecScoresPeak('onet'))); }
   if(sC){ setF('riasec_custom',fmt(sC)); setF('riasec_custom_peak',fmt(riasecScoresPeak('custom'))); }
   const main=(sO&&sC)?((intakeState.scoreSrc==='custom')?sC:sO):(sO||sC); if(main) setF('riasec',fmt(main));
   const b=intakeState.basic||{};
