@@ -1778,7 +1778,7 @@ function hideOverlay(id){ $('#'+id).classList.remove('show'); }
 $$('[data-close]').forEach(b=>b.addEventListener('click', e=>e.target.closest('.overlay').classList.remove('show')));
 $$('.overlay').forEach(o=>{ o.addEventListener('mousedown', e=>{ o._downSelf=(e.target===o); }); o.addEventListener('click', e=>{ if(e.target===o && o._downSelf) o.classList.remove('show'); }); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show').forEach(o=>o.classList.remove('show')); });
-$$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); }));
+$$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); if(b.dataset.tab==='matches') renderMatches(); }));
 $('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderMatches(); });
 $('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; matchState.page=0; renderMatches(); });
 let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; matchState.page=0; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
