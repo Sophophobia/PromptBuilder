@@ -303,7 +303,7 @@
       <div class="row">
         <select class="inp" id="matchPerson" style="width:auto"></select>
         <select class="inp" id="matchScoreSet" style="width:auto"></select>
-        <select class="inp" id="matchZone" style="width:auto"><option value="">All Job Zones</option><option value="1">Job Zone 1</option><option value="2">Job Zone 2</option><option value="3">Job Zone 3</option><option value="4">Job Zone 4</option><option value="5">Job Zone 5</option></select>
+        <input class="inp" id="matchQuery" placeholder="filter by job title…" style="width:200px">
       </div>
     </div>
     <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Ranks all 923 O*NET occupations by <b>Pearson correlation</b> between the person's RIASEC profile and each occupation's interest profile — the exact O*NET fit rule: <b>Best</b> r≥0.729 · <b>Great</b> 0.608–0.729 · <b>Good</b> 0–0.608. Occupation data loads privately from <b>onet/interests.json</b>; titles link to O*NET Online. <span class="match-legend" style="margin-left:6px"><b style="color:#2563eb">— your profile</b> <b style="color:#dc2626">- - this career</b></span></div>
@@ -1375,7 +1375,7 @@ async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(g
 async function hydrateIntake(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('intake_schema.json'); if(t){ INTAKE=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 /* ===================== O*NET matches (in-page, no API) ===================== */
-let ONETI=null; let matchState={personId:'', scoreKey:'riasec', zone:''};
+let ONETI=null; let matchState={personId:'', scoreKey:'riasec', q:''};
 async function hydrateMatches(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('onet/interests.json'); if(t){ ONETI=JSON.parse(t); renderMatches(); } }catch(e){} }
 function pearson(a,b){ const n=Math.min(a.length,b.length); if(n<2) return 0; let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];} const ma=sa/n,mb=sb/n; let num=0,da=0,db=0; for(let i=0;i<n;i++){ const x=a[i]-ma,y=b[i]-mb; num+=x*y; da+=x*x; db+=y*y; } const d=Math.sqrt(da*db); return d?num/d:0; }
 function fitTier(r){ if(r>=0.729) return {label:'Best Fit',cls:'best'}; if(r>=0.608) return {label:'Great Fit',cls:'great'}; if(r>=0) return {label:'Good Fit',cls:'good'}; return null; }
@@ -1402,13 +1402,13 @@ function renderMatches(){
   const scores=parseScores6(person.values&&person.values[matchState.scoreKey]);
   if(!scores){ host.innerHTML='<div class="warn">⚠ This person has no RIASEC scores in the selected set. Fill the Interest Profile in Intake first.</div>'; return; }
   let rows=[]; for(const soc in ONETI){ const o=ONETI[soc]; const r=pearson(scores,o.r); const t=fitTier(r); if(t) rows.push({soc,o,r,tier:t}); }
-  if(matchState.zone) rows=rows.filter(x=>String(x.o.z)===String(matchState.zone));
   rows.sort((a,b)=>b.r-a.r);
   const counts={best:rows.filter(x=>x.tier.cls==='best').length,great:rows.filter(x=>x.tier.cls==='great').length,good:rows.filter(x=>x.tier.cls==='good').length};
-  const top=rows.slice(0,25);
+  const q=(matchState.q||'').trim().toLowerCase();
+  const shown=q?rows.filter(x=>x.o.t.toLowerCase().includes(q)):rows;
   const setLabel=(MATCH_SETS.find(([k])=>k===matchState.scoreKey)||[,''])[1];
-  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> matches (Best ${counts.best} · Great ${counts.great} · Good ${counts.good})${matchState.zone?' · Job Zone '+matchState.zone:''} · showing top ${top.length}</div>`+
-    top.map(x=>`<div class="match-card"><div><div class="match-title"><a href="https://www.onetonline.org/link/summary/${esc(x.soc)}" target="_blank" rel="noopener">${esc(x.o.t)}</a></div><div class="match-meta"><span class="match-fit ${x.tier.cls}">${x.tier.label}</span> <span>r = ${x.r.toFixed(3)}</span> <span>Job Zone ${x.o.z}</span> <span class="mono">${esc(x.soc)}</span></div></div><div>${matchChart(scores,x.o.r)}</div></div>`).join('');
+  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> matches (Best ${counts.best} · Great ${counts.great} · Good ${counts.good})${q?` · filtered by “${esc(q)}” → ${shown.length}`:' · showing all'}</div>`+
+    (shown.length?shown.map(x=>`<div class="match-card"><div><div class="match-title"><a href="https://www.onetonline.org/link/summary/${esc(x.soc)}" target="_blank" rel="noopener">${esc(x.o.t)}</a></div><div class="match-meta"><span class="match-fit ${x.tier.cls}">${x.tier.label}</span> <span>r = ${x.r.toFixed(3)}</span> <span>Job Zone ${x.o.z}</span> <span class="mono">${esc(x.soc)}</span></div></div><div>${matchChart(scores,x.o.r)}</div></div>`).join(''):'<div class="muted small">No occupation title matches that filter.</div>');
 }
 
 function parseAllTables(text){
@@ -1669,7 +1669,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show
 $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); }));
 $('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey='riasec'; renderMatches(); });
 $('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; renderMatches(); });
-$('#matchZone').addEventListener('change', function(){ matchState.zone=this.value; renderMatches(); });
+let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
 $('#genRecipe').addEventListener('change', buildPicker);
 $('#histFilter').addEventListener('change', renderHistory);
 $('#histPersonFilter').addEventListener('change', renderHistory);
