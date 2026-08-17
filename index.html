@@ -1408,12 +1408,12 @@ async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(g
 async function hydrateIntake(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('intake_schema.json'); if(t){ INTAKE=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 /* ===================== O*NET matches (in-page, no API) ===================== */
-let ONETI=null; let matchState={personId:'', scoreKey:'riasec', q:'', page:0};
+let ONETI=null; let matchState={personId:'', scoreKey:'', q:'', page:0};
 async function hydrateMatches(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('onet/interests.json'); if(t){ ONETI=JSON.parse(t); renderMatches(); } }catch(e){} }
 function pearson(a,b){ const n=Math.min(a.length,b.length); if(n<2) return 0; let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];} const ma=sa/n,mb=sb/n; let num=0,da=0,db=0; for(let i=0;i<n;i++){ const x=a[i]-ma,y=b[i]-mb; num+=x*y; da+=x*x; db+=y*y; } const d=Math.sqrt(da*db); return d?num/d:0; }
 function fitTier(r){ if(r>=0.729) return {label:'Best Fit',cls:'best'}; if(r>=0.608) return {label:'Great Fit',cls:'great'}; if(r>=0) return {label:'Good Fit',cls:'good'}; return null; }
 function parseScores6(str){ if(str==null||str==='') return null; const a=String(str).split(',').map(x=>parseFloat(x)).filter(x=>!isNaN(x)); return a.length===6?a:null; }
-const MATCH_SETS=[['riasec','Driver'],['riasec_onet','O*NET Linear'],['riasec_onet_peak','O*NET Peak'],['riasec_custom','Custom Linear'],['riasec_custom_peak','Custom Peak']];
+const MATCH_SETS=[['riasec_onet','O*NET Linear'],['riasec_onet_peak','O*NET Peak'],['riasec_custom','Custom Linear'],['riasec_custom_peak','Custom Peak']];
 function matchScoreSets(p){ return MATCH_SETS.filter(([k])=>parseScores6(p.values&&p.values[k])); }
 const RIASEC_BAND=['#86efac','#fcd34d','#fca5a5','#c4b5fd','#fdba74','#5eead4'];
 function matchChart(person,occ){
@@ -1756,7 +1756,7 @@ $$('[data-close]').forEach(b=>b.addEventListener('click', e=>e.target.closest('.
 $$('.overlay').forEach(o=>{ o.addEventListener('mousedown', e=>{ o._downSelf=(e.target===o); }); o.addEventListener('click', e=>{ if(e.target===o && o._downSelf) o.classList.remove('show'); }); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show').forEach(o=>o.classList.remove('show')); });
 $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); }));
-$('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey='riasec'; matchState.page=0; renderMatches(); });
+$('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderMatches(); });
 $('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; matchState.page=0; renderMatches(); });
 let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; matchState.page=0; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
 $('#matchBody').addEventListener('click', function(e){ const b=e.target.closest('[data-mp]'); if(!b) return; matchState.page+=(b.dataset.mp==='next'?1:-1); renderMatches(); const h=$('#view-matches'); if(h&&h.scrollIntoView) h.scrollIntoView({behavior:'smooth',block:'start'}); });
