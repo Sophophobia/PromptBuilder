@@ -119,6 +119,7 @@
   .mp-badge .v.best{color:#166534} .mp-badge .v.great{color:#854d0e} .mp-badge .v.good{color:#3730a3} .mp-badge .v.poor{color:#8a8580}
   .mp-sec{margin-top:18px}
   .mp-h{font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--ink-500); text-transform:uppercase; margin-bottom:10px}
+  .mp-r{margin-left:8px; color:var(--ink-700); font-weight:800; text-transform:none; letter-spacing:0; font-variant-numeric:tabular-nums}
   .mp-note{font-size:13px; color:var(--ink-600); margin-top:10px; line-height:1.5}
   .ms-bar{position:relative; height:20px; border-radius:6px; overflow:hidden; display:flex}
   .ms-bar .z{height:100%} .ms-bar .zg{background:#ece7dd} .ms-bar .zr{background:#d9a441} .ms-bar .zb{background:#b32020}
@@ -1489,7 +1490,7 @@ function matchPanel(x,scores){
   const line=dobj?matchLineChart(scores,cr,dobj.ps)+`<div class="ml-legend"><span><span class="dot" style="background:#b32020"></span>You</span><span><span class="dot" style="background:#c99a3a"></span>This career</span></div>`:'<div class="muted small">Not enough score variation to draw the profile.</div>';
   const diff=dobj?matchDiffBars(dobj):'<div class="muted small">Not enough score variation to compare axes.</div>';
   return `<div class="mp"><div class="mp-head"><div><div class="mp-title"><a href="https://www.onetonline.org/link/summary/${esc(x.soc)}" target="_blank" rel="noopener">${esc(x.o.t)}</a></div><div class="mp-sub"><span class="mono">${esc(x.soc)}</span><span>Job Zone ${x.o.z}</span></div></div><div class="mp-badge"><div class="k">Interest</div><div class="v ${x.tier.cls}">${x.tier.label.replace(' Fit','')}</div></div></div>`+
-    `<div class="mp-sec"><div class="mp-h">Match strength</div>${matchStrengthBar(x.r)}<div class="mp-note">${matchStrengthText(x.r,x.tier.cls)}</div></div>`+
+    `<div class="mp-sec"><div class="mp-h">Match strength <span class="mp-r">r = ${x.r.toFixed(3)}</span></div>${matchStrengthBar(x.r)}<div class="mp-note">${matchStrengthText(x.r,x.tier.cls)}</div></div>`+
     `<div class="mp-sec"><div class="mp-h">Where you differ from this career</div>${diff}</div>`+
     `<div class="mp-sec"><div class="mp-h">What kind of work this is</div>${line}</div></div>`;
 }
