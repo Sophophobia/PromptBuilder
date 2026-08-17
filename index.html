@@ -1734,11 +1734,14 @@ function renderIntake(){
 function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
 function intakeSerializeBarriers(){ const secs=(INTAKE.barriers&&INTAKE.barriers.sections)||[]; const blocks=[]; secs.forEach(sec=>{ const items=(sec.items||[]).filter(it=>intakeState.barriers[it]); if(items.length) blocks.push('**'+sec.name+'**\n'+items.map(x=>'- '+x).join('\n')); }); const cm=(intakeState.barrierComment||'').trim(); if(!blocks.length && !cm) return ''; let out=blocks.length?blocks.join('\n\n'):'No barriers selected'; if(cm) out+='\n\nComments: '+cm; return out; }
 function intakeSerializeSkills(){ const rated=intakeCoreSkills().filter(sk=>intakeState.skillLv[sk]); if(!intakeState.exp.length&&!rated.length) return ''; let out=''; if(intakeState.exp.length) out+='Experience:\n'+intakeState.exp.map(e=>{ const c=careerById(e.careerId); return '- '+(c?cName(c):e.careerId)+' — '+e.level; }).join('\n')+'\n\n'; if(rated.length) out+='Core skill self-assessment:\n'+rated.map(sk=>'- '+sk+': '+intakeState.skillLv[sk]).join('\n'); return out.trim(); }
-function intakeDoSave(){
-  if(!INTAKE){ toast('Questionnaire not loaded.'); return; }
+function intakeDoSave(auto){
+  if(!INTAKE){ if(!auto) toast('Questionnaire not loaded.'); return; }
   const updates={}, written=[]; const setF=(k,v)=>{ if(v!=null && String(v).trim()!==''){ updates[k]=v; written.push(k); } };
   const onetArr=riasecArr('onet'), custArr=riasecArr('custom'); if(onetArr) setF('riasec_answers_onet',onetArr); if(custArr) setF('riasec_answers_custom',custArr);
-  const sO=riasecScores('onet'), sC=riasecScores('custom'); const fmt=s=>[s.R,s.I,s.A,s.S,s.E,s.C].join(', ');
+  const fmt=s=>[s.R,s.I,s.A,s.S,s.E,s.C].join(', ');
+  // What-you-see-is-what-you-save: persist the same live-preview scores the Intake shows,
+  // as soon as the set has any answers (no longer gated on all 30 being answered).
+  const sO=onetArr?riasecScoresLive('onet'):null, sC=custArr?riasecScoresLive('custom'):null;
   if(sO){ setF('riasec_onet',fmt(sO)); setF('riasec_onet_peak',fmt(riasecScoresPeak('onet'))); }
   if(sC){ setF('riasec_custom',fmt(sC)); setF('riasec_custom_peak',fmt(riasecScoresPeak('custom'))); }
   const main=(sO&&sC)?((intakeState.scoreSrc==='custom')?sC:sO):(sO||sC); if(main) setF('riasec',fmt(main));
@@ -1752,23 +1755,22 @@ function intakeDoSave(){
   setF('existing_skills', intakeSerializeSkills());
   const t3=(intakeState.top3||['','','']).map(s=>s||'');
   const t3bad=(t3[1]||t3[2])&&!t3[0];
-  if(t3bad) toast('Top 3: 1st choice is required — skipped. Pick a 1st choice to save it.');
+  if(t3bad && !auto) toast('Top 3: 1st choice is required — skipped. Pick a 1st choice to save it.');
   const t3f=(t3bad?[]:t3).filter(Boolean);
   if(t3f.length){ const labels=t3f.map(soc=>{ const r=(onetIndex||[]).find(x=>x.soc===soc); return r?(r.title+' ('+soc+')'):soc; }); setF('top_3_choices', labels.map((l,i)=>(i+1)+'. '+l).join('\n')); }
   setF('preflight_answer', intakeSerializePreflight());
-  if(!written.length){ toast('Nothing filled in yet.'); return; }
+  if(!written.length){ if(!auto) toast('Nothing filled in yet.'); return; }
   updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc,top3:intakeState.top3,pf:intakeState.pf});
   let person;
-  if(intakeState.personId){ person=DB.people.find(p=>p.id===intakeState.personId); if(!person){ toast('Person not found.'); return; } }
-  else { const nm=((b.name||'').trim()); if(!nm){ toast('Enter a Name in Basic info to create a new person.'); return; } person={id:uid('p'), name:nm, careerId:'', values:{}}; DB.personFields.forEach(f=>person.values[f.key]=''); }
+  if(intakeState.personId){ person=DB.people.find(p=>p.id===intakeState.personId); if(!person){ if(!auto) toast('Person not found.'); return; } }
+  else { if(auto) return; const nm=((b.name||'').trim()); if(!nm){ toast('Enter a Name in Basic info to create a new person.'); return; } person={id:uid('p'), name:nm, careerId:'', values:{}}; DB.personFields.forEach(f=>person.values[f.key]=''); }
   Object.keys(updates).forEach(k=>{ person.values[k]=updates[k]; });
   if(b.name&&b.name.trim()) person.name=b.name.trim();
   if(intakeState.careerId) person.careerId=intakeState.careerId;
   upsert(DB.people, person); intakeState.personId=person.id;
-  markDirty(); renderAll();
-  const hint=$('#intakeHint'); if(hint) hint.textContent='Saved to '+pName(person)+' → '+written.join(', ');
-  toast('Saved to '+pName(person)+' ('+written.length+' fields).');
-  if(t3f.length) intakeImportTop3(t3f);
+  markDirty(); if(!auto) renderAll();
+  const hint=$('#intakeHint'); if(hint) hint.textContent=auto?('Auto-saved ✓ ('+written.length+' fields)'):('Saved to '+pName(person)+' → '+written.join(', '));
+  if(!auto){ toast('Saved to '+pName(person)+' ('+written.length+' fields).'); if(t3f.length) intakeImportTop3(t3f); }
 }
 
 function showOverlay(id){ $('#'+id).classList.add('show'); }
@@ -1790,7 +1792,10 @@ $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='ren
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
 $('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=raw.life||{}; intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } renderIntake(); });
 $('#intakeCareer').addEventListener('change', function(){ intakeState.careerId=this.value; });
-$('#intakeSave').addEventListener('click', intakeDoSave);
+$('#intakeSave').addEventListener('click', ()=>intakeDoSave(false));
+let intakeAutoT=null;
+function intakeScheduleAutoSave(){ if(!intakeState.personId) return; clearTimeout(intakeAutoT); intakeAutoT=setTimeout(()=>intakeDoSave(true), 800); }
+(function(){ const host=$('#intakeBody'); if(host){ ['input','change','click'].forEach(ev=>host.addEventListener(ev, intakeScheduleAutoSave)); } })();
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
 $('#btnOnetImport').addEventListener('click', ()=>openOnetPicker());
 $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
