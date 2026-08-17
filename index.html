@@ -108,6 +108,39 @@
   .match-fit.best{background:#dcfce7; color:#166534} .match-fit.great{background:#fef9c3; color:#854d0e} .match-fit.good{background:#e0e7ff; color:#3730a3}
   .match-legend{display:inline-flex; gap:14px; font-size:12px; color:var(--ink-500); align-items:center}
   .match-legend b{color:var(--ink-700)}
+  .mp{border:1px solid var(--ink-200); border-radius:14px; padding:18px 20px; margin-bottom:16px; background:var(--surface)}
+  .mp-head{display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:16px}
+  .mp-title{font-weight:800; font-size:18px; line-height:1.25}
+  .mp-title a{color:var(--red-700); text-decoration:none} .mp-title a:hover{text-decoration:underline}
+  .mp-sub{color:var(--ink-500); font-size:12px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap}
+  .mp-badge{border:1px solid var(--ink-200); border-radius:10px; padding:7px 14px; min-width:120px; background:var(--surface-2)}
+  .mp-badge .k{font-size:10px; font-weight:800; letter-spacing:.06em; color:var(--ink-500); text-transform:uppercase}
+  .mp-badge .v{font-size:16px; font-weight:800; margin-top:2px}
+  .mp-badge .v.best{color:#166534} .mp-badge .v.great{color:#854d0e} .mp-badge .v.good{color:#3730a3}
+  .mp-sec{margin-top:18px}
+  .mp-h{font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--ink-500); text-transform:uppercase; margin-bottom:10px}
+  .mp-note{font-size:13px; color:var(--ink-600); margin-top:10px; line-height:1.5}
+  .ms-bar{position:relative; height:20px; border-radius:6px; overflow:hidden; display:flex}
+  .ms-bar .z{height:100%} .ms-bar .zg{background:#ece7dd} .ms-bar .zr{background:#d9a441} .ms-bar .zb{background:#b32020}
+  .ms-mark{position:absolute; top:-3px; width:2px; height:26px; background:#1a1a1a}
+  .ms-ax{position:relative; height:16px; margin-top:2px; font-size:10px; color:var(--ink-500)}
+  .ms-ax .n{position:absolute; transform:translateX(-50%)}
+  .ms-lab{display:flex; margin-top:3px; font-size:11px; font-weight:800; letter-spacing:.04em; color:var(--ink-500)}
+  .ms-lab span{text-align:center}
+  .wd-row{display:grid; grid-template-columns:18px 1fr 54px; align-items:center; gap:10px; margin-bottom:7px}
+  .wd-axis{font-weight:800; font-size:12px; color:var(--ink-600)}
+  .wd-track{position:relative; height:15px; background:var(--surface-2); border-radius:4px}
+  .wd-track::before{content:''; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--ink-300)}
+  .wd-bar{position:absolute; top:0; bottom:0; border-radius:3px}
+  .wd-bar.pos{background:#b32020} .wd-bar.neg{background:#d9b98a}
+  .wd-val{font-size:12px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums}
+  .wd-val.pos{color:#b32020} .wd-val.neg{color:#8a6d3b}
+  .ml-legend{display:flex; gap:18px; margin-top:8px; font-size:12px; color:var(--ink-600); align-items:center}
+  .ml-legend .dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle}
+  .m-pager{display:flex; align-items:center; gap:12px; margin:6px 0 16px; flex-wrap:wrap}
+  .m-pager button{border:1px solid var(--ink-200); background:var(--surface); border-radius:8px; padding:6px 14px; font-weight:700; color:var(--ink-700); cursor:pointer}
+  .m-pager button:disabled{opacity:.4; cursor:default}
+  .m-pager .pg{font-size:13px; color:var(--ink-500)}
   .ik-btn.sel{background:var(--red-700); color:#fff; border-color:var(--red-700)}
   .ik-btn:hover{border-color:var(--red-700)}
   .aqopt{display:flex; gap:7px; align-items:center; cursor:pointer; font-size:13.5px}
@@ -306,7 +339,7 @@
         <input class="inp" id="matchQuery" placeholder="filter by job title…" style="width:200px">
       </div>
     </div>
-    <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Ranks all 923 O*NET occupations by <b>Pearson correlation</b> between the person's RIASEC profile and each occupation's interest profile — the exact O*NET fit rule: <b>Best</b> r≥0.729 · <b>Great</b> 0.608–0.729 · <b>Good</b> 0–0.608. Occupation data loads privately from <b>onet/interests.json</b>; titles link to O*NET Online. <span class="match-legend" style="margin-left:6px"><b style="color:#2563eb">— your profile</b> <b style="color:#dc2626">- - this career</b></span></div>
+    <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Ranks all 923 O*NET occupations by <b>Pearson correlation</b> between the person's RIASEC profile and each occupation's interest profile — the exact O*NET fit rule: <b>Best</b> r≥0.729 · <b>Great</b> 0.608–0.729 · <b>Good</b> 0–0.608. Occupation data loads privately from <b>onet/interests.json</b>; titles link to O*NET Online. <span class="match-legend" style="margin-left:6px"><b style="color:#b32020">— you</b> <b style="color:#c99a3a">- - this career</b></span></div>
     <div id="matchBody"></div>
   </section>
 
@@ -1375,7 +1408,7 @@ async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(g
 async function hydrateIntake(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('intake_schema.json'); if(t){ INTAKE=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 /* ===================== O*NET matches (in-page, no API) ===================== */
-let ONETI=null; let matchState={personId:'', scoreKey:'riasec', q:''};
+let ONETI=null; let matchState={personId:'', scoreKey:'riasec', q:'', page:0};
 async function hydrateMatches(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('onet/interests.json'); if(t){ ONETI=JSON.parse(t); renderMatches(); } }catch(e){} }
 function pearson(a,b){ const n=Math.min(a.length,b.length); if(n<2) return 0; let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];} const ma=sa/n,mb=sb/n; let num=0,da=0,db=0; for(let i=0;i<n;i++){ const x=a[i]-ma,y=b[i]-mb; num+=x*y; da+=x*x; db+=y*y; } const d=Math.sqrt(da*db); return d?num/d:0; }
 function fitTier(r){ if(r>=0.729) return {label:'Best Fit',cls:'best'}; if(r>=0.608) return {label:'Great Fit',cls:'great'}; if(r>=0) return {label:'Good Fit',cls:'good'}; return null; }
@@ -1390,6 +1423,56 @@ function matchChart(person,occ){
   let bands=''; for(let i=0;i<6;i++){ bands+=`<rect x="${(padX+i*step-9).toFixed(1)}" y="0" width="18" height="${H-16}" fill="${RIASEC_BAND[i]}" opacity="0.3"/>`; }
   const labels=['R','I','A','S','E','C'].map((L,i)=>`<text x="${(padX+i*step).toFixed(1)}" y="${H-3}" font-size="10" font-weight="700" text-anchor="middle" fill="#334155">${L}</text>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:300px;display:block">${bands}<polyline points="${pts(o)}" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="5 4"/><polyline points="${pts(p)}" fill="none" stroke="#2563eb" stroke-width="2.5"/>${labels}</svg>`;
+}
+const RIASEC_FULL=['realistic','investigative','artistic','social','enterprising','conventional'];
+function matchStd(p,c){ const n=6; let mp=0,mc=0; for(let i=0;i<n;i++){mp+=p[i];mc+=c[i];} mp/=n; mc/=n; let vp=0,vc=0; for(let i=0;i<n;i++){vp+=(p[i]-mp)*(p[i]-mp); vc+=(c[i]-mc)*(c[i]-mc);} vp=Math.sqrt(vp/n); vc=Math.sqrt(vc/n); if(vp===0) return null; return p.map(x=>(x-mp)/vp*vc+mc); }
+function matchDiffs(scores,cr){ const ps=matchStd(scores,cr); if(!ps) return null; const d=ps.map((v,i)=>v-cr[i]); const maxAbs=Math.max.apply(null,d.map(Math.abs))||1; return {ps,d,maxAbs}; }
+function fmtSigned(x){ return (x>=0?'+':'−')+Math.abs(x).toFixed(2); }
+function matchStrengthBar(r){
+  const mk=(Math.max(0,Math.min(1,r))*100).toFixed(1);
+  return `<div class="ms-bar"><div class="z zg" style="width:60.8%"></div><div class="z zr" style="width:12.1%"></div><div class="z zb" style="width:27.1%"></div><div class="ms-mark" style="left:${mk}%"></div></div>`+
+    `<div class="ms-ax"><span class="n" style="left:60.8%">0.608</span><span class="n" style="left:72.9%">0.729</span></div>`+
+    `<div class="ms-lab"><span style="width:60.8%">GOOD</span><span style="width:12.1%">GREAT</span><span style="width:27.1%">BEST</span></div>`;
+}
+function matchStrengthText(r,cls){
+  const R=r.toFixed(2);
+  if(cls==='best'){ const d=r-0.729; return `This career sits in <b>Best</b> (correlation ${R}). It clears the 0.729 line by ${d<0.05?'only ':''}${d.toFixed(2)}, so the Best call is ${d<0.05?'close to the edge':'a solid one'}.`; }
+  if(cls==='great'){ const dl=r-0.608, dh=0.729-r; return `This career sits in <b>Great</b> (correlation ${R}), between the 0.608 and 0.729 lines${dh<dl?` — only ${dh.toFixed(2)} short of a Best call`:` — ${dl.toFixed(2)} above the Good line`}.`; }
+  const d=0.608-r; return `This career sits in <b>Good</b> (correlation ${R}) — ${d.toFixed(2)} below the 0.608 line, so it's a looser match than the Great and Best careers.`;
+}
+function matchDiffBars(dobj){
+  const AX=['R','I','A','S','E','C']; const half=48;
+  const rows=AX.map((L,i)=>{ const v=dobj.d[i]; const w=Math.abs(v)/dobj.maxAbs*half; const pos=v>=0;
+    const style=pos?`left:50%;width:${w.toFixed(1)}%`:`left:${(50-w).toFixed(1)}%;width:${w.toFixed(1)}%`;
+    return `<div class="wd-row"><span class="wd-axis">${L}</span><div class="wd-track"><div class="wd-bar ${pos?'pos':'neg'}" style="${style}"></div></div><span class="wd-val ${pos?'pos':'neg'}">${fmtSigned(v)}</span></div>`;
+  }).join('');
+  let bi=0; for(let i=1;i<6;i++) if(Math.abs(dobj.d[i])>Math.abs(dobj.d[bi])) bi=i;
+  const full=RIASEC_FULL[bi];
+  const note=dobj.d[bi]>=0
+    ? `Short bars mean a close match. The one long bar is <b>${AX[bi]}</b>: you lean much further into ${full} work than this career does.`
+    : `Short bars mean a close match. The one long bar is <b>${AX[bi]}</b>: this career leans much further into ${full} work than you do.`;
+  return rows+`<div class="mp-note">${note}</div>`;
+}
+function matchLineChart(scores,cr,ps){
+  const all=ps.concat(cr); const lo=Math.min.apply(null,all),hi=Math.max.apply(null,all); const rng=(hi-lo)||1;
+  const W=520,H=150,padX=24,padTop=14,padBot=34; const step=(W-2*padX)/5; const plotH=H-padTop-padBot;
+  const y=v=>padTop+(1-(v-lo)/rng)*plotH;
+  const pts=arr=>arr.map((v,i)=>((padX+i*step).toFixed(1))+','+(y(v).toFixed(1))).join(' ');
+  const dots=(arr,fill,hollow)=>arr.map((v,i)=>`<circle cx="${(padX+i*step).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${hollow?'#fff':fill}" stroke="${fill}" stroke-width="2"/>`).join('');
+  const labels=['R','I','A','S','E','C'].map((L,i)=>`<text x="${(padX+i*step).toFixed(1)}" y="${H-12}" font-size="12" font-weight="800" text-anchor="middle" fill="#334155">${L}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:520px;display:block">`+
+    `<polyline points="${pts(cr)}" fill="none" stroke="#c99a3a" stroke-width="2" stroke-dasharray="5 4"/>`+
+    `<polyline points="${pts(ps)}" fill="none" stroke="#b32020" stroke-width="2.5"/>`+
+    dots(cr,'#c99a3a',true)+dots(ps,'#b32020',false)+labels+`</svg>`;
+}
+function matchPanel(x,scores){
+  const cr=x.o.r; const dobj=matchDiffs(scores,cr);
+  const line=dobj?matchLineChart(scores,cr,dobj.ps)+`<div class="ml-legend"><span><span class="dot" style="background:#b32020"></span>You</span><span><span class="dot" style="background:#c99a3a"></span>This career</span></div>`:'<div class="muted small">Not enough score variation to draw the profile.</div>';
+  const diff=dobj?matchDiffBars(dobj):'<div class="muted small">Not enough score variation to compare axes.</div>';
+  return `<div class="mp"><div class="mp-head"><div><div class="mp-title"><a href="https://www.onetonline.org/link/summary/${esc(x.soc)}" target="_blank" rel="noopener">${esc(x.o.t)}</a></div><div class="mp-sub"><span class="mono">${esc(x.soc)}</span><span>Job Zone ${x.o.z}</span></div></div><div class="mp-badge"><div class="k">Interest</div><div class="v ${x.tier.cls}">${x.tier.label.replace(' Fit','')}</div></div></div>`+
+    `<div class="mp-sec"><div class="mp-h">Match strength</div>${matchStrengthBar(x.r)}<div class="mp-note">${matchStrengthText(x.r,x.tier.cls)}</div></div>`+
+    `<div class="mp-sec"><div class="mp-h">Where you differ from this career</div>${diff}</div>`+
+    `<div class="mp-sec"><div class="mp-h">What kind of work this is</div>${line}</div></div>`;
 }
 function renderMatches(){
   const host=$('#matchBody'); if(!host) return;
@@ -1407,8 +1490,14 @@ function renderMatches(){
   const q=(matchState.q||'').trim().toLowerCase();
   const shown=q?rows.filter(x=>x.o.t.toLowerCase().includes(q)):rows;
   const setLabel=(MATCH_SETS.find(([k])=>k===matchState.scoreKey)||[,''])[1];
-  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> matches (Best ${counts.best} · Great ${counts.great} · Good ${counts.good})${q?` · filtered by “${esc(q)}” → ${shown.length}`:' · showing all'}</div>`+
-    (shown.length?shown.map(x=>`<div class="match-card"><div><div class="match-title"><a href="https://www.onetonline.org/link/summary/${esc(x.soc)}" target="_blank" rel="noopener">${esc(x.o.t)}</a></div><div class="match-meta"><span class="match-fit ${x.tier.cls}">${x.tier.label}</span> <span>r = ${x.r.toFixed(3)}</span> <span>Job Zone ${x.o.z}</span> <span class="mono">${esc(x.soc)}</span></div></div><div>${matchChart(scores,x.o.r)}</div></div>`).join(''):'<div class="muted small">No occupation title matches that filter.</div>');
+  const per=50, pages=Math.max(1,Math.ceil(shown.length/per));
+  if(matchState.page>=pages) matchState.page=pages-1; if(matchState.page<0) matchState.page=0;
+  const pg=matchState.page, a=pg*per, b=Math.min(shown.length,a+per), pageRows=shown.slice(a,b);
+  const pager=shown.length>per?`<div class="m-pager"><button data-mp="prev" ${pg<=0?'disabled':''}>‹ Prev</button><span class="pg">Page ${pg+1} of ${pages} · showing ${shown.length?a+1:0}–${b} of ${shown.length}</span><button data-mp="next" ${pg>=pages-1?'disabled':''}>Next ›</button></div>`:'';
+  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> matches (Best ${counts.best} · Great ${counts.great} · Good ${counts.good})${q?` · filtered by “${esc(q)}” → ${shown.length}`:''}</div>`+
+    pager+
+    (pageRows.length?pageRows.map(x=>matchPanel(x,scores)).join(''):'<div class="muted small">No occupation title matches that filter.</div>')+
+    (pageRows.length?pager:'');
 }
 
 function parseAllTables(text){
@@ -1667,9 +1756,10 @@ $$('[data-close]').forEach(b=>b.addEventListener('click', e=>e.target.closest('.
 $$('.overlay').forEach(o=>{ o.addEventListener('mousedown', e=>{ o._downSelf=(e.target===o); }); o.addEventListener('click', e=>{ if(e.target===o && o._downSelf) o.classList.remove('show'); }); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show').forEach(o=>o.classList.remove('show')); });
 $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); }));
-$('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey='riasec'; renderMatches(); });
-$('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; renderMatches(); });
-let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
+$('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey='riasec'; matchState.page=0; renderMatches(); });
+$('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; matchState.page=0; renderMatches(); });
+let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; matchState.page=0; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
+$('#matchBody').addEventListener('click', function(e){ const b=e.target.closest('[data-mp]'); if(!b) return; matchState.page+=(b.dataset.mp==='next'?1:-1); renderMatches(); const h=$('#view-matches'); if(h&&h.scrollIntoView) h.scrollIntoView({behavior:'smooth',block:'start'}); });
 $('#genRecipe').addEventListener('change', buildPicker);
 $('#histFilter').addEventListener('change', renderHistory);
 $('#histPersonFilter').addEventListener('change', renderHistory);
