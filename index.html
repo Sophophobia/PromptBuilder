@@ -105,7 +105,7 @@
   .match-title a{color:var(--red-700); text-decoration:none} .match-title a:hover{text-decoration:underline}
   .match-meta{color:var(--ink-500); font-size:12px; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
   .match-fit{font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; padding:2px 9px; border-radius:999px}
-  .match-fit.best{background:#dcfce7; color:#166534} .match-fit.great{background:#fef9c3; color:#854d0e} .match-fit.good{background:#e0e7ff; color:#3730a3}
+  .match-fit.best{background:#dcfce7; color:#166534} .match-fit.great{background:#fef9c3; color:#854d0e} .match-fit.good{background:#e0e7ff; color:#3730a3} .match-fit.poor{background:#f0efec; color:#8a8580}
   .match-legend{display:inline-flex; gap:14px; font-size:12px; color:var(--ink-500); align-items:center}
   .match-legend b{color:var(--ink-700)}
   .mp{border:1px solid var(--ink-200); border-radius:14px; padding:18px 20px; margin-bottom:16px; background:var(--surface)}
@@ -116,7 +116,7 @@
   .mp-badge{border:1px solid var(--ink-200); border-radius:10px; padding:7px 14px; min-width:120px; background:var(--surface-2)}
   .mp-badge .k{font-size:10px; font-weight:800; letter-spacing:.06em; color:var(--ink-500); text-transform:uppercase}
   .mp-badge .v{font-size:16px; font-weight:800; margin-top:2px}
-  .mp-badge .v.best{color:#166534} .mp-badge .v.great{color:#854d0e} .mp-badge .v.good{color:#3730a3}
+  .mp-badge .v.best{color:#166534} .mp-badge .v.great{color:#854d0e} .mp-badge .v.good{color:#3730a3} .mp-badge .v.poor{color:#8a8580}
   .mp-sec{margin-top:18px}
   .mp-h{font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--ink-500); text-transform:uppercase; margin-bottom:10px}
   .mp-note{font-size:13px; color:var(--ink-600); margin-top:10px; line-height:1.5}
@@ -339,7 +339,7 @@
         <input class="inp" id="matchQuery" placeholder="filter by job title…" style="width:200px">
       </div>
     </div>
-    <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Ranks all 923 O*NET occupations by <b>Pearson correlation</b> between the person's RIASEC profile and each occupation's interest profile — the exact O*NET fit rule: <b>Best</b> r≥0.729 · <b>Great</b> 0.608–0.729 · <b>Good</b> 0–0.608. Occupation data loads privately from <b>onet/interests.json</b>; titles link to O*NET Online. <span class="match-legend" style="margin-left:6px"><b style="color:#b32020">— you</b> <b style="color:#c99a3a">- - this career</b></span></div>
+    <div class="help-hint" style="margin-top:-6px;margin-bottom:14px">Scores all 923 O*NET occupations by <b>Pearson correlation</b> (r) between the person's RIASEC profile and each occupation's interest profile, then applies O*NET's Short-Form return rule <b>per Job Zone</b>: every <b>Best</b> (r≥0.729) and <b>Great</b> (0.608–0.729) is kept; if a zone has fewer than 10, its next-highest non-negative r fill in as <b>Good</b> up to 10. Everything else — including higher-r careers whose zone was already full, and any r<0 — is <b>Poor</b>. Zones aren't filtered, only used for labeling. Data loads privately from <b>onet/interests.json</b>; titles link to O*NET Online. <span class="match-legend" style="margin-left:6px"><b style="color:#b32020">— you</b> <b style="color:#c99a3a">- - this career</b></span></div>
     <div id="matchBody"></div>
   </section>
 
@@ -1413,6 +1413,23 @@ async function hydrateMatches(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{
 function pearson(a,b){ const n=Math.min(a.length,b.length); if(n<2) return 0; let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];} const ma=sa/n,mb=sb/n; let num=0,da=0,db=0; for(let i=0;i<n;i++){ const x=a[i]-ma,y=b[i]-mb; num+=x*y; da+=x*x; db+=y*y; } const d=Math.sqrt(da*db); return d?num/d:0; }
 function fitTier(r){ if(r>=0.729) return {label:'Best Fit',cls:'best'}; if(r>=0.608) return {label:'Great Fit',cls:'great'}; if(r>=0) return {label:'Good Fit',cls:'good'}; return null; }
 function parseScores6(str){ if(str==null||str==='') return null; const a=String(str).split(',').map(x=>parseFloat(x)).filter(x=>!isNaN(x)); return a.length===6?a:null; }
+const TIER_LABEL={best:'Best Fit',great:'Great Fit',good:'Good Fit',poor:'Poor Fit'};
+// O*NET Short-Form return rule: within each Job Zone, all Best+Great (r>=0.608) are returned;
+// if fewer than 10, backfill with the zone's next-highest non-negative r as Good until 10.
+// Everything not returned (incl. r<0, and Good-range careers whose zone was already full) = Poor.
+function computeMatchTiers(scores){
+  const byZone={}, rBy={};
+  for(const soc in ONETI){ const o=ONETI[soc]; const r=pearson(scores,o.r); rBy[soc]=r; const z=(o.z==null?0:o.z); (byZone[z]||(byZone[z]=[])).push({soc,r}); }
+  const tier={};
+  for(const z in byZone){
+    const arr=byZone[z]; const nonneg=arr.filter(x=>x.r>=0).sort((a,b)=>b.r-a.r);
+    const returned=new Set(); let bg=0;
+    for(const x of nonneg){ if(x.r>=0.608){ returned.add(x.soc); bg++; } }
+    if(bg<10){ let need=10-bg; for(const x of nonneg){ if(x.r<0.608){ if(need<=0) break; returned.add(x.soc); need--; } } }
+    for(const x of arr){ tier[x.soc]= returned.has(x.soc) ? (x.r>=0.729?'best':(x.r>=0.608?'great':'good')) : 'poor'; }
+  }
+  return {tier, rBy};
+}
 const MATCH_SETS=[['riasec_onet','O*NET Linear'],['riasec_onet_peak','O*NET Peak'],['riasec_custom','Custom Linear'],['riasec_custom_peak','Custom Peak']];
 function matchScoreSets(p){ return MATCH_SETS.filter(([k])=>parseScores6(p.values&&p.values[k])); }
 const RIASEC_BAND=['#86efac','#fcd34d','#fca5a5','#c4b5fd','#fdba74','#5eead4'];
@@ -1438,7 +1455,9 @@ function matchStrengthText(r,cls){
   const R=r.toFixed(2);
   if(cls==='best'){ const d=r-0.729; return `This career sits in <b>Best</b> (correlation ${R}). It clears the 0.729 line by ${d<0.05?'only ':''}${d.toFixed(2)}, so the Best call is ${d<0.05?'close to the edge':'a solid one'}.`; }
   if(cls==='great'){ const dl=r-0.608, dh=0.729-r; return `This career sits in <b>Great</b> (correlation ${R}), between the 0.608 and 0.729 lines${dh<dl?` — only ${dh.toFixed(2)} short of a Best call`:` — ${dl.toFixed(2)} above the Good line`}.`; }
-  const d=0.608-r; return `This career sits in <b>Good</b> (correlation ${R}) — ${d.toFixed(2)} below the 0.608 line, so it's a looser match than the Great and Best careers.`;
+  if(cls==='good'){ const d=0.608-r; return `This career sits in <b>Good</b> (correlation ${R}) — ${d.toFixed(2)} below the 0.608 line. O*NET backfilled it into this Job Zone's shown list to reach 10.`; }
+  if(r>=0) return `Correlation ${R} falls in the Good range, but this occupation's Job Zone had already filled its 10 shown slots — so O*NET holds it back as <b>Poor</b>. The label depends on the zone, not r alone.`;
+  return `Correlation ${R} is negative — your interests and this career point in opposite directions — so it is never returned: <b>Poor</b>.`;
 }
 function matchDiffBars(dobj){
   const AX=['R','I','A','S','E','C']; const half=48;
@@ -1484,9 +1503,10 @@ function renderMatches(){
   if(!person){ host.innerHTML='<div class="muted small">Pick a person to see their O*NET occupation matches.</div>'; return; }
   const scores=parseScores6(person.values&&person.values[matchState.scoreKey]);
   if(!scores){ host.innerHTML='<div class="warn">⚠ This person has no RIASEC scores in the selected set. Fill the Interest Profile in Intake first.</div>'; return; }
-  let rows=[]; for(const soc in ONETI){ const o=ONETI[soc]; const r=pearson(scores,o.r); const t=fitTier(r); if(t) rows.push({soc,o,r,tier:t}); }
+  const tg=computeMatchTiers(scores);
+  let rows=[]; for(const soc in ONETI){ const o=ONETI[soc]; const cls=tg.tier[soc]; rows.push({soc,o,r:tg.rBy[soc],tier:{cls,label:TIER_LABEL[cls]}}); }
   rows.sort((a,b)=>b.r-a.r);
-  const counts={best:rows.filter(x=>x.tier.cls==='best').length,great:rows.filter(x=>x.tier.cls==='great').length,good:rows.filter(x=>x.tier.cls==='good').length};
+  const counts={best:0,great:0,good:0,poor:0}; rows.forEach(x=>counts[x.tier.cls]++);
   const q=(matchState.q||'').trim().toLowerCase();
   const shown=q?rows.filter(x=>x.o.t.toLowerCase().includes(q)):rows;
   const setLabel=(MATCH_SETS.find(([k])=>k===matchState.scoreKey)||[,''])[1];
@@ -1494,7 +1514,7 @@ function renderMatches(){
   if(matchState.page>=pages) matchState.page=pages-1; if(matchState.page<0) matchState.page=0;
   const pg=matchState.page, a=pg*per, b=Math.min(shown.length,a+per), pageRows=shown.slice(a,b);
   const pager=shown.length>per?`<div class="m-pager"><button data-mp="prev" ${pg<=0?'disabled':''}>‹ Prev</button><span class="pg">Page ${pg+1} of ${pages} · showing ${shown.length?a+1:0}–${b} of ${shown.length}</span><button data-mp="next" ${pg>=pages-1?'disabled':''}>Next ›</button></div>`:'';
-  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> matches (Best ${counts.best} · Great ${counts.great} · Good ${counts.good})${q?` · filtered by “${esc(q)}” → ${shown.length}`:''}</div>`+
+  host.innerHTML=`<div class="help-hint" style="margin-top:0;margin-bottom:12px">Matching <b>${esc(pName(person))}</b> · <b>${esc(setLabel)}</b> scores [${scores.join(', ')}] · <b>${rows.length}</b> occupations (Best ${counts.best} · Great ${counts.great} · Good ${counts.good} · Poor ${counts.poor})${q?` · filtered by “${esc(q)}” → ${shown.length}`:''}</div>`+
     pager+
     (pageRows.length?pageRows.map(x=>matchPanel(x,scores)).join(''):'<div class="muted small">No occupation title matches that filter.</div>')+
     (pageRows.length?pager:'');
