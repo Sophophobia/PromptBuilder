@@ -142,6 +142,15 @@
   .m-pager button{border:1px solid var(--ink-200); background:var(--surface); border-radius:8px; padding:6px 14px; font-weight:700; color:var(--ink-700); cursor:pointer}
   .m-pager button:disabled{opacity:.4; cursor:default}
   .m-pager .pg{font-size:13px; color:var(--ink-500)}
+  .ce-wrap{overflow-x:auto; border:1px solid var(--ink-200); border-radius:10px; background:var(--surface)}
+  .ce-tbl{width:100%; border-collapse:collapse; font-size:13px}
+  .ce-tbl th,.ce-tbl td{border-bottom:1px solid var(--ink-200); padding:7px 10px; text-align:left; vertical-align:top}
+  .ce-tbl th{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); font-weight:800}
+  .ce-tbl .r{text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .ce-tbl td small{display:block; color:var(--ink-500); font-size:11.5px; margin-top:2px; font-weight:400}
+  .ce-tbl tr.sub td{font-weight:700; background:var(--surface-2)}
+  .ce-tbl tr.tot td{font-weight:800}
+  .ce-tbl tr.yr td{font-weight:800; color:var(--red-700); background:var(--surface-2); border-bottom:0}
   .ik-btn.sel{background:var(--red-700); color:#fff; border-color:var(--red-700)}
   .ik-btn:hover{border-color:var(--red-700)}
   .aqopt{display:flex; gap:7px; align-items:center; cursor:pointer; font-size:13.5px}
@@ -505,7 +514,7 @@ async function fetchJSON(p){ const r=await fetch(p,{cache:'no-store'}); if(!r.ok
 async function init(){
   loadGH();
   const ld=lsGet(LS_DB); const clean=lsGet(LS_CLEAN)==='1';
-  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; try{ const bs=lsGet(LS_BASE); if(bs) baseDB=JSON.parse(bs); const bh=lsGet(LS_BASEH); if(bh) baseHIST=JSON.parse(bh); loadedSha=lsGet(LS_SHA)||''; }catch(e){} renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches(); checkRemote(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
+  if(ld && !clean){ try{ DB=normalizeDB(JSON.parse(ld)); const lh=lsGet(LS_HIST); HISTORY=lh?JSON.parse(lh):[]; dirty=true; try{ const bs=lsGet(LS_BASE); if(bs) baseDB=JSON.parse(bs); const bh=lsGet(LS_BASEH); if(bh) baseHIST=JSON.parse(bh); loadedSha=lsGet(LS_SHA)||''; }catch(e){} renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches(); hydrateCost(); checkRemote(); toast('Loaded local unsaved edits. Use ↻ Reload to discard and pull latest.'); return; }catch(e){} }
   await loadInitial(true);
 }
 async function loadInitial(silent){
@@ -516,7 +525,7 @@ async function reloadFromRepo(silent){
   try{
     const d=await fetchJSON('data.json').catch(()=>null);
     const h=await fetchJSON('history.json').catch(()=>[]);
-    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; setBaseFromDB(); renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches(); if(!silent) toast('Reloaded from repo.'); return; }
+    if(d){ DB=normalizeDB(d); HISTORY=Array.isArray(h)?h:[]; dirty=false; persistLocal(); markClean(); dirty=false; setBaseFromDB(); renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches(); hydrateCost(); if(!silent) toast('Reloaded from repo.'); return; }
     throw new Error('no data.json');
   }catch(e){ DB=normalizeDB(DB); HISTORY=[]; dirty=false; renderAll(); renderStatus('No data found. Set ⚙ GitHub (private data repo), or use ↻ to load files.'); }
 }
@@ -537,7 +546,7 @@ async function loadFromGitHub(silent){
     renderStatus('loading from GitHub…');
     const d=await ghReadFile(gh.dataPath||'data.json');
     const h=await ghReadFile(gh.histPath||'history.json');
-    DB=normalizeDB(d?JSON.parse(d):{}); HISTORY=h?JSON.parse(h):[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches();
+    DB=normalizeDB(d?JSON.parse(d):{}); HISTORY=h?JSON.parse(h):[]; dirty=false; persistLocal(); markClean(); dirty=false; renderAll(); hydrateLibrary(); hydrateIntake(); hydrateMatches(); hydrateCost();
     let sha=''; try{ sha=await ghHeadSha(); }catch(e){} setBaseFromDB(sha); hideRemoteBanner();
     if(!silent) toast('Loaded from '+gh.owner+'/'+gh.repo);
   }catch(e){ renderStatus('GitHub load failed'); alert('GitHub load failed:\n'+e.message+'\n\nCheck owner / repo / branch / token in ⚙ Settings.'); }
@@ -621,7 +630,10 @@ function assembleRecipe(recipe, person, career){
   const body=recipe.body||''; const missing=[], blocks=[];
   const cs=recipe.colSelect||{};
   const cell=(which,k,val)=>{ if(val==null||val===''){ missing.push(which+'.'+k); return '[MISSING]'; } const keep=cs[which+'.'+k]; return (keep&&keep.length)?filterTableColumns(val,keep):val; };
-  (recipe.personKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('person',k)+'\n\n'+cell('person',k, person?person.values[k]:'')); });
+  // Derived person fields: the interest match is for the career being assembled; the
+  // income estimate falls back to the saved Intake answers when the field is empty.
+  const pval=k=>{ if(!person) return ''; if(k==='interest_match'){ const t=interestMatchText(person,career); if(t) return t; } if(k==='required_income'&&!String(person.values[k]||'').trim()){ const t=requiredIncomeFromRaw(person); if(t) return t; } return person.values[k]; };
+  (recipe.personKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('person',k)+'\n\n'+cell('person',k, pval(k))); });
   (recipe.careerKeys||[]).forEach(k=>{ blocks.push('## '+labelOf('career',k)+'\n\n'+cell('career',k, career?career.values[k]:'')); });
   (recipe.libraryKeys||[]).forEach(k=>{
     const fdef=DB.libraryFields.find(f=>f.key===k); let val=DB.library&&DB.library.values?DB.library.values[k]:'';
@@ -1407,6 +1419,9 @@ window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.
 let onetIndexLoading=false;
 async function ensureOnetIndex(){ if(onetIndex||onetIndexLoading) return; if(!(gh.owner&&gh.repo&&gh.token)) return; onetIndexLoading=true; try{ const t=await ghReadFile('onet/index.json'); onetIndex=JSON.parse(t); renderIntake(); }catch(e){} finally{ onetIndexLoading=false; } }
 async function hydrateIntake(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('intake_schema.json'); if(t){ INTAKE=JSON.parse(t); renderIntake(); } }catch(e){} }
+// Lifestyle cost data (rent, food, living, tax, college tuition) for the income estimate; private like the schema.
+let COSTD=null;
+async function hydrateCost(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('cost_data.json'); if(t){ COSTD=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 /* ===================== O*NET matches (in-page, no API) ===================== */
 let ONETI=null; let matchState={personId:'', scoreKey:'', q:'', page:0};
@@ -1556,6 +1571,169 @@ function riasecScoresLive(set){ const s={R:0,I:0,A:0,S:0,E:0,C:0}; const r=INTAK
 function riasecScoresPeak(set){ const s={R:0,I:0,A:0,S:0,E:0,C:0}; const r=INTAKE&&INTAKE.riasec; if(!r) return s; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; const inc={5:2,4:1,3:0,2:-1,1:-2}; const byArea={}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c==null) return; const v=ans[q.index]; if(v==null) return; (byArea[c]=byArea[c]||[]).push(v); }); Object.keys(byArea).forEach(c=>{ const vals=byArea[c].slice(); const mx=Math.max.apply(null,vals); const base=mx===5?16:(mx===4?12:(mx===3?6:0)); vals.splice(vals.indexOf(mx),1); let sc=base; vals.forEach(v=>{ sc+=(inc[v]||0); }); s[c]=Math.max(0,Math.min(20,sc)); }); return s; }
 function riasecArr(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return ''; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length||!qs.some(q=>ans[q.index]!=null)) return ''; return qs.map(q=>ans[q.index]!=null?ans[q.index]:'').join(','); }
 function parseRiasecAns(str,set){ const out={}; if(!str) return out; const r=INTAKE&&INTAKE.riasec; const qs=r?((r.sets&&r.sets[set]&&r.sets[set].questions)||[]):[]; const parts=String(str).split(','); qs.forEach((q,i)=>{ const v=parseInt(parts[i],10); if(!isNaN(v)) out[q.index]=v; }); return out; }
+
+/* ===================== Lifestyle cost → required income =====================
+   Port of the standalone cost estimator. Each place gets Housing, Transportation,
+   Food, Personal & household, Debt and Savings lines (a [lo, hi] range, because
+   rent is one); the taxes are then solved for the smallest pre-tax income whose
+   take-home pay covers them. A region spans its lowest state to its highest. */
+const CE_STATE={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',PR:'Puerto Rico',USVI:'U.S. Virgin Islands',Guam:'Guam',AS:'American Samoa',MP:'Northern Mariana Islands'};
+const CE_ABBR={}; Object.keys(CE_STATE).forEach(a=>{ CE_ABBR[CE_STATE[a].toLowerCase()]=a; });
+const CE_REGIONS=[{name:'Northeast',states:['ME','NH','VT','MA','RI','CT']},{name:'Mid-Atlantic',states:['NY','NJ','PA','DE','MD','DC','VA','WV']},{name:'Southeast',states:['NC','SC','GA','FL','AL','MS','TN','KY']},{name:'Midwest',states:['OH','MI','IN','IL','WI','MN','IA','MO','ND','SD','NE','KS']},{name:'South Central',states:['TX','OK','AR','LA','NM']},{name:'West',states:['CA','OR','WA','NV','AZ','CO','UT','ID','MT','WY']},{name:'Other / U.S. territories & islands',states:['HI','AK','PR','USVI','Guam','AS','MP']}];
+// Older Intake answers (before the questions matched the estimator) mapped onto today's codes.
+function intakeMigrateLife(L){
+  if(!L||typeof L!=='object') return L||{};
+  const lv={Dependent:'family','Basic Shared':'roommates',Independent:'own','Condo Owner':'own',Homeowner:'provider'}; if(lv[L.lp_living_situation]) L.lp_living_situation=lv[L.lp_living_situation];
+  if(Array.isArray(L.lp_support_who)){ const had=L.lp_support_who, m={'A partner':'spouse',partner:'spouse',Parents:'adults',parents:'adults',Children:'children'}; L.lp_support_who=Array.from(new Set(had.map(x=>m[x]||x))); if(had.some(x=>/^parents$/i.test(x))&&L.lp_adults_count==null) L.lp_adults_count='2'; }
+  if(L.lp_children!=null&&L.lp_children_count==null){ L.lp_children_count=String(L.lp_children); delete L.lp_children; }
+  if(L.lp_eat==='home') L.lp_eat='cook';
+  if(L.lp_income_support==='me_and_others') L.lp_income_support='others';
+  if(L.lp_live_where==='region') L.lp_live_where='area'; if(L.lp_live_where==='none') L.lp_live_where='unsure';
+  if(L.lp_breathing==='basic') L.lp_breathing='basics';
+  if(Array.isArray(L.lp_debt)&&!L.lp_debts){ const d={student_loans:'Student loans',car_loan:'Car loan',credit_card:'Credit card debt',personal_loan:'Personal loan',medical_debt:'Medical debt',none:'None'}; L.lp_debts=L.lp_debt.map(x=>d[x]||x); delete L.lp_debt; }
+  return L;
+}
+function ceNum(v){ const n=parseFloat(v); return isNaN(n)?null:n; }
+function ceAnswers(life){
+  const L=intakeMigrateLife(JSON.parse(JSON.stringify(life||{}))), a={missing:[]};
+  if(L.lp_know_budget==='yes'){ a.known=ceNum(L.lp_monthly_expenses); return a; }
+  a.places=[];
+  if(L.lp_live_where==='states') (L.lp_states||[]).forEach(n=>{ const ab=CE_ABBR[String(n).toLowerCase()]; if(ab&&a.places.every(p=>p.loc!==ab)) a.places.push({name:CE_STATE[ab],loc:ab}); });
+  else if(L.lp_live_where==='area') (L.lp_regions||[]).forEach(s=>{ const r=CE_REGIONS.find(x=>x.name===String(s).split(' (')[0].trim()); if(r) a.places.push({name:r.name,states:r.states}); });
+  a.places=a.places.slice(0,3); if(!a.places.length) a.places=[{name:'National',loc:'National'}];
+  a.living=L.lp_living_situation||''; if(!a.living) a.missing.push('kind of home');
+  a.bedrooms=Math.min(4,Math.max(1,Math.round(ceNum(L.lp_bedrooms)||2)));
+  a.transport=L.lp_transport||''; if(!a.transport) a.missing.push('getting around');
+  a.cars=Math.min(4,Math.max(1,Math.round(ceNum(L.lp_cars)||1)));
+  a.food=L.lp_eat||''; if(!a.food) a.missing.push('eating');
+  const others=L.lp_income_support==='others', who=L.lp_support_who||[];
+  a.spouse=others&&who.indexOf('spouse')>=0;
+  a.adults=others&&who.indexOf('adults')>=0?Math.max(1,Math.round(ceNum(L.lp_adults_count)||1)):0;
+  a.kids=others&&who.indexOf('children')>=0?Math.max(1,Math.round(ceNum(L.lp_children_count)||1)):0;
+  a.breathing={basics:'basic'}[L.lp_breathing]||L.lp_breathing||'';
+  a.college=L.lp_college==='yes';
+  a.collegeState=L.lp_college_state==='out'?'out':'in';
+  a.collegeControl=L.lp_college_control==='private'?'private':'public';
+  a.collegeLevel=Array.isArray(L.lp_college_level)&&L.lp_college_level.length?L.lp_college_level:['4yr'];
+  const dl={'Student loans':'student','Car loan':'car','Credit card debt':'credit','Personal loan':'personal','Medical debt':'medical'};
+  a.debts={}; (L.lp_debts||[]).map(x=>dl[x]).filter(Boolean).forEach(d=>{ a.debts[d]=ceNum(L['lp_debt_'+d]); });   // null = not entered
+  return a;
+}
+function ceMembers(a){ const out=[{tier:'adult'}]; if(a.spouse) out.push({tier:'adult'}); for(let i=0;i<a.adults;i++) out.push({tier:'adult'}); for(let i=0;i<a.kids;i++) out.push({tier:'child'}); return out; }
+function ceWho(ms){ const ad=ms.filter(m=>m.tier==='adult').length, ch=ms.length-ad; return [ad?ad+(ad>1?' adults':' adult'):'', ch?ch+(ch>1?' children':' child'):''].filter(Boolean).join(', '); }
+function ceRent(loc,br){ const R=COSTD.rent||{}, p='fmr_'+br+'_', x=R[loc]||{}; if(x[p+'lo']!=null) return {lo:x[p+'lo'],hi:x[p+'hi']}; const n=R.National||{}; return {lo:n[p+'lo']||0,hi:n[p+'hi']||0}; }
+function ceCollegeYears(a){ const two=a.collegeLevel.indexOf('2yr')>=0, four=a.collegeLevel.indexOf('4yr')>=0||!two; return two&&four?['2yr','2yr','4yr','4yr']:two?['2yr','2yr']:['4yr','4yr','4yr','4yr']; }
+// Every year's tuition is borrowed when that year starts and earns simple interest until
+// repayment starts (end of school + grace); the total is repaid in equal monthly payments.
+// A state with no school of that kind uses the National figure.
+function ceStudentLoan(a,loc){
+  const C=COSTD.costs||{}, T=COSTD.college||{}, rate=(C['college.loan_rate']||0)/100, term=C['college.loan_years']||10, grace=(C['college.grace_months']||0)/12;
+  const yrs=ceCollegeYears(a), n=yrs.length; let owed=0;
+  yrs.forEach((lev,k)=>{ const col=a.collegeControl+'_'+lev+'_'+a.collegeState; let v=(T[loc]||{})[col]; if(v==null) v=(T.National||{})[col]||0; owed+=v*(1+rate*(n-k+grace)); });
+  const r=rate/12, m=term*12; return r>0?owed*r/(1-Math.pow(1+r,-m)):owed/m;
+}
+function ceLines(a){
+  const C=COSTD.costs||{}, F=COSTD.food||{}, L=COSTD.living||{}, out=[], ms=ceMembers(a), n=ms.length, flat=v=>()=>({lo:v,hi:v});
+  if(a.living==='family') out.push({head:'Housing',sub:"At parents' or family's home",calc:flat(C['housing.family']||0)});
+  else if(a.living==='roommates') out.push({head:'Housing',sub:'Sharing with roommates · 2-bedroom ÷ 2',calc:l=>{ const r=ceRent(l,2); return {lo:r.lo/2,hi:r.hi/2}; }});
+  else if(a.living==='own') out.push({head:'Housing',sub:'A small place of my own · 1-bedroom',calc:l=>ceRent(l,1)});
+  else if(a.living==='provider') out.push({head:'Housing',sub:'A home for my family · '+a.bedrooms+'-bedroom',calc:l=>ceRent(l,a.bedrooms)});
+  if(a.transport==='nocar') out.push({head:'Transportation',sub:'Mostly without a car',calc:flat(C['transport.nocar']||0)});
+  else if(a.transport==='car'){ const per=(C['transport.car.fuel']||0)+(C['transport.car.maintenance']||0)+(C['transport.car.insurance']||0); out.push({head:'Transportation',sub:'Own car · '+a.cars+(a.cars>1?' cars':' car')+' · fuel, maintenance, insurance',calc:flat(per*a.cars)}); }
+  if(a.food){
+    const sk=n>=7?'7':n>=5?'5':String(n), size=F['food.size.'+sk]!=null?F['food.size.'+sk]:1;
+    const low=ms.reduce((s,m)=>s+(F['food.low.'+m.tier]||0),0), eat=ms.reduce((s,m)=>s+(F['food.eatout.'+m.tier]||0),0);
+    const mult=F['food.mult.'+a.food]!=null?F['food.mult.'+a.food]:({cook:0,mix:1,eatout:2}[a.food]||0);
+    const fl={cook:'Mostly cook at home',mix:'A mix of cooking and eating out',eatout:'Eat out or order in a lot'}[a.food]||a.food;
+    // Eating out has no household-size economy; Alaska and Hawaii scale all food by the USDA Thrifty reference.
+    out.push({head:'Food',sub:fl+' · '+ceWho(ms),calc:l=>{ const us=F['food.thrifty_ref.us'], adj=l==='AK'?F['food.thrifty_ref.ak']:l==='HI'?F['food.thrifty_ref.hi']:null, st=adj&&us?adj/us:1, v=(low*size+mult*eat)*st; return {lo:v,hi:v}; }});
+  }
+  const pv=['apparel','personal_care','phone','housekeeping','health_ins'].reduce((s,x)=>s+ms.reduce((t,m)=>t+(L['living.'+x+'.'+m.tier]||0),0),0);
+  out.push({head:'Personal & household',sub:'Apparel, personal care, phone, supplies, health insurance · '+ceWho(ms),calc:flat(pv)});
+  const DN={student:'Student loans',car:'Car loan',credit:'Credit card',personal:'Personal loan',medical:'Medical debt'};
+  const pre={student:C['debt.student']||0,car:C['debt.car']||0,credit:0,personal:0,medical:C['debt.medical']||0}, parts=[];
+  if(a.college){
+    const yrs=ceCollegeYears(a), kind=yrs[0]==='2yr'?(yrs.length===4?'2-year then 4-year':'2-year'):'4-year';
+    const lab='College loan ('+a.collegeControl+', '+kind+', '+(a.collegeState==='in'?'in-state':'out-of-state')+')', typed=a.debts.student;
+    parts.push(typed!=null?{name:lab+' · amount entered',calc:()=>typed}:{name:lab+' · from tuition, repaid over '+((COSTD.costs||{})['college.loan_years']||10)+' years',calc:l=>ceStudentLoan(a,l)});
+  }
+  Object.keys(a.debts).forEach(d=>{ if(d==='student'&&a.college) return; const v=a.debts[d]!=null?a.debts[d]:pre[d]; parts.push({name:DN[d]+(a.debts[d]==null?(pre[d]?' (default $'+pre[d]+')':' (no amount entered)'):''),calc:()=>v}); });
+  if(parts.length) out.push({head:'Debt',sub:parts.map(p=>p.name).join(', '),calc:l=>{ const v=parts.reduce((s,p)=>s+p.calc(l),0); return {lo:v,hi:v}; }});
+  // Savings are p% of take-home pay, and take-home includes them: savings = rest x p / (1 - p).
+  const p=Math.min(Math.max(C['breathing.'+a.breathing]||0,0),90)/100;
+  if(p>0){ const others=out.slice(), bl={basic:'Just the basics',extra:'A little extra',comfortable:'Comfortable'}[a.breathing];
+    out.push({head:'Savings & buffer',sub:bl+' · '+Math.round(p*100)+'% of take-home pay',calc:l=>{ const s=others.reduce((t,o)=>{ const x=o.calc(l); t.lo+=x.lo; t.hi+=x.hi; return t; },{lo:0,hi:0}); return {lo:s.lo*p/(1-p),hi:s.hi*p/(1-p)}; }}); }
+  return out;
+}
+// Taxes: 2026 federal and state brackets, standard deductions, exemptions and credits, plus FICA.
+// Married filing jointly with a spouse, otherwise single; children and other adults are dependents.
+function ceBracket(brs,x){ let t=0; for(let i=0;i<brs.length;i++){ const lo=brs[i][0], hi=i+1<brs.length?brs[i+1][0]:Infinity; if(x>lo) t+=(Math.min(x,hi)-lo)*brs[i][1]; } return t; }
+function ceIncomeTax(j,g,fam){ const T=COSTD.tax||{}, b=(T.brackets||{})[j], al=(T.allow||{})[j]; if(!b||!al) return 0; const f=fam.married?'married':'single', deps=fam.kids+fam.others; const taxable=g-(al['std_'+f]||0)-(al['ex_'+f]||0)-(al.ex_dep||0)*deps; const cr=(al['cr_'+f]||0)+(al.cr_child||0)*fam.kids+(al.cr_other||0)*fam.others; return Math.max(0,ceBracket(b[f]||[],Math.max(0,taxable))-cr); }
+function cePayroll(g,fam){ const P=(COSTD.tax||{}).payroll||{}; const ss=Math.min(g,P['payroll.ss_wage_base']||Infinity)*(P['payroll.ss_rate']||0), thr=fam.married?P['payroll.addl_married']:P['payroll.addl_single']; return ss+g*(P['payroll.medicare_rate']||0)+Math.max(0,g-(thr||Infinity))*(P['payroll.addl_rate']||0); }
+function ceTaxes(loc,g,fam){ return {federal:ceIncomeTax('Federal',g,fam), state:loc==='National'?0:ceIncomeTax(loc,g,fam), payroll:cePayroll(g,fam)}; }
+// Smallest pre-tax annual income whose take-home reaches `net` (bisection; taxes rise with income).
+function ceGross(loc,net,fam){ if(net<=0) return 0; let lo=net, hi=net*2+50000; const take=g=>{ const t=ceTaxes(loc,g,fam); return g-t.federal-t.state-t.payroll; }; while(take(hi)<net) hi*=2; for(let i=0;i<60;i++){ const mid=(lo+hi)/2; if(take(mid)>=net) hi=mid; else lo=mid; } return hi; }
+function ceEstimate(life){
+  if(!COSTD) return null;
+  const a=ceAnswers(life);
+  if(a.known!==undefined){ if(a.known==null) return {known:true,empty:true}; const g=ceGross('National',a.known*12,{married:false,kids:0,others:0})/12; return {known:true,net:a.known,tax:g-a.known,month:g}; }
+  const lines=ceLines(a), fam={married:a.spouse,kids:a.kids,others:a.adults};
+  const evalLoc=loc=>{ const cells=lines.map(ln=>ln.calc(loc)), net={lo:0,hi:0}; cells.forEach(c=>{ net.lo+=c.lo; net.hi+=c.hi; }); const gl=ceGross(loc,net.lo*12,fam)/12, gh=ceGross(loc,net.hi*12,fam)/12; return {loc,cells,net,tax:{lo:gl-net.lo,hi:gh-net.hi},month:{lo:gl,hi:gh}}; };
+  const cols=a.places.map(pl=>{ const per=(pl.states||[pl.loc]).map(evalLoc), mm=f=>({lo:Math.min.apply(null,per.map(x=>f(x).lo)),hi:Math.max.apply(null,per.map(x=>f(x).hi))});
+    return {name:pl.name,per,rows:lines.map((_,i)=>mm(x=>x.cells[i])),tax:mm(x=>x.tax),net:mm(x=>x.net),month:mm(x=>x.month)}; });
+  const deps=a.kids+a.adults, famTxt=(a.spouse?'married filing jointly':'single')+(deps?', '+deps+' dependent'+(deps>1?'s':''):'');
+  return {a,lines,cols,famTxt,missing:a.missing};
+}
+function ceMoney(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
+function ceRange(x){ return Math.round(x.lo)===Math.round(x.hi)?ceMoney(x.lo):ceMoney(x.lo)+' – '+ceMoney(x.hi); }
+const CE_BASIS='Rent is HUD FY27 Fair Market Rent, 25th–75th percentile for the state (a region spans its lowest to its highest state). Food, personal and household costs are USDA and BLS national figures. Taxes are 2026 federal, state and FICA, solved for the pre-tax income that leaves this take-home pay.';
+function ceTableHTML(e){
+  if(!e) return '';
+  if(e.known){ if(e.empty) return '<div class="muted small">Enter the monthly living expenses to see the income they need.</div>';
+    return `<div class="ce-wrap"><table class="ce-tbl"><tbody><tr><td>Monthly living expenses<small>the take-home pay needed</small></td><td class="r">${ceMoney(e.net)}</td></tr><tr><td>Taxes<small>federal + FICA, single filer; no state given, so no state income tax</small></td><td class="r">${ceMoney(e.tax)}</td></tr><tr class="tot"><td>Minimum pre-tax income / month</td><td class="r">${ceMoney(e.month)}</td></tr><tr class="yr"><td>Minimum pre-tax income / year</td><td class="r">${ceMoney(e.month*12)}</td></tr></tbody></table></div>`; }
+  const row=(cls,label,sub,f)=>`<tr${cls?` class="${cls}"`:''}><td>${label}${sub?`<small>${esc(sub)}</small>`:''}</td>`+e.cols.map(c=>`<td class="r">${ceRange(f(c))}</td>`).join('')+'</tr>';
+  let h=`<div class="ce-wrap"><table class="ce-tbl"><thead><tr><th>Line item</th>`+e.cols.map(c=>`<th class="r"${c.per.length>1?` title="${esc(c.per.map(x=>x.loc).join(', '))}"`:''}>${esc(c.name)}</th>`).join('')+'</tr></thead><tbody>';
+  e.lines.forEach((ln,i)=>{ h+=row('','<b>'+esc(ln.head)+'</b>',ln.sub,c=>c.rows[i]); });
+  h+=row('','<b>Taxes</b>','Federal + state + FICA · '+e.famTxt,c=>c.tax);
+  h+=row('sub','Take-home pay needed / month','',c=>c.net);
+  h+=row('tot','Minimum pre-tax income / month','',c=>c.month);
+  h+=row('yr','Minimum pre-tax income / year','',c=>({lo:c.month.lo*12,hi:c.month.hi*12}));
+  h+='</tbody></table></div>';
+  if(e.missing.length) h+=`<div class="muted small" style="margin-top:6px">Not answered yet, left out of the total: ${esc(e.missing.join(', '))}.</div>`;
+  return h+`<div class="muted small" style="margin-top:6px">${CE_BASIS}</div>`;
+}
+// The same estimate as markdown, saved to the person's Required Income field.
+function ceText(e){
+  if(!e||(e.known&&e.empty)) return '';
+  if(e.known) return '**Estimated required income** — from the monthly living expenses they stated\n\n- Monthly living expenses (take-home pay needed): '+ceMoney(e.net)+'\n- Minimum pre-tax income: '+ceMoney(e.month)+' / month · **'+ceMoney(e.month*12)+' / year**\n\nBasis: 2026 federal income tax and FICA, single filer; no state was given, so no state income tax.';
+  const cell=f=>e.cols.map(c=>ceRange(f(c))).join(' | ');
+  const rows=['| Line item (monthly) | '+e.cols.map(c=>c.name+(c.per.length>1?' ('+c.per.map(x=>x.loc).join(', ')+')':'')).join(' | ')+' |','|---|'+e.cols.map(()=>'---:|').join('')];
+  e.lines.forEach((ln,i)=>rows.push('| '+ln.head+' — '+ln.sub+' | '+cell(c=>c.rows[i])+' |'));
+  rows.push('| Taxes — federal + state + FICA, '+e.famTxt+' | '+cell(c=>c.tax)+' |');
+  rows.push('| **Take-home pay needed / month** | '+cell(c=>c.net)+' |');
+  rows.push('| **Minimum pre-tax income / month** | '+cell(c=>c.month)+' |');
+  rows.push('| **Minimum pre-tax income / year** | '+e.cols.map(c=>'**'+ceRange({lo:c.month.lo*12,hi:c.month.hi*12})+'**').join(' | ')+' |');
+  return '**Estimated required income** — worked out from the Lifestyle Preferences answers\n\n'+rows.join('\n')+'\n\n'+CE_BASIS+(e.missing.length?'\nNot answered, left out of the total: '+e.missing.join(', ')+'.':'');
+}
+function requiredIncomeFromRaw(person){ try{ const raw=JSON.parse((person&&person.values&&person.values.intake_raw)||'{}'); return raw.life?ceText(ceEstimate(raw.life)):''; }catch(e){ return ''; } }
+function intakeCostHTML(){
+  if(!COSTD) return `<div class="field-block"><div class="muted small">The income estimate needs <b>cost_data.json</b> from your data repo — set ⚙ GitHub and ↻ Reload.</div></div>`;
+  return `<div class="field-block"><label class="fld">Estimated cost of this lifestyle</label><div id="ikCost">${ceTableHTML(ceEstimate(intakeState.life))}</div></div>`;
+}
+let ikCostT=null;
+function intakeRefreshCost(){ clearTimeout(ikCostT); ikCostT=setTimeout(()=>{ const el=document.getElementById('ikCost'); if(el&&COSTD&&intakeState) el.innerHTML=ceTableHTML(ceEstimate(intakeState.life)); },150); }
+
+/* ===================== Interest match for the career being viewed =====================
+   The Matches page's result for one person x one career, as text for prompts. */
+function careerSoc(c){ if(!c) return ''; const m=String(c.title||'').match(/\d{2}-\d{4}\.\d{2}/)||String((c.values&&c.values.career_title)||'').match(/\d{2}-\d{4}\.\d{2}/); if(m) return m[0]; const k=String(c.id||'').match(/(\d{2})-(\d{4})-(\d{2})$/); return k?k[1]+'-'+k[2]+'.'+k[3]:''; }
+function interestMatchText(person,career){
+  if(!ONETI||!person||!career) return '';
+  const soc=careerSoc(career), occ=ONETI[soc]; if(!occ) return '';
+  const total=Object.keys(ONETI).length, lines=[];
+  matchScoreSets(person).forEach(([k,label])=>{ const sc=parseScores6(person.values[k]); if(!sc) return; const tg=computeMatchTiers(sc), r=tg.rBy[soc]; const rank=1+Object.keys(tg.rBy).filter(s=>tg.rBy[s]>r).length; lines.push('- '+label+' scores: **'+TIER_LABEL[tg.tier[soc]]+'** (r = '+r.toFixed(3)+'; ranks '+rank+' of '+total+' occupations)'); });
+  if(!lines.length) return '';
+  return 'Interest match with '+occ.t+' ('+soc+'), by the O*NET Interest Profiler rule — Pearson r between their RIASEC profile and the occupation\'s; Best ≥ 0.729, Great 0.608–0.729, Good = next-highest within the Job Zone up to 10 shown, otherwise Poor:\n\n'+lines.join('\n');
+}
 
 function intakeVal(ns,k){ return (intakeState[ns]||{})[k]; }
 function intakeCond(ns,c){ const v=intakeVal(ns,c.key); const empty=(v==null||v===''||(Array.isArray(v)&&!v.length)); if('includes' in c) return Array.isArray(v) && v.indexOf(c.includes)>=0; if('notEquals' in c) return !empty && v!==c.notEquals; return v===c.equals; }
@@ -1725,13 +1903,13 @@ function renderIntake(){
     intakeCard('1 · Basic info', intakeFieldsHTML(INTAKE.basicInfo||[],'basic'), 'sec-basic') +
     intakeCard('2 · Interest Profile (RIASEC)', intakeRiasecHTML(), 'sec-riasec') +
     intakeCard('3 · Skills & Experience', intakeSkillsHTML(), 'sec-skills') +
-    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true), 'sec-life') +
+    intakeCard('4 · Lifestyle Preferences', intakeFieldsHTML(INTAKE.lifestyle||[],'life',true)+intakeCostHTML(), 'sec-life') +
     intakeCard('5 · Career Barriers', intakeBarriersHTML(), 'sec-barriers') +
     intakeCard('6 · Top 3 Career Choices', intakeTop3HTML(), 'sec-top3') +
     intakeCard('7 · Project Blueprint (Preflight)', intakePreflightHTML(), 'sec-preflight');
   const toc=$('#intakeToc'); if(toc) toc.innerHTML='<div class="toc-h">Sections</div>'+INTAKE_SECTIONS.map(s=>`<a href="#${s[0]}" onclick="intakeGoto('${s[0]}');return false">${esc(s[1])}</a>`).join('');
 }
-function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
+function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.map(x=>{ const o=(f.options||[]).find(y=>((typeof y==='object')?y.value:y)===x); return o&&typeof o==='object'?o.label:x; }).join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
 function intakeSerializeBarriers(){ const secs=(INTAKE.barriers&&INTAKE.barriers.sections)||[]; const blocks=[]; secs.forEach(sec=>{ const items=(sec.items||[]).filter(it=>intakeState.barriers[it]); if(items.length) blocks.push('**'+sec.name+'**\n'+items.map(x=>'- '+x).join('\n')); }); const cm=(intakeState.barrierComment||'').trim(); if(!blocks.length && !cm) return ''; let out=blocks.length?blocks.join('\n\n'):'No barriers selected'; if(cm) out+='\n\nComments: '+cm; return out; }
 function intakeSerializeSkills(){ const rated=intakeCoreSkills().filter(sk=>intakeState.skillLv[sk]); if(!intakeState.exp.length&&!rated.length) return ''; let out=''; if(intakeState.exp.length) out+='Experience:\n'+intakeState.exp.map(e=>{ const c=careerById(e.careerId); return '- '+(c?cName(c):e.careerId)+' — '+e.level; }).join('\n')+'\n\n'; if(rated.length) out+='Core skill self-assessment:\n'+rated.map(sk=>'- '+sk+': '+intakeState.skillLv[sk]).join('\n'); return out.trim(); }
 function intakeDoSave(auto){
@@ -1767,6 +1945,8 @@ function intakeDoSave(auto){
   Object.keys(updates).forEach(k=>{ person.values[k]=updates[k]; });
   if(b.name&&b.name.trim()) person.name=b.name.trim();
   if(intakeState.careerId) person.careerId=intakeState.careerId;
+  { const t=ceText(ceEstimate(intakeState.life)); if(t){ person.values.required_income=t; written.push('required_income'); } }
+  { const t=interestMatchText(person, careerById(person.careerId)); if(t){ person.values.interest_match=t; written.push('interest_match'); } }
   upsert(DB.people, person); intakeState.personId=person.id;
   markDirty(); if(!auto) renderAll();
   const hint=$('#intakeHint'); if(hint) hint.textContent=auto?('Auto-saved ✓ ('+written.length+' fields)'):('Saved to '+pName(person)+' → '+written.join(', '));
@@ -1790,12 +1970,12 @@ $('#histCareerFilter').addEventListener('change', renderHistory);
 $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRawText||'').then(()=>toast('Copied prompt (raw).')));
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
-$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=raw.life||{}; intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderIntake(); });
+$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=intakeMigrateLife(raw.life||{}); intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderIntake(); });
 $('#intakeCareer').addEventListener('change', function(){ intakeState.careerId=this.value; });
 $('#intakeSave').addEventListener('click', ()=>intakeDoSave(false));
 let intakeAutoT=null;
 function intakeScheduleAutoSave(){ if(!intakeState.personId) return; clearTimeout(intakeAutoT); intakeAutoT=setTimeout(()=>intakeDoSave(true), 800); }
-(function(){ const host=$('#intakeBody'); if(host){ ['input','change','click'].forEach(ev=>host.addEventListener(ev, intakeScheduleAutoSave)); } })();
+(function(){ const host=$('#intakeBody'); if(host){ ['input','change','click'].forEach(ev=>host.addEventListener(ev, intakeScheduleAutoSave)); ['input','change'].forEach(ev=>host.addEventListener(ev, intakeRefreshCost)); } })();
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
 $('#btnOnetImport').addEventListener('click', ()=>openOnetPicker());
 $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
