@@ -346,6 +346,7 @@
       <div class="row">
         <select class="inp" id="matchPerson" style="width:auto"></select>
         <select class="inp" id="matchScoreSet" style="width:auto"></select>
+        <select class="inp" id="matchSort" style="width:auto"><option value="r">Sort: best match first</option><option value="az">Sort: title A–Z</option></select>
         <input class="inp" id="matchQuery" placeholder="filter by job title…" style="width:200px">
       </div>
     </div>
@@ -1426,7 +1427,7 @@ let COSTD=null;
 async function hydrateCost(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('cost_data.json'); if(t){ COSTD=JSON.parse(t); renderIntake(); } }catch(e){} }
 
 /* ===================== O*NET matches (in-page, no API) ===================== */
-let ONETI=null; let matchState={personId:'', scoreKey:'', q:'', page:0};
+let ONETI=null; let matchState={personId:'', scoreKey:'', q:'', page:0, sort:'r'};
 async function hydrateMatches(){ if(!(gh.owner&&gh.repo&&gh.token)) return; try{ const t=await ghReadFile('onet/interests.json'); if(t){ ONETI=JSON.parse(t); renderMatches(); } }catch(e){} }
 function pearson(a,b){ const n=Math.min(a.length,b.length); if(n<2) return 0; let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];} const ma=sa/n,mb=sb/n; let num=0,da=0,db=0; for(let i=0;i<n;i++){ const x=a[i]-ma,y=b[i]-mb; num+=x*y; da+=x*x; db+=y*y; } const d=Math.sqrt(da*db); return d?num/d:0; }
 function fitTier(r){ if(r>=0.729) return {label:'Best Fit',cls:'best'}; if(r>=0.608) return {label:'Great Fit',cls:'great'}; if(r>=0) return {label:'Good Fit',cls:'good'}; return null; }
@@ -1523,7 +1524,8 @@ function renderMatches(){
   if(!scores){ host.innerHTML='<div class="warn">⚠ This person has no RIASEC scores in the selected set. Fill the Interest Profile in Intake first.</div>'; return; }
   const tg=computeMatchTiers(scores);
   let rows=[]; for(const soc in ONETI){ const o=ONETI[soc]; const cls=tg.tier[soc]; rows.push({soc,o,r:tg.rBy[soc],tier:{cls,label:TIER_LABEL[cls]}}); }
-  rows.sort((a,b)=>b.r-a.r);
+  if(matchState.sort==='az') rows.sort((a,b)=>a.o.t.localeCompare(b.o.t,'en',{sensitivity:'base'}));
+  else rows.sort((a,b)=>b.r-a.r);
   const counts={best:0,great:0,good:0,poor:0}; rows.forEach(x=>counts[x.tier.cls]++);
   const q=(matchState.q||'').trim().toLowerCase();
   const shown=q?rows.filter(x=>x.o.t.toLowerCase().includes(q)):rows;
@@ -1963,6 +1965,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show
 $$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); if(b.dataset.tab==='matches') renderMatches(); }));
 $('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderMatches(); });
 $('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; matchState.page=0; renderMatches(); });
+$('#matchSort').addEventListener('change', function(){ matchState.sort=this.value; matchState.page=0; renderMatches(); });
 let matchQT=null; $('#matchQuery').addEventListener('input', function(){ matchState.q=this.value; matchState.page=0; clearTimeout(matchQT); matchQT=setTimeout(renderMatches,180); });
 $('#matchBody').addEventListener('click', function(e){ const b=e.target.closest('[data-mp]'); if(!b) return; matchState.page+=(b.dataset.mp==='next'?1:-1); renderMatches(); const h=$('#view-matches'); if(h&&h.scrollIntoView) h.scrollIntoView({behavior:'smooth',block:'start'}); });
 $('#genRecipe').addEventListener('change', buildPicker);
