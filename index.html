@@ -433,7 +433,7 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;
 const prettify=k=>String(k).replace(/[_-]+/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 function renderMarkdown(md){
   if(md==null||md==='') return '<span class="muted">(empty)</span>';
-  const src=esc(md).replace(/&lt;br\s*\/?&gt;/gi,'<br>');
+  const src=esc(String(md).replace(/<!--[\s\S]*?-->\n?/g,'')).replace(/&lt;br\s*\/?&gt;/gi,'<br>');
   const lines=src.split(/\r?\n/);
   const inline=s=>s
     .replace(/`([^`]+)`/g,'<code>$1</code>')
@@ -595,7 +595,7 @@ function normRecipe(r, promptMap){
   const subj=(r.subject==='career'||r.subject==='library')?r.subject:'person';
   const outT=(r.outputTarget==='career'||r.outputTarget==='library')?r.outputTarget:'person';
   const aggs=Array.isArray(r.aggregateInputs)?r.aggregateInputs.filter(a=>a&&a.key&&(a.scope==='person'||a.scope==='career')).map(a=>({scope:a.scope,key:a.key})):[];
-  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', group:r.group||'General', body:body||'', subject:subj, personKeys:personKeys||[], careerKeys:careerKeys||[], libraryKeys:Array.isArray(r.libraryKeys)?r.libraryKeys:[], aggregateInputs:aggs, outputTarget:outT, outputKey:r.outputKey||'', colSelect:(r.colSelect&&typeof r.colSelect==='object')?r.colSelect:{} };
+  return { id:r.id||uid('rc'), title:r.title||'Untitled recipe', group:r.group||'General', body:body||'', subject:subj, personKeys:personKeys||[], careerKeys:careerKeys||[], libraryKeys:Array.isArray(r.libraryKeys)?r.libraryKeys:[], aggregateInputs:aggs, outputTarget:outT, outputKey:r.outputKey||'', colSelect:(r.colSelect&&typeof r.colSelect==='object')?r.colSelect:{}, careerSource:r.careerSource==='pick'?'pick':'linked', outputMode:r.outputMode==='perCareer'?'perCareer':'replace' };
 }
 
 /* ===================== markdown-table column helpers ===================== */
@@ -676,7 +676,7 @@ function renderCounts(){ $('#cntPeople').textContent=DB.people.length; $('#cntCa
 function renderStatus(msg){ const el=$('#dataStatus'); if(msg){ el.textContent=msg; el.className='status-pill'; return; } if(storageFull){ el.textContent='⚠ storage full — Commit now'; el.className='status-pill dirty'; return; } el.textContent=dirty?'● unsaved changes':'✓ saved'; el.className='status-pill'+(dirty?' dirty':''); }
 
 /* ---- generate ---- */
-let genState={recipeId:'', personId:'', careerId:''}; let genPipe=null; let genCurrent=null; let genRawText=''; let genViewMode='rendered';
+let genState={recipeId:'', personId:'', careerId:'', candCareerId:''}; let genPipe=null; let genCurrent=null; let genRawText=''; let genViewMode='rendered';
 function genPipeline(){ return genPipe?DB.pipelines.find(p=>p.id===genPipe.id):null; }
 function genActiveRecipe(){
   if(genPipe){ const p=genPipeline(); if(!p||!p.recipeIds.length) return null; const rid=p.recipeIds[Math.min(genPipe.step,p.recipeIds.length-1)]; return DB.recipes.find(r=>r.id===rid)||null; }
@@ -715,13 +715,43 @@ function buildPicker(){
     const cs=$('#genCareerSel'); if(DB.careers.some(c=>c.id===genState.careerId)) cs.value=genState.careerId;
     cs.addEventListener('change',()=>{ genState.careerId=cs.value; computeGen(); });
   } else {
-    title.textContent='2 · Pick a person';
-    area.innerHTML='<select class="inp" id="genPersonSel"><option value="">— select person —</option>'+DB.people.map(p=>`<option value="${p.id}">${esc(pName(p))}</option>`).join('')+'</select>';
+    const rc=genActiveRecipe(); const cand=!!(rc&&rc.careerSource==='pick');
+    title.textContent=cand?'2 · Pick a person + candidate career':'2 · Pick a person';
+    area.innerHTML='<select class="inp" id="genPersonSel"><option value="">— select person —</option>'+DB.people.map(p=>`<option value="${p.id}">${esc(pName(p))}</option>`).join('')+'</select>'+
+      (cand?'<div style="height:8px"></div><div class="row" style="gap:6px"><select class="inp" id="genCandSel" style="flex:1"></select><button class="bb g sm" onclick="genFindOnet()" title="Search the 923-occupation O*NET catalog">⬇ Find in O*NET</button></div><div class="help-hint">Candidate career is used for this prompt only — it is not linked to the person.</div>':'');
     const ps=$('#genPersonSel'); if(DB.people.some(p=>p.id===genState.personId)) ps.value=genState.personId;
-    ps.addEventListener('change',()=>{ genState.personId=ps.value; computeGen(); });
+    ps.addEventListener('change',()=>{ genState.personId=ps.value; if(cand) fillCandSel(); computeGen(); });
+    if(cand) fillCandSel();
   }
   computeGen();
 }
+function careerBySoc(soc){ const tail='-'+String(soc).replace(/\./g,'-'); return DB.careers.find(c=>c.id.endsWith(tail))||DB.careers.find(c=>(c.title||'').indexOf(soc)>=0); }
+async function onetEnsureCareer(soc){
+  const ex=careerBySoc(soc); if(ex) return ex.id;
+  if(!(gh.owner&&gh.repo&&gh.token)){ toast('Set GitHub in ⚙ first.'); return ''; }
+  try{
+    const rec=JSON.parse(await ghReadFile('onet/'+soc+'.json'));
+    const clean=(rec.career_title||soc).replace(/\s+\d{2}-\d{4}\.\d{2}$/,''); const id=onetCareerId(clean,soc);
+    const vals={}; DB.careerFields.forEach(f=>{ if(rec[f.key]!=null) vals[f.key]=rec[f.key]; });
+    DB.careers.push({id, title:rec.career_title||clean, starred:false, values:valuesFor(DB.careerFields,vals)});
+    markDirty(); toast('Downloaded '+(rec.career_title||soc)+' from O*NET.'); return id;
+  }catch(e){ alert('Could not download '+soc+' from the O*NET catalog:\n'+e.message); return ''; }
+}
+function fillCandSel(){
+  const sel=$('#genCandSel'); if(!sel) return;
+  const p=personById(genState.personId); const t3=String((p&&p.values&&p.values.top_3_choices)||'');
+  const seen=new Set(), top=[];
+  t3.split(/\r?\n/).forEach(line=>{ const m=line.match(/^\s*\d+\.\s*(.*?)\s*\((\d{2}-\d{4}\.\d{2})\)\s*$/); if(!m) return; const c=careerBySoc(m[2]); if(c){ if(!seen.has(c.id)){ seen.add(c.id); top.push(c); } } else top.push({soc:m[2], title:m[1]}); });
+  const opt=c=>`<option value="${c.id}">${c.starred?'★ ':''}${esc(cName(c))}</option>`;
+  let h='<option value="">— select candidate career —</option>';
+  if(top.length) h+='<optgroup label="Top 3 choices">'+top.map(t=>t.id?opt(t):`<option value="soc:${esc(t.soc)}">⬇ ${esc(t.title||t.soc)} (${esc(t.soc)}) — download</option>`).join('')+'</optgroup>';
+  h+='<optgroup label="All careers">'+DB.careers.filter(c=>!seen.has(c.id)).map(opt).join('')+'</optgroup>';
+  sel.innerHTML=h;
+  if(DB.careers.some(c=>c.id===genState.candCareerId)) sel.value=genState.candCareerId;
+  sel.onchange=async()=>{ const v=sel.value; if(v.indexOf('soc:')===0){ const id=await onetEnsureCareer(v.slice(4)); if(id){ genState.candCareerId=id; renderAll(); } else fillCandSel(); return; } genState.candCareerId=v; computeGen(); };
+}
+let onetPickTarget='';
+window.genFindOnet=function(){ onetPickTarget='gen'; openOnetPicker(); };
 function updateSaveLabel(){ const b=$('#btnSaveOutput'); if(b) b.textContent=genPipe?'Save & next ▶':'Save output'; }
 function renderStepBar(recipe){
   const bar=$('#genStepBar'); if(!bar) return;
@@ -742,18 +772,21 @@ function computeGen(){
   let person=null, career=null;
   if(subject==='library'){ cn.textContent=''; }
   else if(subject==='career'){ career=careerById(genState.careerId); cn.textContent=''; }
+  else if(recipe.careerSource==='pick'){ person=personById(genState.personId); career=careerById(genState.candCareerId);
+    cn.innerHTML = career?('Candidate career: <b>'+esc(cName(career))+'</b> <span class="muted">(not linked to the person)</span>'):'<span style="color:#b91c1c">Pick a candidate career.</span>'; }
   else { person=personById(genState.personId); career=person?careerById(person.careerId):null;
     cn.innerHTML = person ? (career?('Linked career: <b>'+esc(cName(career))+'</b>'):'<span style="color:#b91c1c">No linked career; career fields will be empty.</span>') : ''; }
   const {prompt:text, missing}=assembleRecipe(recipe, person, career);
   genRawText=text; renderGenPreview();
   let warn='';
-  if(subject==='career'){ if(!career) warn+='Pick a career. '; } else if(subject==='person'){ if(!person) warn+='Pick a person. '; }
+  if(subject==='career'){ if(!career) warn+='Pick a career. '; } else if(subject==='person'){ if(!person) warn+='Pick a person. '; if(recipe.careerSource==='pick'&&!career) warn+='Pick a candidate career. '; }
   if(recipe.outputTarget==='career' && !career) warn+='No career to save the output into. ';
   if(recipe.outputTarget==='person' && !person) warn+='No person to save the output into. ';
   if(missing.length) warn+='Empty field(s): '+missing.join(', ')+'.';
   $('#genWarn').innerHTML=warn?`<div class="warn">⚠ ${esc(warn)}</div>`:'';
   const destName=recipe.outputTarget==='career'?(career&&cName(career)):recipe.outputTarget==='person'?(person&&pName(person)):'the library';
   $('#genOutDest').innerHTML = recipe.outputKey ? ('Saving will write to '+esc(recipe.outputTarget)+' field <code class="tok">'+esc(recipe.outputKey)+'</code>'+(destName?' on <b>'+esc(destName)+'</b>':'')+'.') : 'This recipe has no output field set (Recipes tab).';
+  if(recipe.outputMode==='perCareer'&&recipe.outputTarget==='person'&&recipe.outputKey) $('#genOutDest').innerHTML+=' Only the section for <b>'+esc(career?cName(career):'the chosen career')+'</b> is replaced; other careers\' sections are kept.';
   genCurrent={recipe, person, career};
 }
 function renderGenPreview(placeholder){
@@ -954,6 +987,7 @@ window.importOnet=async function(soc){
     const existing=DB.careers.find(c=>c.id===id);
     if(existing){ existing.title=rec.career_title||cleanTitle; Object.assign(existing.values,vals); }
     else { DB.careers.push({id, title:rec.career_title||cleanTitle, values:valuesFor(DB.careerFields,vals)}); }
+    if(onetPickTarget==='gen'){ onetPickTarget=''; genState.candCareerId=id; hideOverlay('onetOverlay'); }
     markDirty(); renderAll();
     toast((existing?'Updated ':'Added ')+(rec.career_title||cleanTitle));
     renderOnetList($('#onetSearch').value);
@@ -1021,9 +1055,14 @@ window.openRecipe=function(id){
     <div class="row">
       <select class="inp" id="rcOutTarget" style="max-width:160px"><option value="person">person</option><option value="career">career</option><option value="library">library</option></select>
       <select class="inp" id="rcOutKey"></select>
+    </div>
+    <div class="grid2" id="rcCandBlock" style="margin-top:12px">
+      <div><label class="fld">Career for this person recipe</label><select class="inp" id="rcCareerSource"><option value="linked">Person's linked career</option><option value="pick">Pick at generate time (candidate career)</option></select><div class="help-hint">Candidate: the career is chosen in Generate and is <b>not</b> linked to the person — for prompts shown while they are still choosing.</div></div>
+      <div><label class="fld">When saving the output</label><select class="inp" id="rcOutputMode"><option value="replace">Overwrite the field</option><option value="perCareer">Keep one section per career</option></select><div class="help-hint">Per career: saving updates only this career's section of the person field, so comments for different careers don't overwrite each other.</div></div>
     </div>`;
   $('#rcOutTarget').value=r.outputTarget; $('#rcSubject').value=editCtx.draft.subject;
-  const applySubject=()=>{ const s=editCtx.draft.subject; $('#rcPersonBlock').style.display=s==='person'?'':'none'; $('#rcCareerBlock').style.display=s==='library'?'none':''; };
+  $('#rcCareerSource').value=r.careerSource||'linked'; $('#rcOutputMode').value=r.outputMode||'replace';
+  const applySubject=()=>{ const s=editCtx.draft.subject; $('#rcPersonBlock').style.display=s==='person'?'':'none'; $('#rcCareerBlock').style.display=s==='library'?'none':''; $('#rcCandBlock').style.display=s==='person'?'':'none'; };
   $('#rcSubject').addEventListener('change', ()=>{ editCtx.draft.subject=$('#rcSubject').value; applySubject(); renderColSelect(); });
   $('#rcOutTarget').addEventListener('change', ()=>{ editCtx.draft.outputTarget=$('#rcOutTarget').value; renderOutKey(); });
   renderRecipeFields('person'); renderRecipeFields('career'); renderRecipeFields('library'); renderAggFields(); renderColSelect(); renderOutKey(); $('#rcOutKey').value=r.outputKey; applySubject();
@@ -1141,7 +1180,7 @@ $('#editSave').addEventListener('click', ()=>{
       const included=w==='person'?pKeys:w==='library'?libKeys:cKeys; if(included.indexOf(fk)<0) return;
       const all=fieldColumns(w,fk); const kept=(d.colSelect[csKey]||[]).filter(c=>all.indexOf(c)>=0);
       if(kept.length && kept.length<all.length) colSel[csKey]=kept; });
-    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, body:$('#rcBody').value, subject, personKeys:pKeys, careerKeys:cKeys, libraryKeys:libKeys, aggregateInputs:(d.aggregateInputs||[]).map(a=>({scope:a.scope,key:a.key})), outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value, colSelect:colSel});
+    upsert(DB.recipes,{id:editCtx.id||uid('rc'), title:$('#rcTitle').value.trim()||'Untitled recipe', group:g, body:$('#rcBody').value, subject, personKeys:pKeys, careerKeys:cKeys, libraryKeys:libKeys, aggregateInputs:(d.aggregateInputs||[]).map(a=>({scope:a.scope,key:a.key})), outputTarget:$('#rcOutTarget').value, outputKey:$('#rcOutKey').value, colSelect:colSel, careerSource:subject==='person'?$('#rcCareerSource').value:'linked', outputMode:subject==='person'?$('#rcOutputMode').value:'replace'});
   } else if(k==='pipeline'){
     upsert(DB.pipelines,{id:editCtx.id||uid('pl'), title:$('#plTitle').value.trim()||'Untitled pipeline', subject:$('#plSubject').value, recipeIds:[...editCtx.draft.recipeIds]});
   }
@@ -1279,6 +1318,16 @@ $('#schemaSave').addEventListener('click', ()=>{
 });
 
 /* ===================== generate actions ===================== */
+/* per-career sections inside one text field: each starts with a hidden "<!-- career:<id> -->" marker */
+const CAREER_MARK=/(?=<!-- career:[^\s>]+ -->)/;
+function careerSectionExists(text, id){ return String(text||'').indexOf('<!-- career:'+id+' -->')>=0; }
+function upsertCareerSection(text, career, body){
+  const block='<!-- career:'+career.id+' -->\n## '+cName(career)+'\n\n'+String(body).trim();
+  let found=false;
+  const parts=String(text||'').split(CAREER_MARK).map(p=>{ const m=p.match(/^<!-- career:([^\s>]+) -->/); if(m&&m[1]===career.id){ found=true; return block; } return p.trim(); }).filter(Boolean);
+  if(!found) parts.push(block);
+  return parts.join('\n\n');
+}
 $('#btnSaveOutput').addEventListener('click', ()=>{
   if(!genCurrent||!genCurrent.recipe){ toast('Pick a recipe first.'); return; }
   const {recipe,person,career}=genCurrent;
@@ -1289,8 +1338,15 @@ $('#btnSaveOutput').addEventListener('click', ()=>{
   if(!dest){ toast('No '+recipe.outputTarget+' to save into.'); return; }
   const destName=recipe.outputTarget==='career'?cName(career):recipe.outputTarget==='library'?'the library':pName(person);
   const prevVal=dest.values[recipe.outputKey];
-  if(prevVal && String(prevVal).trim() && !confirm('"'+recipe.outputKey+'" on '+destName+' already has a value.\n\nThe previous value is kept in History regardless. Overwrite the live field? (Downstream recipes will then use this new value.)')) return;
-  dest.values[recipe.outputKey]=out;
+  const perCareer=recipe.outputMode==='perCareer' && recipe.outputTarget==='person';
+  if(perCareer){
+    if(!career){ toast('Pick a career — this recipe keeps one section per career.'); return; }
+    if(careerSectionExists(prevVal, career.id) && !confirm('"'+recipe.outputKey+'" on '+destName+' already has a section for '+cName(career)+'.\n\nThe previous value is kept in History regardless. Replace that section? (Other careers\' sections are kept.)')) return;
+    dest.values[recipe.outputKey]=upsertCareerSection(prevVal, career, out);
+  } else {
+    if(prevVal && String(prevVal).trim() && !confirm('"'+recipe.outputKey+'" on '+destName+' already has a value.\n\nThe previous value is kept in History regardless. Overwrite the live field? (Downstream recipes will then use this new value.)')) return;
+    dest.values[recipe.outputKey]=out;
+  }
   const {prompt}=assembleRecipe(recipe, person, career);
   HISTORY.push({ id:uid('h'), createdAt:new Date().toISOString().slice(0,16).replace('T',' '), by:gh.uploader||'',
     recipeId:recipe.id, recipeTitle:recipe.title, personId:person&&person.id, personName:person?pName(person):'',
@@ -2044,7 +2100,7 @@ let intakeAutoT=null;
 function intakeScheduleAutoSave(){ if(!intakeState.personId) return; clearTimeout(intakeAutoT); intakeAutoT=setTimeout(()=>intakeDoSave(true), 800); }
 (function(){ const host=$('#intakeBody'); if(host){ ['input','change','click'].forEach(ev=>host.addEventListener(ev, intakeScheduleAutoSave)); ['input','change'].forEach(ev=>host.addEventListener(ev, intakeRefreshCost)); } })();
 $('#btnAddCareer').addEventListener('click', ()=>openEntity('careers',null));
-$('#btnOnetImport').addEventListener('click', ()=>openOnetPicker());
+$('#btnOnetImport').addEventListener('click', ()=>{ onetPickTarget=''; openOnetPicker(); });
 $('#btnPersonGroups').addEventListener('click', ()=>openGroups('person'));
 $('#btnCareerGroups').addEventListener('click', ()=>openGroups('career'));
 $('#btnLibraryGroups').addEventListener('click', ()=>openGroups('library'));
