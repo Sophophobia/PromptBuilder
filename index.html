@@ -27,7 +27,7 @@
   .starbtn{font-size:16px; line-height:1; padding:3px 9px; color:var(--ink-200); border-color:var(--ink-200)}
   .starbtn:hover{color:#e0a415; border-color:#e0a415; background:rgba(224,164,21,.08)}
   .starbtn.on{color:#f5a623; border-color:#f5a623; background:rgba(245,166,35,.12)}
-  .intake-toc{position:fixed; top:120px; left:16px; width:184px; z-index:40; background:var(--surface); border:1px solid var(--ink-200); border-radius:12px; padding:10px 8px; box-shadow:0 4px 18px rgba(0,0,0,.06)}
+  .intake-toc{position:fixed; top:160px; left:16px; width:184px; z-index:40; background:var(--surface); border:1px solid var(--ink-200); border-radius:12px; padding:10px 8px; box-shadow:0 4px 18px rgba(0,0,0,.06)}
   .intake-toc .toc-h{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-600); padding:2px 8px 6px}
   .intake-toc a{display:block; padding:6px 8px; border-radius:8px; font-size:13px; color:var(--ink-600); text-decoration:none; line-height:1.25}
   .intake-toc a:hover{background:rgba(164,30,26,.07); color:var(--red-700)}
@@ -55,6 +55,13 @@
   nav.tabs button.active{color:var(--red-700); border-bottom-color:var(--red-700)}
   nav.tabs button:hover{color:var(--ink-700)}
   nav.tabs .count{font-size:11px; background:var(--surface-2); color:var(--ink-500); border-radius:999px; padding:1px 7px; margin-left:6px}
+  .navwrap{position:sticky; top:53px; z-index:30}
+  .navwrap nav.tabs{position:static}
+  nav.subtabs{display:flex; gap:2px; padding:6px 22px; background:var(--surface-2); border-bottom:1px solid var(--ink-200); flex-wrap:wrap}
+  nav.subtabs button{background:none; border:none; padding:6px 13px; border-radius:8px; font-weight:600; font-size:13px; color:var(--ink-500)}
+  nav.subtabs button:hover{color:var(--ink-700); background:rgba(0,0,0,.04)}
+  nav.subtabs button.active{color:var(--red-700); background:var(--surface); box-shadow:0 0 0 1px var(--ink-200)}
+  nav.subtabs .count{font-size:11px; background:var(--surface-2); color:var(--ink-500); border-radius:999px; padding:1px 7px; margin-left:6px}
 
   main{max-width:1180px; margin:0 auto; padding:22px}
   .view{display:none} .view.active{display:block}
@@ -236,17 +243,25 @@
   <button class="bb n sm" onclick="if(confirm('Discard your local unsaved changes and reload the latest from the repo?')){try{localStorage.removeItem(LS_DB);localStorage.removeItem(LS_HIST);}catch(e){} loadInitial(false);}">↻ Reload (discard mine)</button>
 </div>
 
-<nav class="tabs">
-  <button data-tab="generate" class="active">Generate</button>
-  <button data-tab="people">People <span class="count" id="cntPeople">0</span></button>
-  <button data-tab="intake">Intake</button>
-  <button data-tab="matches">Matches</button>
-  <button data-tab="careers">Careers <span class="count" id="cntCareers">0</span></button>
-  <button data-tab="library">Library <span class="count" id="cntLibrary">0</span></button>
-  <button data-tab="recipes">Recipes <span class="count" id="cntRecipes">0</span></button>
-  <button data-tab="pipelines">Pipelines <span class="count" id="cntPipelines">0</span></button>
-  <button data-tab="history">History <span class="count" id="cntHistory">0</span></button>
+<div class="navwrap">
+<nav class="tabs" id="navGroups">
+  <button data-group="run" class="active">Run</button>
+  <button data-group="people">People</button>
+  <button data-group="data">Data</button>
+  <button data-group="prompts">Prompts</button>
 </nav>
+<nav class="subtabs" id="navSub">
+  <button data-group="run" data-tab="generate" class="active">Generate</button>
+  <button data-group="run" data-tab="history">History <span class="count" id="cntHistory">0</span></button>
+  <button data-group="people" data-tab="people">People <span class="count" id="cntPeople">0</span></button>
+  <button data-group="people" data-tab="intake">Intake</button>
+  <button data-group="people" data-tab="matches">Matches</button>
+  <button data-group="data" data-tab="careers">Careers <span class="count" id="cntCareers">0</span></button>
+  <button data-group="data" data-tab="library">Library <span class="count" id="cntLibrary">0</span></button>
+  <button data-group="prompts" data-tab="recipes">Recipes <span class="count" id="cntRecipes">0</span></button>
+  <button data-group="prompts" data-tab="pipelines">Pipelines <span class="count" id="cntPipelines">0</span></button>
+</nav>
+</div>
 
 <main>
   <section class="view active" id="view-generate">
@@ -2210,7 +2225,19 @@ function hideOverlay(id){ $('#'+id).classList.remove('show'); }
 $$('[data-close]').forEach(b=>b.addEventListener('click', e=>e.target.closest('.overlay').classList.remove('show')));
 $$('.overlay').forEach(o=>{ o.addEventListener('mousedown', e=>{ o._downSelf=(e.target===o); }); o.addEventListener('click', e=>{ if(e.target===o && o._downSelf) o.classList.remove('show'); }); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.overlay.show').forEach(o=>o.classList.remove('show')); });
-$$('nav.tabs button').forEach(b=>b.addEventListener('click', ()=>{ $$('nav.tabs button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+b.dataset.tab).classList.add('active'); if(b.dataset.tab==='matches') renderMatches(); }));
+/* two-level nav: a group row, then that group's tabs; each group remembers its last tab */
+const TAB_LAST={run:'generate', people:'people', data:'careers', prompts:'recipes'};
+function showTab(tab){
+  const sb=document.querySelector('#navSub button[data-tab="'+tab+'"]'); if(!sb) return;
+  const g=sb.dataset.group; TAB_LAST[g]=tab;
+  $$('#navGroups button').forEach(x=>x.classList.toggle('active', x.dataset.group===g));
+  $$('#navSub button').forEach(x=>{ x.style.display=x.dataset.group===g?'':'none'; x.classList.toggle('active', x.dataset.tab===tab); });
+  $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+tab).classList.add('active');
+  if(tab==='matches') renderMatches();
+}
+$$('#navGroups button').forEach(b=>b.addEventListener('click', ()=>showTab(TAB_LAST[b.dataset.group])));
+$$('#navSub button').forEach(b=>b.addEventListener('click', ()=>showTab(b.dataset.tab)));
+$$('#navSub button').forEach(b=>{ if(b.dataset.group!=='run') b.style.display='none'; });
 $('#matchPerson').addEventListener('change', function(){ matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderMatches(); });
 $('#matchScoreSet').addEventListener('change', function(){ matchState.scoreKey=this.value; matchState.page=0; renderMatches(); });
 $('#matchSort').addEventListener('change', function(){ matchState.sort=this.value; matchState.page=0; renderMatches(); });
