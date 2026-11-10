@@ -1531,7 +1531,7 @@ $('#saveSettings').addEventListener('click', ()=>{ gh={ owner:$('#ghOwner').valu
 const US_STATES=['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
 let INTAKE=null; let intakeState=null;
 function pfBlank(){ return {topic:'',pain:'',success:'',inScope:[''],outScope:[],stages:[{name:'',detail:'',covers:[]}]}; }
-function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'custom', riasecCat:'realistic', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], skillLv:{}, top3:['','',''], pf:pfBlank() }; }
+function intakeBlank(){ return { personId:'', careerId:'', riasecSet:'custom', riasecCat:'realistic', scoreSrc:'onet', quiz:{onet:{},custom:{}}, basic:{}, life:{}, barriers:{}, barrierComment:'', exp:[], jobs:[], skillLv:{}, skillNames:{}, prerateText:'', licenses:[], licState:'', top3:['','',''], pf:pfBlank() }; }
 const INTAKE_SECTIONS=[['sec-basic','1 · Basic info'],['sec-riasec','2 · Interest (RIASEC)'],['sec-skills','3 · Skills & Experience'],['sec-life','4 · Lifestyle'],['sec-barriers','5 · Career Barriers'],['sec-top3','6 · Top 3 Choices'],['sec-preflight','7 · Project Blueprint']];
 window.intakeGoto=function(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
 let onetIndexLoading=false;
@@ -1683,7 +1683,6 @@ function coreCapsFromCanon(text){
   return out;
 }
 function careersWithCanon(){ return DB.careers.filter(c=>coreCapsFromCanon(c.values&&c.values.canon).length); }
-function intakeCoreSkills(){ const seen=new Set(), out=[]; intakeState.exp.forEach(e=>{ const c=careerById(e.careerId); if(!c) return; coreCapsFromCanon(c.values&&c.values.canon).forEach(nm=>{ const k=nm.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(nm); } }); }); return out; }
 
 const RIASEC_MAP={realistic:'R',investigative:'I',artistic:'A',social:'S',enterprising:'E',conventional:'C'};
 function riasecScores(set){ const r=INTAKE&&INTAKE.riasec; if(!r) return null; const qs=(r.sets&&r.sets[set]&&r.sets[set].questions)||[]; const ans=intakeState.quiz[set]||{}; if(!qs.length) return null; if(qs.filter(q=>ans[q.index]!=null).length<qs.length) return null; const s={R:0,I:0,A:0,S:0,E:0,C:0}; qs.forEach(q=>{ const c=RIASEC_MAP[q.area]; if(c!=null&&ans[q.index]!=null) s[c]+=(ans[q.index]-1); }); return s; }
@@ -1910,23 +1909,140 @@ window.intakeQuizCat=function(a){ intakeState.riasecCat=a; renderIntake(); };
 window.intakeQuiz=function(set,idx,val){ (intakeState.quiz[set]=intakeState.quiz[set]||{})[idx]=val; renderIntake(); };
 window.intakeScoreSrc=function(s){ intakeState.scoreSrc=s; };
 
+/* ---- 3 · Skills & Experience ----
+   work history (typed by the person) -> each job matched to an O*NET occupation (code/embeddings in the
+   product; picked here) -> candidate skills (Table 2 rows + Table 1 rungs) -> AI pre-rating
+   (Experience-Based Skill Pre-Rating) -> the person confirms levels -> existing_skills. Plus licences held. */
+const SKILL_LVLS=['None','Beginner','Intermediate','Advanced'];
+function jobBlank(ref){ return {ref, title:'', employer:'', start:'', end:'', current:false, description:'', soc:''}; }
+function nextJobRef(){ const used=new Set((intakeState.jobs||[]).map(j=>j.ref)); let n=1; while(used.has('j'+n)) n++; return 'j'+n; }
+function socFromCareer(c){ if(!c) return ''; const m=(c.title||'').match(/\d{2}-\d{4}\.\d{2}/); if(m) return m[0]; const k=(c.id||'').match(/(\d{2})-(\d{4})-(\d{2})$/); return k?(k[1]+'-'+k[2]+'.'+k[3]):''; }
+function intakeMigrateJobs(raw){
+  if(Array.isArray(raw.jobs)) return raw.jobs.map((j,i)=>Object.assign(jobBlank(j.ref||('j'+(i+1))), j));
+  // legacy: exp = [{careerId, level}] or [{soc, title, level}] (occupation picked, no description)
+  return (Array.isArray(raw.exp)?raw.exp:[]).map((e,i)=>{ const c=e.careerId?careerById(e.careerId):null; const soc=e.soc||socFromCareer(c);
+    const title=e.title||(c?cName(c).replace(/\s+\d{2}-\d{4}\.\d{2}.*$/,''):''); return Object.assign(jobBlank('j'+(i+1)), {title, soc, level:e.level||''}); });
+}
+function parseSkillNames(txt){ const m={}; String(txt||'').split(/\r?\n/).forEach(l=>{ const x=l.match(/^\s*-\s*(.+?)\s*\((G\d+)\)\s*:/); if(x) m[x[2]]=x[1]; }); return m; }
+function jobDuration(j){
+  const p=s=>{ const m=String(s||'').match(/^(\d{4})-(\d{2})/); return m?[+m[1],+m[2]]:null; };
+  const a=p(j.start); if(!a) return '';
+  let b=j.current?null:p(j.end); if(!b){ if(!j.current) return ''; const d=new Date(); b=[d.getFullYear(), d.getMonth()+1]; }
+  const n=(b[0]-a[0])*12+(b[1]-a[1])+1; if(!(n>0)) return '';
+  const y=Math.floor(n/12), r=n%12; return [y?y+(y>1?' yrs':' yr'):'', r?r+' mo':''].filter(Boolean).join(' ');
+}
+let onetRecCache={};
+function ensureJobRecs(){
+  if(!(gh.owner&&gh.repo&&gh.token)) return;
+  const need=[...new Set((intakeState.jobs||[]).map(j=>j.soc).filter(s=>s&&!onetRecCache[s]))]; if(!need.length) return;
+  need.forEach(s=>{ onetRecCache[s]={_loading:true}; });
+  Promise.all(need.map(async s=>{ try{ onetRecCache[s]=JSON.parse(await ghReadFile('onet/'+s+'.json')); }catch(e){ onetRecCache[s]={_err:String(e.message||e)}; } })).then(()=>renderIntake());
+}
+function parseReqTable(md){ const out=[]; String(md||'').split(/\r?\n/).forEach(l=>{ const c=l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(s=>s.trim()); if(/^G\d+$/.test(c[0]||'')) out.push({id:c[0], name:c[1], core:c[2]==='yes', entry:c[3], mid:c[4], senior:c[5], description:c[6]||''}); }); return out; }
+let t1Cache={src:null, map:{}};
+function t1Row(gid){
+  const src=(DB.library&&DB.library.values&&DB.library.values.capability_library)||'';
+  if(t1Cache.src!==src){ const m={}; src.split(/\r?\n/).forEach(l=>{ if(l.indexOf('| G')!==0) return; const c=l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(s=>s.trim()); m[c[0]]={name:c[1], definition:c[2], beginner:c[6]||'', intermediate:c[7]||'', advanced:c[8]||''}; }); t1Cache={src, map:m}; }
+  return t1Cache.map[gid]||null;
+}
+function intakeCandidates(){
+  const map={}, order=[]; const rung=v=>(v&&v!=='—')?v:'';
+  (intakeState.jobs||[]).forEach(j=>{ const rec=j.soc&&onetRecCache[j.soc]; if(!rec||rec._loading||rec._err) return;
+    parseReqTable(rec.skill_requirements).forEach(r=>{
+      if(!map[r.id]){ const t=t1Row(r.id); map[r.id]={skill_id:r.id, name:r.name, definition:r.description, rungs:t?{Beginner:t.beginner, Intermediate:t.intermediate, Advanced:t.advanced}:{}, sources:[]}; order.push(r.id); }
+      map[r.id].sources.push({job_ref:j.ref, occupation:rec.career_title||j.soc, is_core:r.core?'yes':'no', entry_rung:rung(r.entry), mid_rung:rung(r.mid), senior_rung:rung(r.senior)}); }); });
+  return order.map(id=>map[id]);
+}
+function parsePrerate(txt){ const s=String(txt||''); const a=s.indexOf('{'), b=s.lastIndexOf('}'); if(a<0||b<a) return null;
+  try{ const o=JSON.parse(s.slice(a,b+1)); const sk={}; (o.skills||[]).forEach(x=>{ if(x&&x.skill_id!=null){ const id=/^G/.test(String(x.skill_id))?String(x.skill_id):'G'+x.skill_id; sk[id]=x; } }); return {jobs:o.jobs||[], skills:sk}; }catch(e){ return null; } }
+function skillName(id){ return (intakeState.skillNames&&intakeState.skillNames[id])||((t1Row(id)||{}).name)||id; }
 function intakeSkillsHTML(){
-  const cwc=careersWithCanon(); const lvls=(INTAKE.skills&&INTAKE.skills.levels)||['None','Beginner','Intermediate','Advanced']; const exps=(INTAKE.skills&&INTAKE.skills.experienceLevels)||['Entry','Mid','Senior'];
-  let h='<div class="help-hint" style="margin-top:0">Add occupations the person has worked in; their canon core skills combine (shared shown once) for self-rating. Skill names use the canon capability name for now.</div>';
-  h+=`<div class="row" style="margin:8px 0;flex-wrap:wrap"><select class="inp" id="ikExpOcc" style="max-width:320px"><option value="">Select an occupation…</option>`+cwc.map(c=>`<option value="${c.id}">${esc(cName(c))}</option>`).join('')+`</select><select class="inp" id="ikExpLv" style="max-width:200px"><option value="">Experience level…</option>`+exps.map(e=>`<option value="${esc(e)}">${esc(e)}</option>`).join('')+`</select><button class="bb n sm" onclick="intakeAddExp()">+ Add</button></div>`;
-  if(!cwc.length) h+='<div class="muted small">No careers have a canon yet — generate canons first.</div>';
-  h+='<div class="chips">'+intakeState.exp.map((e,i)=>{ const c=careerById(e.careerId); return `<span class="chip">${esc(c?cName(c):e.careerId)} · ${esc(e.level)} <a href="#" onclick="intakeRmExp(${i});return false" style="color:#b91c1c;text-decoration:none">✕</a></span>`; }).join('')+'</div>';
-  const skills=intakeCoreSkills();
-  if(skills.length){
-    h+=`<div style="margin-top:12px;overflow-x:auto"><div class="srow" style="grid-template-columns:1fr repeat(${lvls.length},92px);font-weight:700;color:var(--ink-600)"><div>Skill</div>`+lvls.map(l=>`<div style="text-align:center">${esc(l)}</div>`).join('')+`</div>`;
-    h+=skills.map(sk=>{ const cur=intakeState.skillLv[sk]||''; const nm=sk.replace(/[^a-z0-9]/gi,''); return `<div class="srow" style="grid-template-columns:1fr repeat(${lvls.length},92px)"><div>${esc(sk)}</div>`+lvls.map(l=>`<div style="text-align:center"><input type="radio" name="iksk-${nm}" ${cur===l?'checked':''} onchange="intakeSkillLv(${esc(JSON.stringify(sk))},${esc(JSON.stringify(l))})"></div>`).join('')+`</div>`; }).join('');
+  ensureJobRecs(); if(!onetIndex) ensureOnetIndex();
+  const jobs=intakeState.jobs||(intakeState.jobs=[]);
+  let h='<div class="help-hint" style="margin-top:0">The person describes each job in their own words. Each job is matched to an O*NET occupation (done in code in the product; picked here), which supplies the <b>candidate skills</b>. The <b>Experience-Based Skill Pre-Rating</b> AI suggests levels from the descriptions, and the person confirms or changes them in the self-rating table.</div>';
+  h+='<div class="pf-scope-h" style="margin-top:6px">Work history → <code class="tok">work_history</code></div>';
+  h+=jobs.map((j,i)=>{
+    const occ=j.soc?((((onetIndex||[]).find(r=>r.soc===j.soc)||{}).title||'')+' ('+j.soc+')').trim():'';
+    const rec=j.soc&&onetRecCache[j.soc]; const n=rec&&!rec._loading&&!rec._err?parseReqTable(rec.skill_requirements).length:0;
+    const note=!j.soc?'Not matched yet — pick the closest O*NET occupation.':(!rec||rec._loading)?'Loading occupation data…':rec._err?'Could not load this occupation.':(n?n+' candidate skills from Table 2':'No Table 2 skills for this occupation (out of scope) — it adds no candidates.');
+    return `<div class="card pad" style="box-shadow:none;margin-bottom:8px">
+      <div class="row" style="gap:6px"><span class="chip">${esc(j.ref)}</span><input class="inp" style="flex:2" placeholder="Job title, as they would write it" value="${esc(j.title)}" oninput="intakeJob(${i},'title',this.value)"><input class="inp" style="flex:1" placeholder="Employer" value="${esc(j.employer)}" oninput="intakeJob(${i},'employer',this.value)"><button class="bb g sm" title="Remove this job" onclick="intakeRmJob(${i})">✕</button></div>
+      <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center"><span class="muted small">Start</span><input class="inp" type="month" style="width:auto" value="${esc(j.start)}" onchange="intakeJob(${i},'start',this.value,1)"><span class="muted small">End</span><input class="inp" type="month" style="width:auto" value="${esc(j.end)}" ${j.current?'disabled':''} onchange="intakeJob(${i},'end',this.value,1)"><label class="small"><input type="checkbox" ${j.current?'checked':''} onchange="intakeJob(${i},'current',this.checked,1)"> current</label><span class="muted small">${esc(jobDuration(j))}${j.level?' · legacy level: '+esc(j.level):''}</span></div>
+      <textarea class="inp" style="margin-top:6px" placeholder="What they actually did in this job, in their own words…" oninput="intakeJob(${i},'description',this.value)">${esc(j.description)}</textarea>
+      <div class="combo" style="margin-top:6px;max-width:620px"><div style="display:flex;gap:6px;align-items:center"><span class="muted small" style="white-space:nowrap">Matched occupation</span><input class="inp" id="ikjob-in-${i}" autocomplete="off" placeholder="Type to search O*NET occupations…" value="${esc(occ)}" oninput="intakeJobOccFilter(${i},this.value)" onfocus="intakeJobOccFilter(${i},this.value)" onblur="intakeJobOccBlur(${i})" style="flex:1">${j.soc?`<button class="bb g sm" title="Clear the match" onclick="intakeJobOccPick(${i},'')">✕</button>`:''}</div><div id="ikjob-list-${i}" class="combo-list" style="display:none"></div></div>
+      <div class="muted small" style="margin-top:4px">${esc(note)}</div>
+    </div>`; }).join('');
+  h+='<button class="bb n sm" onclick="intakeAddJob()">+ Add job</button>';
+
+  const cands=intakeCandidates();
+  h+=`<div class="pf-scope-h" style="margin-top:16px">Candidate skills → <code class="tok">candidate_skills</code></div><div class="muted small">${cands.length?cands.length+' skill(s) from the matched occupation(s), each with its Table 1 rungs and Table 2 sources; written on Save.':'Match at least one job to an occupation to build the candidate list.'}</div>`;
+
+  const pr=parsePrerate(intakeState.prerateText);
+  const cnt=pr?Object.values(pr.skills).reduce((a,x)=>{ a[x.status]=(a[x.status]||0)+1; return a; },{}):null;
+  h+=`<div class="pf-scope-h" style="margin-top:16px">AI pre-rating → <code class="tok">skill_prerating</code></div>
+    <div class="help-hint" style="margin-top:0">Run <b>Experience-Based Skill Pre-Rating</b> in Generate (it reads <code class="tok">work_history</code> + <code class="tok">candidate_skills</code>) and save its output, or paste the JSON here. <b>Apply</b> pre-fills only skills the AI found evidence for and that are not rated yet; "typical" levels show as hints only.</div>
+    <textarea class="inp" style="min-height:64px;font-size:12px" placeholder='{"jobs":[…], "skills":[…]}' oninput="intakePrerateText(this.value)">${esc(intakeState.prerateText||'')}</textarea>
+    <div class="row" style="gap:8px;margin-top:6px;align-items:center"><button class="bb n sm" onclick="intakeApplyPrerate()">Apply suggestions</button><span class="muted small">${pr?('evidenced '+(cnt.evidenced||0)+' · typical '+(cnt.typical||0)+' · none '+(cnt.none||0)):(String(intakeState.prerateText||'').trim()?'<span style="color:#b91c1c">Not valid JSON yet.</span>':'')}</span></div>`;
+
+  const cmap={}; cands.forEach(c=>{ cmap[c.skill_id]=c; });
+  const ids=cands.map(c=>c.skill_id); Object.keys(intakeState.skillLv||{}).forEach(id=>{ if(/^G\d+$/.test(id)&&ids.indexOf(id)<0) ids.push(id); });
+  if(ids.length){
+    h+=`<div class="pf-scope-h" style="margin-top:16px">Self-rating (confirmed) → <code class="tok">existing_skills</code></div><div style="overflow-x:auto"><div class="srow" style="grid-template-columns:1fr repeat(4,92px);font-weight:700;color:var(--ink-600)"><div>Skill</div>`+SKILL_LVLS.map(l=>`<div style="text-align:center">${l}</div>`).join('')+'</div>';
+    h+=ids.map(id=>{ const cur=(intakeState.skillLv||{})[id]||''; const s=pr&&pr.skills[id];
+      const hint=s&&s.status==='evidenced'?` <span class="chip out" title="${esc(s.evidence||'')}">AI: ${esc(s.level||'')}</span>`:(s&&s.status==='typical'?` <span class="muted small">typical: ${esc(s.level||'')}</span>`:'');
+      return `<div class="srow" style="grid-template-columns:1fr repeat(4,92px)"><div>${esc((cmap[id]&&cmap[id].name)||skillName(id))} <span class="muted small">${esc(id)}${cmap[id]?(cmap[id].sources.some(x=>x.is_core==='yes')?' · core':''):' · not in candidates'}</span>${hint}</div>`+
+        SKILL_LVLS.map(l=>`<div style="text-align:center"><input type="radio" name="iksk-${id}" ${cur===l?'checked':''} onchange="intakeSkillLv('${id}','${l}')"></div>`).join('')+'</div>'; }).join('');
     h+='</div>';
-  } else if(intakeState.exp.length){ h+='<div class="muted small" style="margin-top:8px">No core skills found in the selected occupation(s) canon.</div>'; }
+  }
+  return h+intakeLicensesHTML();
+}
+window.intakeAddJob=function(){ (intakeState.jobs=intakeState.jobs||[]).push(jobBlank(nextJobRef())); renderIntake(); };
+window.intakeRmJob=function(i){ const j=(intakeState.jobs||[])[i]; if(!j) return; if((j.title||j.description)&&!confirm('Remove this job?')) return; intakeState.jobs.splice(i,1); renderIntake(); intakeScheduleAutoSave(); };
+window.intakeJob=function(i,k,v,rerender){ const j=(intakeState.jobs||[])[i]; if(!j) return; j[k]=v; if(k==='current'&&v) j.end=''; if(rerender) renderIntake(); };
+window.intakeJobOccFilter=function(i,q){ const list=document.getElementById('ikjob-list-'+i); if(!list||!onetIndex) return; q=(q||'').trim().toLowerCase();
+  const rows=q?onetIndex.filter(r=>r.title.toLowerCase().includes(q)||String(r.soc).includes(q)):onetIndex;
+  list.innerHTML=rows.slice(0,40).map(r=>`<div class="combo-item" onmousedown="intakeJobOccPick(${i},'${esc(String(r.soc))}')">${esc(r.title)} <span class="muted">(${esc(r.soc)})</span></div>`).join('')+(rows.length>40?`<div class="combo-item muted">${rows.length-40} more — keep typing…</div>`:'')||'<div class="combo-item muted">No match</div>';
+  list.style.display='block'; };
+window.intakeJobOccBlur=function(i){ setTimeout(()=>{ const l=document.getElementById('ikjob-list-'+i); if(l) l.style.display='none'; },160); };
+window.intakeJobOccPick=function(i,soc){ const j=(intakeState.jobs||[])[i]; if(!j) return; j.soc=soc; renderIntake(); intakeScheduleAutoSave(); };
+window.intakePrerateText=function(v){ intakeState.prerateText=v; };
+window.intakeApplyPrerate=function(){ const pr=parsePrerate(intakeState.prerateText); if(!pr){ toast('Paste the pre-rating JSON first.'); return; } let n=0;
+  Object.keys(pr.skills).forEach(id=>{ const s=pr.skills[id]; if(s.status==='evidenced'&&s.level&&!(intakeState.skillLv||{})[id]){ (intakeState.skillLv=intakeState.skillLv||{})[id]=s.level; n++; } });
+  renderIntake(); intakeScheduleAutoSave(); toast(n?('Pre-filled '+n+' evidenced level(s); existing answers kept.'):'No new evidenced levels to pre-fill.'); };
+window.intakeSkillLv=function(id,l){ (intakeState.skillLv=intakeState.skillLv||{})[id]=l; };
+
+/* licences held: pick a state, then that state's licences (licenses/<slug>.json in the data repo) */
+let licStates=null, licStatesLoading=false, licCache={};
+async function ensureLicStates(){ if(licStates||licStatesLoading||!(gh.owner&&gh.repo&&gh.token)) return; licStatesLoading=true; try{ licStates=JSON.parse(await ghReadFile('licenses/states.json')); }catch(e){ licStates=[]; } licStatesLoading=false; renderIntake(); }
+async function ensureLicState(slug){ if(!slug||licCache[slug]) return; licCache[slug]={_loading:true}; try{ licCache[slug]=JSON.parse(await ghReadFile('licenses/'+slug+'.json')); }catch(e){ licCache[slug]=[]; } renderIntake(); }
+function licStateLabel(st){ return st==='Federal Agencies'?'Federal (any state)':st; }
+function intakeLicensesHTML(){
+  let h='<div class="pf-scope-h" style="margin-top:16px">Licences &amp; certificates held → <code class="tok">current_license</code></div>';
+  if(!(gh.owner&&gh.repo&&gh.token)) return h+'<div class="muted small">Set ⚙ GitHub to load the licence lists.</div>';
+  ensureLicStates(); if(!licStates) return h+'<div class="muted small">Loading states…</div>';
+  const sel=intakeState.licState||''; if(sel) ensureLicState(sel);
+  const held=intakeState.licenses||(intakeState.licenses=[]);
+  h+='<div class="row" style="gap:6px;flex-wrap:wrap;align-items:flex-start"><select class="inp" style="max-width:260px" onchange="intakeLicState(this.value)"><option value="">— pick a state —</option>'+licStates.map(s=>`<option value="${esc(s.slug)}" ${s.slug===sel?'selected':''}>${esc(licStateLabel(s.state))} (${s.count})</option>`).join('')+'</select>';
+  if(sel){ const lst=licCache[sel]; h+=(!lst||lst._loading)?'<span class="muted small" style="align-self:center">Loading licences…</span>':`<div class="combo" style="flex:1;min-width:280px;max-width:560px"><input class="inp" id="iklic-in" autocomplete="off" placeholder="Type to search this state's ${lst.length} licences…" oninput="intakeLicFilter(this.value)" onfocus="intakeLicFilter(this.value)" onblur="intakeLicBlur()"><div id="iklic-list" class="combo-list" style="display:none"></div></div>`; }
+  h+='</div>';
+  h+=held.length?'<div class="chips" style="margin-top:8px">'+held.map((l,i)=>`<span class="chip">${esc(l.title)} · ${esc(licStateLabel(l.state))} <a href="#" onclick="intakeRmLic(${i});return false" style="color:#b91c1c;text-decoration:none">✕</a></span>`).join('')+'</div>':'<div class="muted small" style="margin-top:6px">None added.</div>';
   return h;
 }
-window.intakeAddExp=function(){ const o=$('#ikExpOcc').value, l=$('#ikExpLv').value; if(!o||!l){ toast('Pick an occupation and a level.'); return; } if(intakeState.exp.some(e=>e.careerId===o)){ toast('Already added.'); return; } intakeState.exp.push({careerId:o,level:l}); renderIntake(); };
-window.intakeRmExp=function(i){ intakeState.exp.splice(i,1); renderIntake(); };
-window.intakeSkillLv=function(sk,l){ intakeState.skillLv[sk]=l; };
+window.intakeLicState=function(v){ intakeState.licState=v; renderIntake(); };
+window.intakeLicFilter=function(q){ const list=document.getElementById('iklic-list'); const lst=licCache[intakeState.licState]; if(!list||!Array.isArray(lst)) return; q=(q||'').trim().toLowerCase();
+  const rows=q?lst.filter(r=>r.title.toLowerCase().includes(q)||String(r.agency||'').toLowerCase().includes(q)):lst;
+  list.innerHTML=rows.slice(0,50).map(r=>`<div class="combo-item" onmousedown="intakeAddLic('${esc(r.id)}')">${esc(r.title)} <span class="muted">· ${esc(String(r.agency||'').replace(/~/g,' · '))}${r.status&&r.status!=='Active'?' · '+esc(r.status):''}</span></div>`).join('')+(rows.length>50?`<div class="combo-item muted">${rows.length-50} more — keep typing…</div>`:'')||'<div class="combo-item muted">No match</div>';
+  list.style.display='block'; };
+window.intakeLicBlur=function(){ setTimeout(()=>{ const l=document.getElementById('iklic-list'); if(l) l.style.display='none'; },160); };
+window.intakeAddLic=function(id){ const lst=licCache[intakeState.licState]; const r=Array.isArray(lst)&&lst.find(x=>x.id===id); if(!r) return;
+  const st=(licStates||[]).find(s=>s.slug===intakeState.licState); const held=intakeState.licenses||(intakeState.licenses=[]);
+  if(held.some(x=>x.id===id)){ toast('Already added.'); return; }
+  held.push({id:r.id, title:r.title, state:st?st.state:intakeState.licState, type:r.type}); renderIntake(); intakeScheduleAutoSave(); };
+window.intakeRmLic=function(i){ (intakeState.licenses||[]).splice(i,1); renderIntake(); intakeScheduleAutoSave(); };
+function intakeSerializeWorkHistory(){ const jobs=(intakeState.jobs||[]).filter(j=>j.title||j.employer||j.description||j.start); if(!jobs.length) return '';
+  return JSON.stringify(jobs.map(j=>({job_ref:j.ref, title:j.title, employer:j.employer, start_date:j.start, end_date:j.current?'current':j.end, duration:jobDuration(j), description:j.description})), null, 2); }
+function intakeSerializeCandidates(){ const c=intakeCandidates(); return c.length?JSON.stringify(c, null, 1):''; }
+function intakeSerializeLicenses(){ return (intakeState.licenses||[]).map(x=>'- '+x.title+' ('+(x.state==='Federal Agencies'?'Federal':x.state)+')').join('\n'); }
 
 function intakeBarriersHTML(){
   const b=INTAKE.barriers||{}; let h=b.intro?`<div class="help-hint" style="margin-top:0">${esc(b.intro)}</div>`:'';
@@ -2033,7 +2149,17 @@ function renderIntake(){
 }
 function intakeSerializeFields(fields,ns){ const lines=[]; (fields||[]).forEach(f=>{ if(!intakeShow(ns,f)) return; const v=intakeVal(ns,f.key); if(v==null||v===''||(Array.isArray(v)&&!v.length)) return; let disp; if(Array.isArray(v)) disp=v.map(x=>{ const o=(f.options||[]).find(y=>((typeof y==='object')?y.value:y)===x); return o&&typeof o==='object'?o.label:x; }).join(', '); else if(f.type==='radio'||f.type==='select'){ const o=(f.options||[]).find(x=>((typeof x==='object')?x.value:x)===v); disp=o?((typeof o==='object')?o.label:o):v; } else disp=v; lines.push('- '+f.label+': '+disp); }); return lines.join('\n'); }
 function intakeSerializeBarriers(){ const secs=(INTAKE.barriers&&INTAKE.barriers.sections)||[]; const blocks=[]; secs.forEach(sec=>{ const items=(sec.items||[]).filter(it=>intakeState.barriers[it]); if(items.length) blocks.push('**'+sec.name+'**\n'+items.map(x=>'- '+x).join('\n')); }); const cm=(intakeState.barrierComment||'').trim(); if(!blocks.length && !cm) return ''; let out=blocks.length?blocks.join('\n\n'):'No barriers selected'; if(cm) out+='\n\nComments: '+cm; return out; }
-function intakeSerializeSkills(){ const rated=intakeCoreSkills().filter(sk=>intakeState.skillLv[sk]); if(!intakeState.exp.length&&!rated.length) return ''; let out=''; if(intakeState.exp.length) out+='Experience:\n'+intakeState.exp.map(e=>{ const c=careerById(e.careerId); return '- '+(c?cName(c):e.careerId)+' — '+e.level; }).join('\n')+'\n\n'; if(rated.length) out+='Core skill self-assessment:\n'+rated.map(sk=>'- '+sk+': '+intakeState.skillLv[sk]).join('\n'); return out.trim(); }
+function intakeSerializeSkills(){
+  const jobs=(intakeState.jobs||[]).filter(j=>j.title||j.employer);
+  const rated=Object.keys(intakeState.skillLv||{}).filter(id=>/^G\d+$/.test(id)&&intakeState.skillLv[id]&&intakeState.skillLv[id]!=='None');
+  if(!jobs.length&&!rated.length) return '';
+  const cn={}; intakeCandidates().forEach(c=>{ cn[c.skill_id]=c.name; });
+  let out='';
+  if(jobs.length) out+='Experience:\n'+jobs.map(j=>{ const when=[j.start?(j.start+' – '+(j.current?'current':(j.end||'?'))):'', jobDuration(j)].filter(Boolean).join(', ');
+    return '- '+(j.title||'(untitled)')+(j.employer?' — '+j.employer:'')+(when?' ('+when+')':'')+(j.level&&!j.start?' — '+j.level:''); }).join('\n')+'\n\n';
+  if(rated.length) out+='Core skill self-assessment:\n'+rated.map(id=>'- '+(cn[id]||skillName(id))+' ('+id+'): '+intakeState.skillLv[id]).join('\n');
+  return out.trim();
+}
 function intakeDoSave(auto){
   if(!INTAKE){ if(!auto) toast('Questionnaire not loaded.'); return; }
   const updates={}, written=[]; const setF=(k,v)=>{ if(v!=null && String(v).trim()!==''){ updates[k]=v; written.push(k); } };
@@ -2053,6 +2179,10 @@ function intakeDoSave(auto){
   setF('lifestyle', intakeSerializeFields(INTAKE.lifestyle||[],'life'));
   setF('career_barriers', intakeSerializeBarriers());
   setF('existing_skills', intakeSerializeSkills());
+  setF('work_history', intakeSerializeWorkHistory());
+  setF('candidate_skills', intakeSerializeCandidates());
+  setF('skill_prerating', String(intakeState.prerateText||'').trim());
+  setF('current_license', intakeSerializeLicenses());
   const t3=(intakeState.top3||['','','']).map(s=>s||'');
   const t3bad=(t3[1]||t3[2])&&!t3[0];
   if(t3bad && !auto) toast('Top 3: 1st choice is required — skipped. Pick a 1st choice to save it.');
@@ -2060,7 +2190,7 @@ function intakeDoSave(auto){
   if(t3f.length){ const labels=t3f.map(soc=>{ const r=(onetIndex||[]).find(x=>x.soc===soc); return r?(r.title+' ('+soc+')'):soc; }); setF('top_3_choices', labels.map((l,i)=>(i+1)+'. '+l).join('\n')); }
   setF('preflight_answer', intakeSerializePreflight());
   if(!written.length){ if(!auto) toast('Nothing filled in yet.'); return; }
-  updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,exp:intakeState.exp,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc,top3:intakeState.top3,pf:intakeState.pf});
+  updates['intake_raw']=JSON.stringify({basic:intakeState.basic,life:intakeState.life,barriers:intakeState.barriers,barrierComment:intakeState.barrierComment,jobs:intakeState.jobs,licenses:intakeState.licenses,skillLv:intakeState.skillLv,quiz:intakeState.quiz,scoreSrc:intakeState.scoreSrc,top3:intakeState.top3,pf:intakeState.pf});
   let person;
   if(intakeState.personId){ person=DB.people.find(p=>p.id===intakeState.personId); if(!person){ if(!auto) toast('Person not found.'); return; } }
   else { if(auto) return; const nm=((b.name||'').trim()); if(!nm){ toast('Enter a Name in Basic info to create a new person.'); return; } person={id:uid('p'), name:nm, careerId:'', values:{}}; DB.personFields.forEach(f=>person.values[f.key]=''); }
@@ -2093,7 +2223,7 @@ $('#histCareerFilter').addEventListener('change', renderHistory);
 $('#btnCopy').addEventListener('click', ()=>navigator.clipboard.writeText(genRawText||'').then(()=>toast('Copied prompt (raw).')));
 $('#btnViewMode').addEventListener('click', ()=>{ genViewMode=genViewMode==='rendered'?'raw':'rendered'; $('#btnViewMode').textContent=genViewMode==='rendered'?'👁 Rendered':'👁 Raw'; renderGenPreview(genRawText?undefined:'Pick a recipe to begin.'); });
 $('#btnAddPerson').addEventListener('click', ()=>openEntity('people',null));
-$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=intakeMigrateLife(raw.life||{}); intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.exp=Array.isArray(raw.exp)?raw.exp:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderIntake(); });
+$('#intakePerson').addEventListener('change', function(){ intakeState=intakeBlank(); intakeState.personId=this.value; if(this.value){ const p=DB.people.find(x=>x.id===this.value); if(p){ intakeState.careerId=p.careerId||''; intakeState.skillNames=parseSkillNames(p.values&&p.values.existing_skills); intakeState.prerateText=(p.values&&p.values.skill_prerating)||''; let loaded=false; if(p.values&&p.values.intake_raw){ try{ const raw=JSON.parse(p.values.intake_raw); intakeState.basic=raw.basic||{}; intakeState.life=intakeMigrateLife(raw.life||{}); intakeState.barriers=raw.barriers||{}; intakeState.barrierComment=raw.barrierComment||''; intakeState.jobs=intakeMigrateJobs(raw); intakeState.licenses=Array.isArray(raw.licenses)?raw.licenses:[]; intakeState.skillLv=raw.skillLv||{}; intakeState.quiz=raw.quiz&&raw.quiz.onet?raw.quiz:{onet:{},custom:{}}; intakeState.scoreSrc=raw.scoreSrc||'onet'; intakeState.top3=Array.isArray(raw.top3)?raw.top3:['','','']; intakeState.pf=raw.pf&&typeof raw.pf==='object'?raw.pf:pfBlank(); loaded=true; }catch(e){} } if(!loaded){ intakeState.quiz.onet=parseRiasecAns(p.values&&p.values.riasec_answers_onet,'onet'); intakeState.quiz.custom=parseRiasecAns(p.values&&p.values.riasec_answers_custom,'custom'); } } } matchState.personId=this.value; matchState.scoreKey=''; matchState.page=0; renderIntake(); });
 $('#intakeCareer').addEventListener('change', function(){ intakeState.careerId=this.value; });
 $('#intakeSave').addEventListener('click', ()=>intakeDoSave(false));
 let intakeAutoT=null;
