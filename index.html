@@ -1925,18 +1925,17 @@ window.intakeQuiz=function(set,idx,val){ (intakeState.quiz[set]=intakeState.quiz
 window.intakeScoreSrc=function(s){ intakeState.scoreSrc=s; };
 
 /* ---- 3 · Skills & Experience ----
-   work history (typed by the person) -> each job matched to an O*NET occupation (code/embeddings in the
-   product; picked here) -> candidate skills (Table 2 rows + Table 1 rungs) -> AI pre-rating
-   (Experience-Based Skill Pre-Rating) -> the person confirms levels -> existing_skills. Plus licences held. */
+   The person types their work history. Experience-Based Skill Pre-Rating (a knowledge-base AI that already
+   knows the skill library, so only the work history is sent) returns skills with suggested levels; the
+   person confirms or changes them -> existing_skills. Plus licences held. */
 const SKILL_LVLS=['None','Beginner','Intermediate','Advanced'];
-function jobBlank(ref){ return {ref, title:'', employer:'', start:'', end:'', current:false, description:'', soc:''}; }
+function jobBlank(ref){ return {ref, title:'', employer:'', start:'', end:'', current:false, description:''}; }
 function nextJobRef(){ const used=new Set((intakeState.jobs||[]).map(j=>j.ref)); let n=1; while(used.has('j'+n)) n++; return 'j'+n; }
-function socFromCareer(c){ if(!c) return ''; const m=(c.title||'').match(/\d{2}-\d{4}\.\d{2}/); if(m) return m[0]; const k=(c.id||'').match(/(\d{2})-(\d{4})-(\d{2})$/); return k?(k[1]+'-'+k[2]+'.'+k[3]):''; }
 function intakeMigrateJobs(raw){
   if(Array.isArray(raw.jobs)) return raw.jobs.map((j,i)=>Object.assign(jobBlank(j.ref||('j'+(i+1))), j));
-  // legacy: exp = [{careerId, level}] or [{soc, title, level}] (occupation picked, no description)
-  return (Array.isArray(raw.exp)?raw.exp:[]).map((e,i)=>{ const c=e.careerId?careerById(e.careerId):null; const soc=e.soc||socFromCareer(c);
-    const title=e.title||(c?cName(c).replace(/\s+\d{2}-\d{4}\.\d{2}.*$/,''):''); return Object.assign(jobBlank('j'+(i+1)), {title, soc, level:e.level||''}); });
+  // legacy: exp = [{careerId, level}] or [{soc, title, level}] (an occupation was picked, no description)
+  return (Array.isArray(raw.exp)?raw.exp:[]).map((e,i)=>{ const c=e.careerId?careerById(e.careerId):null;
+    const title=e.title||(c?cName(c).replace(/\s+\d{2}-\d{4}\.\d{2}.*$/,''):''); return Object.assign(jobBlank('j'+(i+1)), {title, level:e.level||''}); });
 }
 function parseSkillNames(txt){ const m={}; String(txt||'').split(/\r?\n/).forEach(l=>{ const x=l.match(/^\s*-\s*(.+?)\s*\((G\d+)\)\s*:/); if(x) m[x[2]]=x[1]; }); return m; }
 function jobDuration(j){
@@ -1946,66 +1945,40 @@ function jobDuration(j){
   const n=(b[0]-a[0])*12+(b[1]-a[1])+1; if(!(n>0)) return '';
   const y=Math.floor(n/12), r=n%12; return [y?y+(y>1?' yrs':' yr'):'', r?r+' mo':''].filter(Boolean).join(' ');
 }
-let onetRecCache={};
-function ensureJobRecs(){
-  if(!(gh.owner&&gh.repo&&gh.token)) return;
-  const need=[...new Set((intakeState.jobs||[]).map(j=>j.soc).filter(s=>s&&!onetRecCache[s]))]; if(!need.length) return;
-  need.forEach(s=>{ onetRecCache[s]={_loading:true}; });
-  Promise.all(need.map(async s=>{ try{ onetRecCache[s]=JSON.parse(await ghReadFile('onet/'+s+'.json')); }catch(e){ onetRecCache[s]={_err:String(e.message||e)}; } })).then(()=>renderIntake());
-}
-function parseReqTable(md){ const out=[]; String(md||'').split(/\r?\n/).forEach(l=>{ const c=l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(s=>s.trim()); if(/^G\d+$/.test(c[0]||'')) out.push({id:c[0], name:c[1], core:c[2]==='yes', entry:c[3], mid:c[4], senior:c[5], description:c[6]||''}); }); return out; }
 let t1Cache={src:null, map:{}};
 function t1Row(gid){
   const src=(DB.library&&DB.library.values&&DB.library.values.capability_library)||'';
-  if(t1Cache.src!==src){ const m={}; src.split(/\r?\n/).forEach(l=>{ if(l.indexOf('| G')!==0) return; const c=l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(s=>s.trim()); m[c[0]]={name:c[1], definition:c[2], beginner:c[6]||'', intermediate:c[7]||'', advanced:c[8]||''}; }); t1Cache={src, map:m}; }
+  if(t1Cache.src!==src){ const m={}; src.split(/\r?\n/).forEach(l=>{ if(l.indexOf('| G')!==0) return; const c=l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(s=>s.trim()); m[c[0]]={name:c[1]}; }); t1Cache={src, map:m}; }
   return t1Cache.map[gid]||null;
-}
-function intakeCandidates(){
-  const map={}, order=[]; const rung=v=>(v&&v!=='—')?v:'';
-  (intakeState.jobs||[]).forEach(j=>{ const rec=j.soc&&onetRecCache[j.soc]; if(!rec||rec._loading||rec._err) return;
-    parseReqTable(rec.skill_requirements).forEach(r=>{
-      if(!map[r.id]){ const t=t1Row(r.id); map[r.id]={skill_id:r.id, name:r.name, definition:r.description, rungs:t?{Beginner:t.beginner, Intermediate:t.intermediate, Advanced:t.advanced}:{}, sources:[]}; order.push(r.id); }
-      map[r.id].sources.push({job_ref:j.ref, occupation:rec.career_title||j.soc, is_core:r.core?'yes':'no', entry_rung:rung(r.entry), mid_rung:rung(r.mid), senior_rung:rung(r.senior)}); }); });
-  return order.map(id=>map[id]);
 }
 function parsePrerate(txt){ const s=String(txt||''); const a=s.indexOf('{'), b=s.lastIndexOf('}'); if(a<0||b<a) return null;
   try{ const o=JSON.parse(s.slice(a,b+1)); const sk={}; (o.skills||[]).forEach(x=>{ if(x&&x.skill_id!=null){ const id=/^G/.test(String(x.skill_id))?String(x.skill_id):'G'+x.skill_id; sk[id]=x; } }); return {jobs:o.jobs||[], skills:sk}; }catch(e){ return null; } }
-function skillName(id){ return (intakeState.skillNames&&intakeState.skillNames[id])||((t1Row(id)||{}).name)||id; }
+function skillName(id){ const pr=parsePrerate(intakeState.prerateText); return (intakeState.skillNames&&intakeState.skillNames[id])||(pr&&pr.skills[id]&&pr.skills[id].name)||((t1Row(id)||{}).name)||id; }
 function intakeSkillsHTML(){
-  ensureJobRecs(); if(!onetIndex) ensureOnetIndex();
   const jobs=intakeState.jobs||(intakeState.jobs=[]);
-  let h='<div class="help-hint" style="margin-top:0">The person describes each job in their own words. Each job is matched to an O*NET occupation (done in code in the product; picked here), which supplies the <b>candidate skills</b>. The <b>Experience-Based Skill Pre-Rating</b> AI suggests levels from the descriptions, and the person confirms or changes them in the self-rating table.</div>';
+  let h='<div class="help-hint" style="margin-top:0">The person describes each job in their own words. <b>Experience-Based Skill Pre-Rating</b> (a knowledge-base AI that knows the skill library) reads only this work history and returns skills with suggested levels; the person confirms or changes them in the self-rating table.</div>';
   h+='<div class="pf-scope-h" style="margin-top:6px">Work history → <code class="tok">work_history</code></div>';
-  h+=jobs.map((j,i)=>{
-    const occ=j.soc?((((onetIndex||[]).find(r=>r.soc===j.soc)||{}).title||'')+' ('+j.soc+')').trim():'';
-    const rec=j.soc&&onetRecCache[j.soc]; const n=rec&&!rec._loading&&!rec._err?parseReqTable(rec.skill_requirements).length:0;
-    const note=!j.soc?'Not matched yet — pick the closest O*NET occupation.':(!rec||rec._loading)?'Loading occupation data…':rec._err?'Could not load this occupation.':(n?n+' candidate skills from Table 2':'No Table 2 skills for this occupation (out of scope) — it adds no candidates.');
-    return `<div class="card pad" style="box-shadow:none;margin-bottom:8px">
+  h+=jobs.map((j,i)=>`<div class="card pad" style="box-shadow:none;margin-bottom:8px">
       <div class="row" style="gap:6px"><span class="chip">${esc(j.ref)}</span><input class="inp" style="flex:2" placeholder="Job title, as they would write it" value="${esc(j.title)}" oninput="intakeJob(${i},'title',this.value)"><input class="inp" style="flex:1" placeholder="Employer" value="${esc(j.employer)}" oninput="intakeJob(${i},'employer',this.value)"><button class="bb g sm" title="Remove this job" onclick="intakeRmJob(${i})">✕</button></div>
       <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center"><span class="muted small">Start</span><input class="inp" type="month" style="width:auto" value="${esc(j.start)}" onchange="intakeJob(${i},'start',this.value,1)"><span class="muted small">End</span><input class="inp" type="month" style="width:auto" value="${esc(j.end)}" ${j.current?'disabled':''} onchange="intakeJob(${i},'end',this.value,1)"><label class="small"><input type="checkbox" ${j.current?'checked':''} onchange="intakeJob(${i},'current',this.checked,1)"> current</label><span class="muted small">${esc(jobDuration(j))}${j.level?' · legacy level: '+esc(j.level):''}</span></div>
       <textarea class="inp" style="margin-top:6px" placeholder="What they actually did in this job, in their own words…" oninput="intakeJob(${i},'description',this.value)">${esc(j.description)}</textarea>
-      <div class="combo" style="margin-top:6px;max-width:620px"><div style="display:flex;gap:6px;align-items:center"><span class="muted small" style="white-space:nowrap">Matched occupation</span><input class="inp" id="ikjob-in-${i}" autocomplete="off" placeholder="Type to search O*NET occupations…" value="${esc(occ)}" oninput="intakeJobOccFilter(${i},this.value)" onfocus="intakeJobOccFilter(${i},this.value)" onblur="intakeJobOccBlur(${i})" style="flex:1">${j.soc?`<button class="bb g sm" title="Clear the match" onclick="intakeJobOccPick(${i},'')">✕</button>`:''}</div><div id="ikjob-list-${i}" class="combo-list" style="display:none"></div></div>
-      <div class="muted small" style="margin-top:4px">${esc(note)}</div>
-    </div>`; }).join('');
+    </div>`).join('');
   h+='<button class="bb n sm" onclick="intakeAddJob()">+ Add job</button>';
-
-  const cands=intakeCandidates();
-  h+=`<div class="pf-scope-h" style="margin-top:16px">Candidate skills → <code class="tok">candidate_skills</code></div><div class="muted small">${cands.length?cands.length+' skill(s) from the matched occupation(s), each with its Table 1 rungs and Table 2 sources; written on Save.':'Match at least one job to an occupation to build the candidate list.'}</div>`;
 
   const pr=parsePrerate(intakeState.prerateText);
   const cnt=pr?Object.values(pr.skills).reduce((a,x)=>{ a[x.status]=(a[x.status]||0)+1; return a; },{}):null;
   h+=`<div class="pf-scope-h" style="margin-top:16px">AI pre-rating → <code class="tok">skill_prerating</code></div>
-    <div class="help-hint" style="margin-top:0">Run <b>Experience-Based Skill Pre-Rating</b> in Generate (it reads <code class="tok">work_history</code> + <code class="tok">candidate_skills</code>) and save its output, or paste the JSON here. <b>Apply</b> pre-fills only skills the AI found evidence for and that are not rated yet; "typical" levels show as hints only.</div>
+    <div class="help-hint" style="margin-top:0">Run <b>Experience-Based Skill Pre-Rating</b> in Generate (it reads <code class="tok">work_history</code>) and save its output, or paste the JSON here. <b>Apply</b> pre-fills only skills the AI found evidence for and that are not rated yet; "typical" levels show as hints only.</div>
     <textarea class="inp" style="min-height:64px;font-size:12px" placeholder='{"jobs":[…], "skills":[…]}' oninput="intakePrerateText(this.value)">${esc(intakeState.prerateText||'')}</textarea>
     <div class="row" style="gap:8px;margin-top:6px;align-items:center"><button class="bb n sm" onclick="intakeApplyPrerate()">Apply suggestions</button><span class="muted small">${pr?('evidenced '+(cnt.evidenced||0)+' · typical '+(cnt.typical||0)+' · none '+(cnt.none||0)):(String(intakeState.prerateText||'').trim()?'<span style="color:#b91c1c">Not valid JSON yet.</span>':'')}</span></div>`;
 
-  const cmap={}; cands.forEach(c=>{ cmap[c.skill_id]=c; });
-  const ids=cands.map(c=>c.skill_id); Object.keys(intakeState.skillLv||{}).forEach(id=>{ if(/^G\d+$/.test(id)&&ids.indexOf(id)<0) ids.push(id); });
+  const ids=pr?Object.keys(pr.skills).filter(id=>pr.skills[id].status!=='none'):[];
+  Object.keys(intakeState.skillLv||{}).forEach(id=>{ if(/^G\d+$/.test(id)&&ids.indexOf(id)<0) ids.push(id); });
   if(ids.length){
     h+=`<div class="pf-scope-h" style="margin-top:16px">Self-rating (confirmed) → <code class="tok">existing_skills</code></div><div style="overflow-x:auto"><div class="srow" style="grid-template-columns:1fr repeat(4,92px);font-weight:700;color:var(--ink-600)"><div>Skill</div>`+SKILL_LVLS.map(l=>`<div style="text-align:center">${l}</div>`).join('')+'</div>';
     h+=ids.map(id=>{ const cur=(intakeState.skillLv||{})[id]||''; const s=pr&&pr.skills[id];
       const hint=s&&s.status==='evidenced'?` <span class="chip out" title="${esc(s.evidence||'')}">AI: ${esc(s.level||'')}</span>`:(s&&s.status==='typical'?` <span class="muted small">typical: ${esc(s.level||'')}</span>`:'');
-      return `<div class="srow" style="grid-template-columns:1fr repeat(4,92px)"><div>${esc((cmap[id]&&cmap[id].name)||skillName(id))} <span class="muted small">${esc(id)}${cmap[id]?(cmap[id].sources.some(x=>x.is_core==='yes')?' · core':''):' · not in candidates'}</span>${hint}</div>`+
+      return `<div class="srow" style="grid-template-columns:1fr repeat(4,92px)"><div>${esc(skillName(id))} <span class="muted small">${esc(id)}</span>${hint}</div>`+
         SKILL_LVLS.map(l=>`<div style="text-align:center"><input type="radio" name="iksk-${id}" ${cur===l?'checked':''} onchange="intakeSkillLv('${id}','${l}')"></div>`).join('')+'</div>'; }).join('');
     h+='</div>';
   }
@@ -2014,15 +1987,10 @@ function intakeSkillsHTML(){
 window.intakeAddJob=function(){ (intakeState.jobs=intakeState.jobs||[]).push(jobBlank(nextJobRef())); renderIntake(); };
 window.intakeRmJob=function(i){ const j=(intakeState.jobs||[])[i]; if(!j) return; if((j.title||j.description)&&!confirm('Remove this job?')) return; intakeState.jobs.splice(i,1); renderIntake(); intakeScheduleAutoSave(); };
 window.intakeJob=function(i,k,v,rerender){ const j=(intakeState.jobs||[])[i]; if(!j) return; j[k]=v; if(k==='current'&&v) j.end=''; if(rerender) renderIntake(); };
-window.intakeJobOccFilter=function(i,q){ const list=document.getElementById('ikjob-list-'+i); if(!list||!onetIndex) return; q=(q||'').trim().toLowerCase();
-  const rows=q?onetIndex.filter(r=>r.title.toLowerCase().includes(q)||String(r.soc).includes(q)):onetIndex;
-  list.innerHTML=rows.slice(0,40).map(r=>`<div class="combo-item" onmousedown="intakeJobOccPick(${i},'${esc(String(r.soc))}')">${esc(r.title)} <span class="muted">(${esc(r.soc)})</span></div>`).join('')+(rows.length>40?`<div class="combo-item muted">${rows.length-40} more — keep typing…</div>`:'')||'<div class="combo-item muted">No match</div>';
-  list.style.display='block'; };
-window.intakeJobOccBlur=function(i){ setTimeout(()=>{ const l=document.getElementById('ikjob-list-'+i); if(l) l.style.display='none'; },160); };
-window.intakeJobOccPick=function(i,soc){ const j=(intakeState.jobs||[])[i]; if(!j) return; j.soc=soc; renderIntake(); intakeScheduleAutoSave(); };
 window.intakePrerateText=function(v){ intakeState.prerateText=v; };
 window.intakeApplyPrerate=function(){ const pr=parsePrerate(intakeState.prerateText); if(!pr){ toast('Paste the pre-rating JSON first.'); return; } let n=0;
-  Object.keys(pr.skills).forEach(id=>{ const s=pr.skills[id]; if(s.status==='evidenced'&&s.level&&!(intakeState.skillLv||{})[id]){ (intakeState.skillLv=intakeState.skillLv||{})[id]=s.level; n++; } });
+  Object.keys(pr.skills).forEach(id=>{ const s=pr.skills[id]; if(s.name) (intakeState.skillNames=intakeState.skillNames||{})[id]=s.name;
+    if(s.status==='evidenced'&&s.level&&!(intakeState.skillLv||{})[id]){ (intakeState.skillLv=intakeState.skillLv||{})[id]=s.level; n++; } });
   renderIntake(); intakeScheduleAutoSave(); toast(n?('Pre-filled '+n+' evidenced level(s); existing answers kept.'):'No new evidenced levels to pre-fill.'); };
 window.intakeSkillLv=function(id,l){ (intakeState.skillLv=intakeState.skillLv||{})[id]=l; };
 
@@ -2056,7 +2024,6 @@ window.intakeAddLic=function(id){ const lst=licCache[intakeState.licState]; cons
 window.intakeRmLic=function(i){ (intakeState.licenses||[]).splice(i,1); renderIntake(); intakeScheduleAutoSave(); };
 function intakeSerializeWorkHistory(){ const jobs=(intakeState.jobs||[]).filter(j=>j.title||j.employer||j.description||j.start); if(!jobs.length) return '';
   return JSON.stringify(jobs.map(j=>({job_ref:j.ref, title:j.title, employer:j.employer, start_date:j.start, end_date:j.current?'current':j.end, duration:jobDuration(j), description:j.description})), null, 2); }
-function intakeSerializeCandidates(){ const c=intakeCandidates(); return c.length?JSON.stringify(c, null, 1):''; }
 function intakeSerializeLicenses(){ return (intakeState.licenses||[]).map(x=>'- '+x.title+' ('+(x.state==='Federal Agencies'?'Federal':x.state)+')').join('\n'); }
 
 function intakeBarriersHTML(){
@@ -2168,11 +2135,10 @@ function intakeSerializeSkills(){
   const jobs=(intakeState.jobs||[]).filter(j=>j.title||j.employer);
   const rated=Object.keys(intakeState.skillLv||{}).filter(id=>/^G\d+$/.test(id)&&intakeState.skillLv[id]&&intakeState.skillLv[id]!=='None');
   if(!jobs.length&&!rated.length) return '';
-  const cn={}; intakeCandidates().forEach(c=>{ cn[c.skill_id]=c.name; });
   let out='';
   if(jobs.length) out+='Experience:\n'+jobs.map(j=>{ const when=[j.start?(j.start+' – '+(j.current?'current':(j.end||'?'))):'', jobDuration(j)].filter(Boolean).join(', ');
     return '- '+(j.title||'(untitled)')+(j.employer?' — '+j.employer:'')+(when?' ('+when+')':'')+(j.level&&!j.start?' — '+j.level:''); }).join('\n')+'\n\n';
-  if(rated.length) out+='Core skill self-assessment:\n'+rated.map(id=>'- '+(cn[id]||skillName(id))+' ('+id+'): '+intakeState.skillLv[id]).join('\n');
+  if(rated.length) out+='Core skill self-assessment:\n'+rated.map(id=>'- '+skillName(id)+' ('+id+'): '+intakeState.skillLv[id]).join('\n');
   return out.trim();
 }
 function intakeDoSave(auto){
@@ -2195,7 +2161,6 @@ function intakeDoSave(auto){
   setF('career_barriers', intakeSerializeBarriers());
   setF('existing_skills', intakeSerializeSkills());
   setF('work_history', intakeSerializeWorkHistory());
-  setF('candidate_skills', intakeSerializeCandidates());
   setF('skill_prerating', String(intakeState.prerateText||'').trim());
   setF('current_license', intakeSerializeLicenses());
   const t3=(intakeState.top3||['','','']).map(s=>s||'');
